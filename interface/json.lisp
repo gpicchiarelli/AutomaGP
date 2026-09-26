@@ -23,10 +23,18 @@
   "Wrap LIST as a vector so LISP->JSON emits a JSON array (incl. empty [])."
   (coerce list 'vector))
 
+(defun %plist-looking-p (value)
+  "True if VALUE looks like a property list (even length, keyword keys)."
+  (and (consp value)
+       (null (cdr (last value)))
+       (evenp (length value))
+       (loop for (k) on value by #'cddr
+             always (keywordp k))))
+
 (defun lisp->json (value)
   "Encode VALUE as a JSON string.
 NIL encodes as false; use :NULL for null; use JSON-ARRAY for [].
-Plists (list starting with a keyword) encode as objects."
+Even-length keyword plists encode as objects; other lists as arrays."
   (cond
     ((eq value :null) "null")
     ((eq value t) "true")
@@ -40,7 +48,7 @@ Plists (list starting with a keyword) encode as objects."
     ((and (consp value) (atom (cdr value)) (not (null (cdr value))))
      ;; dotted pair → two-element array
      (lisp->json (list (car value) (cdr value))))
-    ((and (consp value) (keywordp (car value)))
+    ((%plist-looking-p value)
      ;; plist → JSON object
      (with-output-to-string (out)
        (write-char #\{ out)
