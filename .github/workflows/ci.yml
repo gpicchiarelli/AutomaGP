@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "cursor/**"]
+  pull_request:
+
+jobs:
+  test:
+    name: SBCL Phase 1 tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SBCL
+        run: sudo apt-get update && sudo apt-get install -y sbcl
+
+      - name: Install Quicklisp
+        run: |
+          curl -fsSL https://beta.quicklisp.org/quicklisp.lisp -o /tmp/quicklisp.lisp
+          sbcl --non-interactive --load /tmp/quicklisp.lisp \
+            --eval '(quicklisp-quickstart:install :path "/home/runner/quicklisp/")' \
+            --eval '(quit)'
+
+      - name: Link project into local-projects
+        run: |
+          mkdir -p /home/runner/quicklisp/local-projects
+          ln -sfn "$GITHUB_WORKSPACE" /home/runner/quicklisp/local-projects/automa-gp
+
+      - name: Run tests
+        run: |
+          sbcl --non-interactive \
+            --load /home/runner/quicklisp/setup.lisp \
+            --load "$GITHUB_WORKSPACE/scripts/run-tests.lisp"

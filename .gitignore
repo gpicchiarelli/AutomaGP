@@ -1,0 +1,76 @@
+# Common Lisp / ASDF / fasl
+*.fasl
+*.fas
+*.lib
+*.o
+*.so
+*.dylib
+*.dx64fsl
+*.dx32fsl
+*.lx64fsl
+*.lx32fsl
+*.fx64fasl
+*.fx32fsl
+*.sx64fsl
+*.sx32fsl
+*.wx64fsl
+*.wx32fsl
+*.abcl
+*.cls
+*.sparcf
+*.x86f
+*.ppcf
+*.dfsl
+*.pfsl
+*.d64fsl
+*.p64fsl
+*.lx64fslc
+*.lx32fslc
+system-index.txt
+.asdf-cache/
+.cache/common-lisp/
+
+# SBCL
+*.core
+*.mem
+sb-cover/
+
+# Quicklisp local noise (do not commit installs)
+quicklisp/
+local-projects/
+
+# Emacs / SLIME / SLY
+*~
+\#*\#
+.#*
+*.elc
+.slime/
+.sly/
+
+# Portacle / Lisp IDE
+.lispworks
+*fasl*
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+*.swp
+
+# Editor / IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Test / coverage artifacts
+coverage/
+*.log
+
+# Env / secrets
+.env
+.env.*
+!.env.example
