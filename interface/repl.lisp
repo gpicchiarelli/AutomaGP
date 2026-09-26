@@ -1,6 +1,6 @@
 ;;;; interface/repl.lisp — SLIME/REPL API surface
 ;;;;
-;;;; Phases 1–4 commands are live. Explanation remains deferred (Phase 6).
+;;;; Phases 1–6 commands are live. Memory/persistence remain deferred (Phase 7).
 
 (in-package #:automa-gp)
 
@@ -29,6 +29,7 @@
   (setf *current-plan* nil)
   (setf *last-execution* nil)
   (setf *deliberative-strategy* nil)
+  (clear-trace-session)
   *current-context*)
 
 (defun gp-context (&key name parent facts mode rules operators)
@@ -191,9 +192,20 @@ With POLICY (:SIGNAL :SKIP :RETRY :ABORT :ASK): install a fresh strategy."
   "Register an ACTION object on the current context."
   (register-action! (ensure-current-context) action))
 
-;;; Deferred Phase 6+ — honest signals
+;;; Phase 6 — explanation from recorded deliberative traces
 
-(defun gp-explain (&rest args)
-  "Not yet implemented (Phase 6)."
-  (declare (ignore args))
-  (not-yet-implemented 'gp-explain 6))
+(defun gp-explain (&optional (topic :last) &key (stream t))
+  "Print (and return) an explanation derived from a recorded deliberative trace.
+TOPIC may be :LAST (default), :PLAN, :EXECUTION, :HISTORY, a PLAN,
+an EXECUTION-RESULT, or a DELIBERATIVE-TRACE.
+Does not invent decisions — only formats entries recorded during
+plan / MEA / simulate / execute. Returns (VALUES TEXT TRACE)."
+  (explain-trace topic :stream stream))
+
+(defun gp-last-trace ()
+  "Return the most recently finished deliberative trace, or NIL."
+  (last-trace))
+
+(defun gp-trace-history ()
+  "Return newest-first session trace history (in-memory buffer only)."
+  (copy-list *trace-history*))

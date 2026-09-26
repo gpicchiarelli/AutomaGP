@@ -5,6 +5,31 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.6.0] — 2026-09-26
+
+### Added
+
+- Phase 6 deliberative trace: `deliberative-trace`, `trace-record`, `with-trace`,
+  `finalize-trace`, session buffer (`*last-trace*`, `*trace-history*`).
+- MEA / planner / simulate / execute record context, goals, differences,
+  selected operators, preconditions, actions, results, and execution steps.
+- `format-explanation` / `explain` / `gp-explain` derive text only from recorded
+  entries (PROMPT §17 shape).
+- Introspection: `trace-of`, `last-trace`, `find-trace-entries`, `gp-last-trace`,
+  `gp-trace-history`, `clear-trace-session`.
+- Workbench example: `docs/tavolo-di-lavoro.md`, `examples/tavolo-di-lavoro.lisp`.
+- FiveAM `explanation-suite` and REPL explain coverage.
+
+### Changed
+
+- Version bump to 0.6.0.
+- `gp-reset` clears the session trace buffer.
+
+### Not yet
+
+- Durable memory / persistence (Phase 7) — session history only.
+- macOS adapters (Phase 8).
+
 ## [0.5.0] — 2026-09-26
 
 ### Added

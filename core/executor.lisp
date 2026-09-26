@@ -194,129 +194,165 @@ Establishes CONFIRM restart for irreversible ops when confirmation needed."
 (defun simulate-plan (plan &key context operators
                              (initial-facts nil initial-p))
   "Simulate PLAN steps without mutating any context.
-Each step establishes recovery restarts; *DELIBERATIVE-STRATEGY* / default
-abort handler decide automatic recovery."
+Records a deliberative execution trace. Step restarts as in Phase 5."
   (unless (plan-p plan)
     (error "SIMULATE-PLAN requires a PLAN, got ~S" plan))
-  (let* ((ops (or operators
-                  (when context (context-planning-operators context))
-                  (getf (plan-meta plan) :operators)))
-         (facts (copy-list (if initial-p
-                               initial-facts
-                               (plan-initial-state plan))))
-         (current (make-state facts :kind :current :source :simulate))
-         (expected (expected-state-from-plan plan))
-         (step-results nil)
-         (ok t)
-         (aborted nil))
-    (handler-bind ((gp-error #'plan-runner-condition-handler))
-      (dolist (step (plan-steps plan))
-        (let* ((op0 (resolve-operator (getf step :operator)
-                                      :context context
-                                      :operators ops))
-               (b0 (bindings-from-step step))
-               (alts (alternatives-for-step step ops)))
-          (multiple-value-bind (new result flag)
-              (run-step-with-restarts
-               (lambda ()
-                 (let ((op (or *gp-alternative-operator* op0)))
-                   (simulate-operator facts op b0
-                                      :mode :simulate
-                                      :context context)))
-               :operator op0
-               :bindings b0
-               :alternatives alts
-               :mode :simulate
-               :context context
-               :step step
-               :facts facts)
-            (setf facts (or new facts))
-            (push result step-results)
-            (when (eq flag :abort)
-              (setf ok nil aborted t)
-              (return))
-            (when (and (null flag)
-                       (not (member (getf result :status)
-                                    '(:ok :skipped :use-value :executed))))
-              (setf ok nil)
-              (return))
-            (when (eq flag :skip)
-              ;; continue with unchanged success expectation softened
-              nil)))))
-    (when aborted (setf ok nil))
-    ;; If last step aborted/failed without completing goals, mark failure
-    (when (and expected ok)
-      (unless (null (differences facts (plan-goals plan)))
-        (setf ok nil)))
-    (let* ((final (make-state facts :kind :simulated :source :simulate))
-           (div (when (and expected ok)
-                  (compare-states expected final))))
-      (make-instance 'execution-result
-                     :mode :simulate
-                     :success ok
-                     :steps (nreverse step-results)
-                     :current-state current
-                     :expected-state expected
-                     :final-state final
-                     :divergences div
-                     :plan plan
-                     :strategy-events (strategy-events-of)
-                     :meta '(:note "symbolic simulation; restarts available; no adapters")))))
+  (with-trace (:simulate :context-name
+                         (or (and context (context-name context))
+                             (getf (plan-meta plan) :context)))
+    (when context
+      (trace-record :context :name (context-name context)))
+    (trace-record :goals :goals (plan-goals plan))
+    (trace-record :state :facts (copy-list (if initial-p
+                                               initial-facts
+                                               (plan-initial-state plan))))
+    (let* ((ops (or operators
+                    (when context (context-planning-operators context))
+                    (getf (plan-meta plan) :operators)))
+           (facts (copy-list (if initial-p
+                                 initial-facts
+                                 (plan-initial-state plan))))
+           (current (make-state facts :kind :current :source :simulate))
+           (expected (expected-state-from-plan plan))
+           (step-results nil)
+           (ok t)
+           (aborted nil))
+      (handler-bind ((gp-error #'plan-runner-condition-handler))
+        (dolist (step (plan-steps plan))
+          (let* ((op0 (resolve-operator (getf step :operator)
+                                        :context context
+                                        :operators ops))
+                 (b0 (bindings-from-step step))
+                 (alts (alternatives-for-step step ops)))
+            (trace-record :selected-operator
+                          :operator (operator-name op0)
+                          :goal (getf step :goal)
+                          :bindings (getf step :bindings))
+            (multiple-value-bind (new result flag)
+                (run-step-with-restarts
+                 (lambda ()
+                   (let ((op (or *gp-alternative-operator* op0)))
+                     (simulate-operator facts op b0
+                                        :mode :simulate
+                                        :context context)))
+                 :operator op0
+                 :bindings b0
+                 :alternatives alts
+                 :mode :simulate
+                 :context context
+                 :step step
+                 :facts facts)
+              (setf facts (or new facts))
+              (push result step-results)
+              (trace-record :execution-step
+                            :mode :simulate
+                            :operator (getf result :operator)
+                            :status (getf result :status)
+                            :flag flag)
+              (trace-record :result :status (getf result :status))
+              (when (eq flag :abort)
+                (setf ok nil aborted t)
+                (return))
+              (when (and (null flag)
+                         (not (member (getf result :status)
+                                      '(:ok :skipped :use-value :executed))))
+                (setf ok nil)
+                (return))
+              (when (eq flag :skip) nil)))))
+      (when aborted (setf ok nil))
+      (when (and expected ok)
+        (unless (null (differences facts (plan-goals plan)))
+          (setf ok nil)))
+      (let* ((final (make-state facts :kind :simulated :source :simulate))
+             (div (when (and expected ok)
+                    (compare-states expected final))))
+        (trace-record :execution-complete :mode :simulate :success ok)
+        (make-instance 'execution-result
+                       :mode :simulate
+                       :success ok
+                       :steps (nreverse step-results)
+                       :current-state current
+                       :expected-state expected
+                       :final-state final
+                       :divergences div
+                       :plan plan
+                       :strategy-events (strategy-events-of)
+                       :meta (list :note "symbolic simulation; restarts available; no adapters"
+                                   :trace *current-trace*))))))
 
 (defun execute-plan! (context plan &key confirm)
   "EXECUTE PLAN steps against live CONTEXT. Mutates context facts.
-Each step establishes recovery restarts; strategy may alter deliberative policy."
+Records a deliberative execution trace."
   (unless (plan-p plan)
     (error "EXECUTE-PLAN! requires a PLAN, got ~S" plan))
-  (let* ((ops (context-planning-operators context))
-         (current (state-from-context context :kind :current))
-         (expected (expected-state-from-plan plan))
-         (step-results nil)
-         (ok t)
-         (aborted nil)
-         (facts (context-all-facts context)))
-    (handler-bind ((gp-error #'plan-runner-condition-handler))
-      (dolist (step (plan-steps plan))
-        (let* ((op0 (resolve-operator (getf step :operator) :context context))
-               (b0 (bindings-from-step step))
-               (alts (alternatives-for-step step ops)))
-          (multiple-value-bind (new result flag)
-              (run-step-with-restarts
-               (lambda ()
-                 (let ((op (or *gp-alternative-operator* op0)))
-                   (execute-operator! context op b0 :confirm confirm)))
-               :operator op0
-               :bindings b0
-               :alternatives alts
-               :mode :execute
-               :context context
-               :step step
-               :facts facts)
-            (setf facts (or new (context-all-facts context)))
-            (push result step-results)
-            (cond
-              ((eq flag :abort)
-               (setf ok nil aborted t)
-               (return))
-              ((eq flag :skip) nil)
-              ((eq flag :use-value)
-               (commit-facts-to-context! context facts))
-              (t nil))))))
-    (when aborted (setf ok nil))
-    (when (and expected ok)
-      (unless (null (differences (context-all-facts context) (plan-goals plan)))
-        (setf ok nil)))
-    (let* ((observed (state-from-context context :kind :observed))
-           (div (when (and expected ok)
-                  (compare-states expected observed))))
-      (make-instance 'execution-result
-                     :mode :execute
-                     :success ok
-                     :steps (nreverse step-results)
-                     :current-state current
-                     :expected-state expected
-                     :final-state observed
-                     :divergences div
-                     :plan plan
-                     :strategy-events (strategy-events-of)
-                     :meta '(:note "symbolic execute; restarts available; no adapters")))))
+  (with-trace (:execute :context-name (context-name context))
+    (trace-record :context :name (context-name context))
+    (trace-record :goals :goals (plan-goals plan))
+    (trace-record :state :facts (copy-list (context-all-facts context)))
+    (let* ((ops (context-planning-operators context))
+           (current (state-from-context context :kind :current))
+           (expected (expected-state-from-plan plan))
+           (step-results nil)
+           (ok t)
+           (aborted nil)
+           (facts (context-all-facts context)))
+      (handler-bind ((gp-error #'plan-runner-condition-handler))
+        (dolist (step (plan-steps plan))
+          (let* ((op0 (resolve-operator (getf step :operator) :context context))
+                 (b0 (bindings-from-step step))
+                 (alts (alternatives-for-step step ops)))
+            (trace-record :selected-operator
+                          :operator (operator-name op0)
+                          :goal (getf step :goal)
+                          :bindings (getf step :bindings))
+            (multiple-value-bind (new result flag)
+                (run-step-with-restarts
+                 (lambda ()
+                   (let ((op (or *gp-alternative-operator* op0)))
+                     (execute-operator! context op b0 :confirm confirm)))
+                 :operator op0
+                 :bindings b0
+                 :alternatives alts
+                 :mode :execute
+                 :context context
+                 :step step
+                 :facts facts)
+              (setf facts (or new (context-all-facts context)))
+              (push result step-results)
+              (trace-record :action
+                            :operator (getf result :operator)
+                            :bindings (getf result :bindings))
+              (trace-record :execution-step
+                            :mode :execute
+                            :operator (getf result :operator)
+                            :status (getf result :status)
+                            :flag flag)
+              (trace-record :result :status (getf result :status))
+              (cond
+                ((eq flag :abort)
+                 (setf ok nil aborted t)
+                 (return))
+                ((eq flag :skip) nil)
+                ((eq flag :use-value)
+                 (commit-facts-to-context! context facts))
+                (t nil))))))
+      (when aborted (setf ok nil))
+      (when (and expected ok)
+        (unless (null (differences (context-all-facts context) (plan-goals plan)))
+          (setf ok nil)))
+      (let* ((observed (state-from-context context :kind :observed))
+             (div (when (and expected ok)
+                    (compare-states expected observed))))
+        (trace-record :execution-complete :mode :execute :success ok)
+        (make-instance 'execution-result
+                       :mode :execute
+                       :success ok
+                       :steps (nreverse step-results)
+                       :current-state current
+                       :expected-state expected
+                       :final-state observed
+                       :divergences div
+                       :plan plan
+                       :strategy-events (strategy-events-of)
+                       :meta (list :note "symbolic execute; restarts available; no adapters"
+                                   :trace *current-trace*))))))

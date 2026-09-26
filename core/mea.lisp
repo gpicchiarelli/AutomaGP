@@ -1,7 +1,7 @@
-;;;; core/mea.lisp — Means-Ends Analysis (Phase 3)
+;;;; core/mea.lisp — Means-Ends Analysis (Phase 3+)
 ;;;;
 ;;;; GPS-style / Norvig: differences → operator → preconditions as subgoals
-;;;; → recursive achievement. Symbolic state only; no external execution.
+;;;; → recursive achievement. Records deliberative events into *CURRENT-TRACE*.
 
 (in-package #:automa-gp)
 
@@ -83,48 +83,93 @@ Uses the first successful match per pattern (Phase-3 simplicity)."
         :action (operator-action operator)
         :cost (operator-cost operator)))
 
-;;; Core MEA
+;;; Core MEA (with deliberative recording)
 
 (defun achieve (goal state operators plan depth)
   "Achieve GOAL from STATE using OPERATORS.
-Returns (VALUES NEW-STATE NEW-PLAN) or (VALUES NIL NIL) on failure.
-PLAN is a list of plan-steps in application order."
+Returns (VALUES NEW-STATE NEW-PLAN) or (VALUES NIL NIL) on failure."
   (cond
     ((goal-holds-p goal state)
+     (trace-record :goal-already-satisfied :goal goal :depth depth)
      (values state plan))
     ((>= depth *plan-depth-limit*)
+     (trace-record :result :status :depth-limit :goal goal)
      (values nil nil))
     (t
-     (dolist (pair (operators-for-goal goal operators) (values nil nil))
-       (let* ((op (car pair))
-              (b0 (cdr pair)))
-         (multiple-value-bind (new-state new-plan)
-             (try-operator op goal b0 state operators plan depth)
-           (when new-state
-             (return (values new-state new-plan)))))))))
+     (trace-record :difference :goal goal :depth depth)
+     (let ((candidates (operators-for-goal goal operators)))
+       (unless candidates
+         (trace-record :result :status :no-operator :goal goal))
+       (dolist (pair candidates (values nil nil))
+         (let* ((op (car pair))
+                (b0 (cdr pair)))
+           (multiple-value-bind (new-state new-plan)
+               (try-operator op goal b0 state operators plan depth)
+             (when new-state
+               (return (values new-state new-plan))))))))))
 
 (defun try-operator (operator goal bindings state operators plan depth)
   "Try OPERATOR to achieve GOAL: satisfy precondition subgoals, then apply."
   (let* ((b (extend-bindings-from-state
              (operator-preconditions operator) bindings state))
-         (subs (precondition-subgoals operator b state)))
+         (subs (precondition-subgoals operator b state))
+         (bound (instantiate-bindings
+                 (cons goal (append (operator-preconditions operator)
+                                    (operator-add-list operator)))
+                 b)))
+    (trace-record :selected-operator
+                  :operator (operator-name operator)
+                  :goal goal
+                  :bindings bound
+                  :depth depth)
+    (dolist (sg subs)
+      (trace-record :subgoal :goal sg :for-operator (operator-name operator)))
     (multiple-value-bind (state2 plan2)
         (achieve-all subs state operators plan (1+ depth))
       (when state2
         (let* ((b2 (extend-bindings-from-state
                     (operator-preconditions operator) b state2))
                (still-missing (precondition-subgoals operator b2 state2)))
+          (dolist (pre (operator-preconditions operator))
+            (let ((g (ground-pattern pre b2)))
+              (unless (fail-p g)
+                (trace-record :precondition
+                              :goal g
+                              :status (if (goal-holds-p g state2)
+                                          :satisfied
+                                          :missing)
+                              :operator (operator-name operator)))))
           (if still-missing
-              (values nil nil)
+              (progn
+                (trace-record :operator-failed
+                              :operator (operator-name operator)
+                              :reason :preconditions-unmet
+                              :missing still-missing)
+                (values nil nil))
               (let* ((step (make-plan-step operator b2 goal subs))
+                     (bound2 (getf step :bindings))
                      (state3 (apply-operator state2 operator b2)))
+                (trace-record :action
+                              :operator (operator-name operator)
+                              :bindings bound2
+                              :goal goal)
                 (if (goal-holds-p goal state3)
-                    (values state3 (append plan2 (list step)))
-                    (values nil nil)))))))))
+                    (progn
+                      (trace-record :result :status :success
+                                    :operator (operator-name operator)
+                                    :goal goal)
+                      (values state3 (append plan2 (list step))))
+                    (progn
+                      (trace-record :result :status :goal-not-achieved
+                                    :operator (operator-name operator)
+                                    :goal goal)
+                      (values nil nil))))))))))
 
 (defun achieve-all (goals state operators plan depth)
   "Achieve every goal in GOALS. Recomputes differences after each success."
   (let ((pending (differences state goals)))
+    (when (and pending (zerop depth))
+      (trace-record :differences :goals pending))
     (if (null pending)
         (values state plan)
         (multiple-value-bind (s2 p2)
@@ -135,10 +180,23 @@ PLAN is a list of plan-steps in application order."
 
 (defun means-ends-analyze (state goals operators)
   "Run MEA: return (VALUES SUCCESS FINAL-STATE PLAN DIFFERENCES-REMAINING)."
+  (trace-record :goals :goals goals)
+  (trace-record :state :facts (copy-list state))
   (let ((initial-diffs (differences state goals)))
+    (when initial-diffs
+      (trace-record :differences :goals initial-diffs))
     (multiple-value-bind (final plan)
         (achieve-all goals state operators nil 0)
       (if final
           (let ((left (differences final goals)))
+            (trace-record :plan-complete
+                          :success (null left)
+                          :steps (length plan)
+                          :remaining left)
             (values (null left) final plan left))
-          (values nil state nil initial-diffs)))))
+          (progn
+            (trace-record :plan-complete
+                          :success nil
+                          :steps 0
+                          :remaining initial-diffs)
+            (values nil state nil initial-diffs))))))

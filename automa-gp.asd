@@ -1,6 +1,6 @@
 ;;;; automa-gp.asd — AUTOMA GP ASDF system definition
 ;;;;
-;;;; Phases 1–5 load through conditions + executor + REPL.
+;;;; Phases 1–6 load through explanation + conditions + executor + REPL.
 ;;;; Later-phase files exist as scaffolds and are NOT components yet.
 
 (defsystem "automa-gp"
@@ -25,6 +25,7 @@
                              (:file "rules")
                              (:file "queries")
                              (:file "operators")
+                             (:file "explanation")
                              (:file "mea")
                              (:file "planner")
                              (:file "conditions")
@@ -57,6 +58,8 @@
                              (:file "test-planner")
                              (:file "test-executor")
                              (:file "test-conditions")
+                             (:file "test-explanation")
+                             (:file "test-tavolo")
                              (:file "test-repl"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))

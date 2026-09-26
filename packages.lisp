@@ -220,6 +220,35 @@
    #:simulate-plan
    #:execute-operator!
    #:execute-plan!
+   ;; explanation / deliberative trace (Phase 6)
+   #:*trace-enabled*
+   #:*current-trace*
+   #:*last-trace*
+   #:*trace-history*
+   #:*trace-history-limit*
+   #:deliberative-trace
+   #:deliberative-trace-p
+   #:trace-id
+   #:trace-phase
+   #:trace-context-name
+   #:trace-entries
+   #:trace-open-p
+   #:trace-started-at
+   #:trace-finished-at
+   #:make-trace
+   #:trace-record
+   #:finalize-trace
+   #:with-trace
+   #:last-trace
+   #:trace-of
+   #:find-trace-entries
+   #:clear-trace-session
+   #:resolve-explain-topic
+   #:format-explanation
+   #:explain-trace
+   #:gp-explain
+   #:gp-last-trace
+   #:gp-trace-history
    ;; session / REPL
    #:*current-context*
    #:gp-reset
@@ -248,7 +277,6 @@
    #:gp-failure-strategy
    #:gp-mode
    #:gp-register-action
-   ;; deferred Phase 6+
-   #:gp-explain
+   ;; deferred Phase 7+
    #:not-yet-implemented
    #:not-yet-implemented-error))

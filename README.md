@@ -10,35 +10,45 @@ CONTEXT → REPRESENT → REASON → PLAN → ACT → OBSERVE → UPDATE
 Spec: [`docs/PROMPT.md`](docs/PROMPT.md) · Architecture:
 [`docs/architecture.md`](docs/architecture.md) · Roadmap: [`ROADMAP.md`](ROADMAP.md).
 
-## Status (Phase 5 / v0.5.0)
+## Status (Phase 6 / v0.6.0)
 
-Phases 1–4 plus **idiomatic conditions/restarts** on simulate/execute failures,
-with a mutable deliberative failure strategy.
+Phases 1–5 plus a **deliberative trace** recorded during MEA / plan / simulate /
+execute, and honest `gp-explain` that formats that record (no invented
+narratives).
 
-**Not yet:** `gp-explain`, memory, macOS adapters, domains, events, web UI.
+**Not yet:** durable memory/persistence, macOS adapters, domains, events, web UI.
 
-## Failure handling (REPL)
+## Explanation (REPL)
 
 ```lisp
 (ql:quickload :automa-gp)
 (in-package :automa-gp)
 
-;; Auto-skip failing steps during simulate/run:
+(gp-plan :goals '((connection interface-01 computer)))
+(gp-explain :plan)          ; trace attached to the plan
+(gp-simulate)
+(gp-explain)                ; last finished trace (simulate)
+(gp-explain :execution)     ; trace on last execution-result
+(gp-last-trace)             ; raw deliberative-trace object
+```
+
+## Workbench example
+
+Italian walkthrough of a symbolic “tavolo di lavoro” (plan → simulate → run):
+[`docs/tavolo-di-lavoro.md`](docs/tavolo-di-lavoro.md). Loadable companion:
+
+```lisp
+(ql:quickload :automa-gp)
+(load "examples/tavolo-di-lavoro.lisp")
+(gp-explain :plan)
+```
+
+## Failure handling (REPL)
+
+```lisp
 (gp-failure-strategy :skip)
 (gp-plan :goals '((connection interface-01 computer)))
 (gp-simulate)
-
-;; Or handle a single step with restarts:
-(handler-bind ((precondition-failure
-                (lambda (c) (declare (ignore c)) (invoke-restart :skip))))
-  (call-with-gp-restarts
-   (lambda () (simulate-operator facts op bindings))
-   :operator op :facts-on-skip facts))
-
-;; Irreversible execute: confirm restart
-(handler-bind ((confirmation-required
-                (lambda (c) (declare (ignore c)) (invoke-restart :confirm))))
-  (gp-run))
 ```
 
 Restarts: `:retry` `:skip` `:abort-execution` `:use-value` `:use-alternative`

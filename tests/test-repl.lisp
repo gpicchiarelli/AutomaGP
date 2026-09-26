@@ -99,5 +99,26 @@
     (is (fact-p '(power-state interface-01 on) (gp-facts)))
     (is (eq :observed (state-kind (execution-final-state run))))))
 
-(test deferred-commands-signal
-  (signals not-yet-implemented-error (gp-explain)))
+(test repl-phase6-explain
+  (gp-reset)
+  (gp-context :name 'studio-audio)
+  (gp-add-fact '(device interface-01))
+  (gp-add-fact '(power-state interface-01 off))
+  (gp-add-operator
+   (make-operator :name 'power-on
+                  :preconditions '((device ?d) (power-state ?d off))
+                  :add-list '((power-state ?d on))
+                  :delete-list '((power-state ?d off))))
+  (gp-add-operator
+   (make-operator :name 'connect
+                  :preconditions '((device ?d) (power-state ?d on))
+                  :add-list '((connection ?d computer))))
+  (gp-plan :goals '((connection interface-01 computer)))
+  (multiple-value-bind (text tr) (gp-explain :plan :stream nil)
+    (is (deliberative-trace-p tr))
+    (is (search "Selected operator" text))
+    (is (search "POWER-ON" text)))
+  (gp-simulate)
+  (multiple-value-bind (text tr) (gp-explain :last :stream nil)
+    (is (deliberative-trace-p tr))
+    (is (search "Execution" text))))

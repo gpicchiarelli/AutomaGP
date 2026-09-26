@@ -19,18 +19,18 @@ system. Do not skip ahead with fake capabilities.
 
 - [x] Executor, state transition, `gp-simulate`, `gp-run`
 
-## Phase 5 — Conditions & failure handling *(current)*
+## Phase 5 — Conditions & failure handling
 
 - [x] Idiomatic CL condition hierarchy (`gp-condition` / `gp-error`)
 - [x] Restarts: `:retry` `:skip` `:abort-execution` `:use-value` `:ask-user` `:use-alternative` (+ `:confirm`)
 - [x] Deliberative strategy (`*deliberative-strategy*`, `with-failure-strategy`, `gp-failure-strategy`)
 - [x] Integration with simulate/execute plan runners via `handler-bind` + restarts
 
-## Phase 6 — Explanation & introspection
+## Phase 6 — Explanation & introspection *(current)*
 
-- [ ] Explanation / deliberative trace
-- [ ] `gp-explain`
-- [ ] Introspection helpers
+- [x] Explanation / deliberative trace (recorded during MEA / plan / simulate / execute)
+- [x] `gp-explain` (formats recorded entries only — no invented narratives)
+- [x] Introspection helpers (`trace-of`, `last-trace`, `find-trace-entries`, `gp-last-trace`, `gp-trace-history`)
 
 ## Phase 7 — Memory & persistence
 
