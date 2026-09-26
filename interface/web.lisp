@@ -282,7 +282,7 @@ Returns the acceptor. Idempotent if already running on the same port."
                  (equal address (hunchentoot:acceptor-address *web-acceptor*)))
         (return-from start-web *web-acceptor*))
       (stop-web)))
-  (ensure-current-context)
+  (gp-context) ; ensure session context exists
   (let ((acceptor (make-instance 'gp-acceptor :port port :address address)))
     (hunchentoot:start acceptor)
     (setf *web-acceptor* acceptor)
