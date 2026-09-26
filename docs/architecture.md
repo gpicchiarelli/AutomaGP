@@ -1,10 +1,14 @@
-# Architecture (Phases 1–10)
+# Architecture (Phases 1–11)
 
-Domain packs and events sit outside the MEA kernel. Events bind to a context;
-reactions assert facts / add goals; planning reuses the same planner.
+The web layer is optional and contains **no deliberative logic**.
 
 ```text
-interface/     REPL (gp-emit · gp-react · gp-load-domain)
+browser  →  automa-gp/web (Hunchentoot)  →  web-api-handle  →  core/REPL
+slime    →  interface/repl.lisp          ↗
+```
+
+```text
+interface/     REPL · JSON · web-api · (web via automa-gp/web)
     ↓
 domains/       software · documents · hardware · music · geometry
     ↓
@@ -12,27 +16,22 @@ adapters/      filesystem · processes · macos
     ↓
 memory/        working · knowledge · episodic · procedural · persistence
     ↓
-core/          events → mea → planner → executor  (domain-agnostic)
+core/          events · mea · planner · executor
 ```
 
-## Events (Phase 10 / PROMPT §16)
+## Web (Phase 11 / PROMPT §18)
 
-- `emit-event!` / `gp-emit` — post `(type . data)` on the context; optional fact assert
-- `event-reaction` — match event → assert facts + add goals
-- `process-pending-events!` / `gp-react` — drain pending; optional `:plan t`
-- Goal-directed `gp-plan` remains available with or without events
+- System `automa-gp` — core + `web-api-handle` (no Hunchentoot)
+- System `automa-gp/web` — Hunchentoot console on `127.0.0.1:47391`
+- API: `/api/status|context|facts|goals|plan|explain|events|…`
+- Mutations: `/api/reset|plan|simulate|run|emit|react|load-domain|add-fact`
 
-Honest limits: no filesystem watchers; events are posted by API/REPL.
+## Events (Phase 10)
 
-## Domains (Phase 9 / PROMPT §12)
-
-Each pack exports `install-*-domain` and a `*-demo-plan`. Documents registers
-an `on-file-created` reaction for the §16 example.
-
-## Adapters (Phase 8)
-
-Opt-in on EXECUTE via `*invoke-adapters*` / `(gp-run :adapters t)`.
+`gp-emit` / `gp-react` — event → reaction → goals → optional plan.
 
 ## Dependency policy
 
-ANSI CL + ASDF + UIOP. Tests: FiveAM.
+Core: ANSI CL + ASDF + UIOP.  
+Web (optional): Hunchentoot via Quicklisp.  
+Tests: FiveAM.

@@ -44,15 +44,17 @@ system. Do not skip ahead with fake capabilities.
 - [x] `domains/geometry` — points → segments → triangle
 - [x] `gp-load-domain` registry (no core MEA changes)
 
-## Phase 10 — Event system *(current)*
+## Phase 10 — Event system
 
 - [x] Events bound to context (`gp-emit` / `gp-events`)
 - [x] Event → reaction → goal → plan → update (`gp-react`)
 - [x] Goal-directed and event-driven behavior coexist
 
-## Phase 11 — Web interface
+## Phase 11 — Web interface *(current)*
 
-- [ ] Thin UI over the symbolic core
+- [x] Thin Hunchentoot operator console (`automa-gp/web`)
+- [x] JSON API façade in core (no chatbot / no second brain)
+- [x] REPL remains first-class; web optional
 
 ## Phase 12 — Autonomous symbolic operation
 

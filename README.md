@@ -10,15 +10,36 @@ CONTEXT → REPRESENT → REASON → PLAN → ACT → OBSERVE → UPDATE
 Spec: [`docs/PROMPT.md`](docs/PROMPT.md) · Architecture:
 [`docs/architecture.md`](docs/architecture.md) · Roadmap: [`ROADMAP.md`](ROADMAP.md).
 
-## Status (Phase 10 / v0.10.0)
+## Status (Phase 11 / v0.11.0)
 
-Phases 1–9 plus a **context-bound event system**: emit events, match
-reactions, add goals, optionally plan — alongside ordinary goal-directed
-`gp-plan`.
+Phases 1–10 plus an optional **web operator console** over the symbolic core
+(PROMPT §18: web is interface only). The REPL remains first-class.
 
-**Not yet:** web UI, OS file watchers, full autonomy loop.
+**Not yet:** full autonomous loop (Phase 12).
 
-## Events (REPL)
+## Web console
+
+```bash
+./scripts/run-web.sh
+# → http://127.0.0.1:47391/
+```
+
+Or from the REPL:
+
+```lisp
+(ql:quickload :automa-gp/web)
+(automa-gp/web:start-web)           ; port 47391
+;; (automa-gp/web:start-web :port 47391)
+(automa-gp/web:web-url)
+(automa-gp/web:stop-web)
+```
+
+Override port: `AUTOMA_GP_WEB_PORT=47400 ./scripts/run-web.sh`.
+
+The UI inspects/controls context, facts, goals, events, plan, simulate, run,
+and explain. All reasoning stays in the Lisp core (`web-api-handle`).
+
+## REPL (primary)
 
 ```lisp
 (ql:quickload :automa-gp)
@@ -26,41 +47,19 @@ reactions, add goals, optionally plan — alongside ordinary goal-directed
 
 (gp-reset)
 (gp-load-domain :documents)
-
-;; PROMPT §16 shape: file-created → classify goal → plan
 (gp-emit '(file-created "document.pdf") :react t :plan t)
-(gp-last-plan)
-(gp-events)
-(gp-last-reaction)
-
-;; Or stepwise:
-(gp-emit '(file-created "note.pdf"))
-(gp-react :plan t)
-
-;; Goal-directed still works without events:
-(gp-reset)
-(gp-load-domain :hardware :seed-demo t)
-(gp-plan :goals '((device-configured interface-01)))
+(gp-explain)
 ```
 
-## Domain packs
+## Domains
 
-| Domain | Demo goal chain |
-|--------|-----------------|
+| Domain | Demo |
+|--------|------|
 | software | fetch → compile → test |
-| documents | ingest → classify → archive (+ `file-created` reaction) |
+| documents | ingest → classify → archive (+ `file-created`) |
 | hardware | power-on → connect → configure |
-| music | power interface → MIDI route → session |
-| geometry | define points → segments → triangle |
-
-```lisp
-(gp-load-domain :software)
-(automa-gp/domain/software:software-demo-plan (gp-context) :project 'myapp)
-```
-
-## Adapters
-
-EXECUTE is symbolic by default. `(gp-run :adapters t)` runs `:external` specs.
+| music | interface → MIDI → session |
+| geometry | points → segments → triangle |
 
 ## Tests
 

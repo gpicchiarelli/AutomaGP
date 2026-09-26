@@ -1,6 +1,6 @@
 ;;;; automa-gp.asd — AUTOMA GP ASDF system definition
 ;;;;
-;;;; Phases 1–10 load through adapters + domains + memory + REPL.
+;;;; Phases 1–11: core + optional Hunchentoot web system.
 
 (defsystem "automa-gp"
   :description "AUTOMA GP — context-centric symbolic deliberative automaton"
@@ -67,8 +67,21 @@
                              (:file "registry")))
                (:module "interface"
                 :serial t
-                :components ((:file "repl"))))
+                :components ((:file "repl")
+                             (:file "json")
+                             (:file "web-api"))))
   :in-order-to ((test-op (test-op "automa-gp/tests"))))
+
+(defsystem "automa-gp/web"
+  :description "Optional Hunchentoot operator console for AUTOMA GP"
+  :author "Giacomo Picchiarelli <gpicchiarelli@gmail.com>"
+  :license "BSD-2-Clause"
+  :version (:read-file-form "version.lisp-expr")
+  :depends-on ("automa-gp" "hunchentoot")
+  :serial t
+  :components ((:module "interface"
+                :serial t
+                :components ((:file "web")))))
 
 (defsystem "automa-gp/tests"
   :description "Tests for AUTOMA GP"
@@ -101,6 +114,7 @@
                              (:file "test-adapters")
                              (:file "test-domains")
                              (:file "test-events")
+                             (:file "test-web")
                              (:file "test-repl"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))

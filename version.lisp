@@ -2,5 +2,5 @@
 
 (in-package #:automa-gp)
 
-(defparameter *version* "0.10.0"
-  "AUTOMA GP version (Phase 10: context-bound events).")
+(defparameter *version* "0.11.0"
+  "AUTOMA GP version (Phase 11: thin web operator console).")

@@ -1,6 +1,6 @@
 ;;;; interface/repl.lisp — SLIME/REPL API surface
 ;;;;
-;;;; Phases 1–10 commands are live. Web UI remains deferred (Phase 11).
+;;;; Phases 1–10 REPL commands. Optional web console: (ql:quickload :automa-gp/web).
 
 (in-package #:automa-gp)
 

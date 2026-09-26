@@ -474,6 +474,16 @@
    #:gp-remove-reaction
    #:gp-reactions
    #:gp-last-reaction
+   ;; web API façade (Phase 11; HTTP via automa-gp/web)
+   #:*web-api-version*
+   #:json-escape-string
+   #:json-array
+   #:lisp->json
+   #:json->lisp
+   #:json-string->symbol
+   #:json->sexp
+   #:web-api-handle
+   #:web-api-handle-json
    ;; utilities
    #:not-yet-implemented
    #:not-yet-implemented-error))

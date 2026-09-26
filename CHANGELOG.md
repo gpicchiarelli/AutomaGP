@@ -5,6 +5,24 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.11.0] — 2026-09-26
+
+### Added
+
+- Phase 11 thin web operator console (Hunchentoot), system `automa-gp/web`.
+- HTTP-agnostic JSON API in core: `web-api-handle` / minimal `lisp->json`.
+- Console exposes context, facts, goals, plan, simulate, run, explain, events.
+- Default bind `127.0.0.1:47391`; `scripts/run-web.sh`.
+- FiveAM `web-suite` (handler/API tests, no browser).
+
+### Changed
+
+- Version bump to 0.11.0.
+
+### Not yet
+
+- Full autonomous operation (Phase 12); auth; remote bind by default.
+
 ## [0.10.0] — 2026-09-26
 
 ### Added
