@@ -1,6 +1,6 @@
 ;;;; interface/repl.lisp — SLIME/REPL API surface
 ;;;;
-;;;; Phases 1–3 commands are live. Execution/simulation/explain remain deferred.
+;;;; Phases 1–4 commands are live. Explanation remains deferred (Phase 6).
 
 (in-package #:automa-gp)
 
@@ -27,6 +27,7 @@
   "Reset the REPL session to a fresh empty context in READ mode."
   (setf *current-context* (create-context :name 'default :mode :read))
   (setf *current-plan* nil)
+  (setf *last-execution* nil)
   *current-context*)
 
 (defun gp-context (&key name parent facts mode rules operators)
@@ -45,9 +46,9 @@ With :NAME (and optional keys): create/select a new current context."
     (t
      (ensure-current-context))))
 
-(defun gp-state ()
-  "Return a STATE snapshot of the current context."
-  (state-from-context (ensure-current-context)))
+(defun gp-state (&key (kind :current))
+  "Return a STATE snapshot of the current context (default kind :CURRENT)."
+  (state-from-context (ensure-current-context) :kind kind))
 
 (defun gp-facts ()
   "Facts visible in the current context (including parent inheritance)."
@@ -106,15 +107,11 @@ With :NAME (and optional keys): create/select a new current context."
   (remove-operator! (ensure-current-context) name))
 
 (defun gp-query (pattern &key (infer t))
-  "Query PATTERN in the current context.
-INFER (default T) enables backward chaining over rules.
-Returns a list of plists (:BINDINGS :FACT :SOURCE)."
+  "Query PATTERN in the current context."
   (query pattern (ensure-current-context) :infer infer))
 
 (defun gp-infer (&key (assert nil) (limit *forward-chain-limit*))
-  "Forward-chain rules over current facts.
-Returns (VALUES ALL-FACTS NEW-FACTS).
-If ASSERT is true, newly derived facts are added to the current context."
+  "Forward-chain rules over current facts."
   (let* ((ctx (ensure-current-context))
          (facts (context-all-facts ctx))
          (rules (context-all-rules ctx)))
@@ -126,13 +123,7 @@ If ASSERT is true, newly derived facts are added to the current context."
       (values all new))))
 
 (defun gp-plan (&key goals operators)
-  "Build a symbolic plan via Means-Ends Analysis.
-GOALS: list of desired facts (defaults to fact-like context goals).
-OPERATORS: list of OPERATOR objects (defaults to context operators / lifted actions).
-
-Does NOT mutate the live context, call adapters, or execute actions.
-Stores the result in *CURRENT-PLAN* and returns it.
-Sets context mode to :PLAN as an advisory session flag."
+  "Build a symbolic plan via Means-Ends Analysis. Does not mutate facts."
   (let ((ctx (ensure-current-context)))
     (setf (context-mode ctx) :plan)
     (setf *current-plan*
@@ -143,9 +134,40 @@ Sets context mode to :PLAN as an advisory session flag."
   "Return the last plan produced by GP-PLAN, or NIL."
   *current-plan*)
 
+(defun gp-simulate (&key plan)
+  "Simulate PLAN (default: last plan) without mutating the live context.
+Sets mode to :SIMULATE. Returns an EXECUTION-RESULT.
+Symbolic effects only — no adapters / macOS side effects."
+  (let* ((ctx (ensure-current-context))
+         (p (or plan *current-plan*)))
+    (unless (plan-p p)
+      (error "GP-SIMULATE requires a plan; call GP-PLAN first or pass :PLAN."))
+    (setf (context-mode ctx) :simulate)
+    (setf *last-execution*
+          (simulate-plan p :context ctx
+                         :operators (context-planning-operators ctx)))
+    *last-execution*))
+
+(defun gp-run (&key plan (confirm nil confirm-p))
+  "Execute PLAN (default: last plan) against live context facts.
+Sets mode to :EXECUTE. Returns an EXECUTION-RESULT.
+Mutates context facts symbolically only — no adapters.
+Irreversible/high-risk operators require :CONFIRM T (or *EXECUTION-CONFIRM*)."
+  (let* ((ctx (ensure-current-context))
+         (p (or plan *current-plan*)))
+    (unless (plan-p p)
+      (error "GP-RUN requires a plan; call GP-PLAN first or pass :PLAN."))
+    (setf (context-mode ctx) :execute)
+    (setf *last-execution*
+          (execute-plan! ctx p :confirm (if confirm-p confirm nil)))
+    *last-execution*))
+
+(defun gp-last-execution ()
+  "Return the last EXECUTION-RESULT from GP-SIMULATE or GP-RUN."
+  *last-execution*)
+
 (defun gp-mode (&optional mode)
-  "Get or set the current context mode (:READ :PLAN :SIMULATE :EXECUTE).
-SIMULATE/EXECUTE engines are not attached (Phase 4). PLAN is set by GP-PLAN."
+  "Get or set the current context mode (:READ :PLAN :SIMULATE :EXECUTE)."
   (let ((ctx (ensure-current-context)))
     (if mode
         (progn
@@ -157,19 +179,9 @@ SIMULATE/EXECUTE engines are not attached (Phase 4). PLAN is set by GP-PLAN."
   "Register an ACTION object on the current context."
   (register-action! (ensure-current-context) action))
 
-;;; Deferred Phase 4+ — honest signals
+;;; Deferred Phase 5+ — honest signals
 
 (defun gp-explain (&rest args)
   "Not yet implemented (Phase 6)."
   (declare (ignore args))
   (not-yet-implemented 'gp-explain 6))
-
-(defun gp-run (&rest args)
-  "Not yet implemented (Phase 4)."
-  (declare (ignore args))
-  (not-yet-implemented 'gp-run 4))
-
-(defun gp-simulate (&rest args)
-  "Not yet implemented (Phase 4). Mode :SIMULATE may be set via GP-MODE."
-  (declare (ignore args))
-  (not-yet-implemented 'gp-simulate 4))

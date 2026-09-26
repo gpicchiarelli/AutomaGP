@@ -9,6 +9,7 @@
    #:*valid-modes*
    #:mode-p
    #:ensure-mode
+   #:mode-allows-mutation-p
    ;; matcher / bindings
    #:*fail*
    #:*no-bindings*
@@ -61,9 +62,15 @@
    #:state
    #:state-p
    #:state-facts
+   #:state-source
+   #:state-kind
+   #:*valid-state-kinds*
+   #:make-state
    #:state-from-context
    #:state-equal
    #:compare-states
+   #:transition-facts
+   #:transition-state
    ;; goals
    #:add-goal!
    #:remove-goal!
@@ -117,12 +124,15 @@
    #:operator-delete-list
    #:operator-cost
    #:operator-action
+   #:operator-reversible
+   #:operator-risk
    #:operator-meta
    #:make-operator
    #:action->operator
    #:register-operator!
    #:remove-operator!
    #:operators-of
+   #:find-operator
    #:operator-achieves
    #:operators-for-goal
    ;; MEA
@@ -151,6 +161,29 @@
    #:plan-cost
    #:normalize-planning-goals
    #:*current-plan*
+   ;; executor / simulation
+   #:execution-result
+   #:execution-result-p
+   #:execution-mode
+   #:execution-success
+   #:execution-steps
+   #:execution-current-state
+   #:execution-expected-state
+   #:execution-final-state
+   #:execution-divergences
+   #:execution-plan
+   #:execution-meta
+   #:*last-execution*
+   #:*execution-confirm*
+   #:precondition-failure
+   #:confirmation-required
+   #:unknown-operator
+   #:expected-state-from-plan
+   #:operator-needs-confirmation-p
+   #:simulate-operator
+   #:simulate-plan
+   #:execute-operator!
+   #:execute-plan!
    ;; session / REPL
    #:*current-context*
    #:gp-reset
@@ -173,11 +206,12 @@
    #:gp-infer
    #:gp-plan
    #:gp-last-plan
+   #:gp-simulate
+   #:gp-run
+   #:gp-last-execution
    #:gp-mode
    #:gp-register-action
-   ;; deferred Phase 4+
+   ;; deferred Phase 5+
    #:gp-explain
-   #:gp-run
-   #:gp-simulate
    #:not-yet-implemented
    #:not-yet-implemented-error))

@@ -74,12 +74,14 @@
 
 (defun plan-from-context (context &key goals operators)
   "Plan inside CONTEXT. GOALS default to fact-like context goals.
-OPERATORS default to CONTEXT-PLANNING-OPERATORS."
+OPERATORS default to CONTEXT-PLANNING-OPERATORS.
+Stores operators in plan meta for later simulate/execute lookup."
   (let* ((state (context-all-facts context))
          (g (or goals (normalize-planning-goals (goals-of context))))
          (ops (or operators (context-planning-operators context))))
     (plan-for state g ops
-              :meta (list :context (context-name context)))))
+              :meta (list :context (context-name context)
+                          :operators ops))))
 
 (defun plan-length (plan)
   (length (plan-steps plan)))

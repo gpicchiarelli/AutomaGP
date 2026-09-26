@@ -1,32 +1,23 @@
 # AUTOMA GP
 
-**AUTOMA GP** is a context-centric **symbolic deliberative automaton** written
-in Common Lisp (target: **SBCL on macOS**).
-
-It is **not** a chatbot. It acquires a **context**, represents it symbolically,
-queries knowledge, and (Phase 3) builds plans via Means-Ends Analysis.
+**AUTOMA GP** is a context-centric **symbolic deliberative automaton** in
+Common Lisp (SBCL / macOS). Not a chatbot.
 
 ```text
 CONTEXT → REPRESENT → REASON → PLAN → ACT → OBSERVE → UPDATE
 ```
 
-Full master specification: [`docs/PROMPT.md`](docs/PROMPT.md).
+Master spec: [`docs/PROMPT.md`](docs/PROMPT.md). Architecture:
+[`docs/architecture.md`](docs/architecture.md). Roadmap: [`ROADMAP.md`](ROADMAP.md).
 
-## Status (Phase 3)
+## Status (Phase 4 / v0.4.0)
 
-| Area | Support |
-|------|---------|
-| Context / state / facts / goals / actions | Phase 1 |
-| Matcher / unification / rules / queries | Phase 2 |
-| Operators | Abstract; registry; lift from actions |
-| MEA | Differences → operator → precondition subgoals |
-| Planner | Symbolic plans; does not mutate live context |
-| Modes | `:PLAN` set by `gp-plan`; no executor yet |
+Working: context, facts, matcher/unification/rules/queries, operators, MEA
+planner, **symbolic simulation & execution** with CURRENT / SIMULATED /
+EXPECTED / OBSERVED states.
 
-**Not implemented:** `gp-run`, `gp-simulate`, `gp-explain`, adapters, domains,
-events, web UI, HTN/temporal/conditional planning.
-
-See [`ROADMAP.md`](ROADMAP.md) and [`docs/architecture.md`](docs/architecture.md).
+**Not yet:** macOS adapters, condition restarts, explanation, memory,
+domains, events, web UI.
 
 ## Quick start (SLIME)
 
@@ -35,7 +26,6 @@ See [`ROADMAP.md`](ROADMAP.md) and [`docs/architecture.md`](docs/architecture.md
 (in-package :automa-gp)
 
 (gp-reset)
-(gp-context :name 'studio-audio)
 (gp-add-fact '(device interface-01))
 (gp-add-fact '(power-state interface-01 off))
 (gp-add-operator
@@ -47,24 +37,19 @@ See [`ROADMAP.md`](ROADMAP.md) and [`docs/architecture.md`](docs/architecture.md
  (make-operator :name 'connect
                 :preconditions '((device ?d) (power-state ?d on))
                 :add-list '((connection ?d computer))))
+
 (gp-plan :goals '((connection interface-01 computer)))
-(plan-steps (gp-last-plan))
-(plan-success (gp-last-plan)) ; => T
-(gp-facts) ; unchanged — planning is symbolic only
+(gp-simulate)   ; mode :SIMULATE — live facts unchanged
+(gp-facts)      ; still power-state off
+(gp-run)        ; mode :EXECUTE — updates context facts
+(gp-facts)      ; connection + power-state on
 ```
 
-## REPL surface (Phases 1–3)
+Irreversible / high-risk operators on execute:
 
-| Form | Role |
-|------|------|
-| `(gp-context …)` / `(gp-facts)` / `(gp-state)` | Context |
-| `(gp-add-fact …)` / `(gp-query …)` / `(gp-infer …)` | Knowledge |
-| `(gp-add-operator op)` / `(gp-operators)` | Operators |
-| `(gp-plan &key goals operators)` | MEA planner |
-| `(gp-last-plan)` | Last plan object |
-| `(gp-mode)` | Mode skeleton |
-
-Deferred: `gp-run`, `gp-simulate`, `gp-explain`.
+```lisp
+(gp-run :confirm t)   ; or bind *execution-confirm*
+```
 
 ## Tests
 
@@ -74,4 +59,4 @@ Deferred: `gp-run`, `gp-simulate`, `gp-explain`.
 
 ## License
 
-BSD-2-Clause. Copyright (c) 2026 Giacomo Picchiarelli. See [`LICENSE`](LICENSE).
+BSD-2-Clause. Copyright (c) 2026 Giacomo Picchiarelli.

@@ -41,6 +41,16 @@
     :accessor operator-action
     :initform nil
     :documentation "Optional linked ACTION name for later execution.")
+   (reversible
+    :initarg :reversible
+    :accessor operator-reversible
+    :initform t
+    :documentation "Whether the operator is considered reversible.")
+   (risk
+    :initarg :risk
+    :accessor operator-risk
+    :initform :low
+    :documentation "Risk label (:LOW :MEDIUM :HIGH …).")
    (meta
     :initarg :meta
     :accessor operator-meta
@@ -51,7 +61,7 @@
   (typep object 'operator))
 
 (defun make-operator (&key name parameters preconditions add-list delete-list
-                        (cost 1) action meta)
+                        (cost 1) action (reversible t) (risk :low) meta)
   "Construct an OPERATOR. ADD-LIST / DELETE-LIST / PRECONDITIONS accept
 a single pattern or a list of patterns."
   (unless name
@@ -64,6 +74,8 @@ a single pattern or a list of patterns."
                  :delete-list (normalize-pattern-list delete-list)
                  :cost cost
                  :action action
+                 :reversible reversible
+                 :risk risk
                  :meta meta))
 
 (defun action->operator (action)
@@ -74,7 +86,14 @@ a single pattern or a list of patterns."
                  :add-list (action-effects action)
                  :delete-list nil
                  :cost (action-cost action)
-                 :action (action-name action)))
+                 :action (action-name action)
+                 :reversible (action-reversible action)
+                 :risk (action-risk action)))
+
+(defun find-operator (context name)
+  "Find operator named NAME among planning operators for CONTEXT."
+  (find name (context-planning-operators context)
+        :key #'operator-name :test #'equal))
 
 (defun register-operator! (context operator)
   "Register OPERATOR on CONTEXT by name."

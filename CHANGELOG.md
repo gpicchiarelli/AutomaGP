@@ -5,39 +5,47 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.4.0] — 2026-09-26
+
+### Added
+
+- Phase 4 state transition: `transition-facts`, `transition-state`; state kinds
+  `:current` / `:simulated` / `:expected` / `:observed`.
+- Symbolic executor: `simulate-operator`, `simulate-plan`, `execute-operator!`,
+  `execute-plan!`, `execution-result` with CURRENT/EXPECTED/FINAL/divergences.
+- REPL: `gp-simulate`, `gp-run`, `gp-last-execution`.
+- Confirmation gate for irreversible/high-risk operators on EXECUTE
+  (`:confirm t` or `*execution-confirm*` hook).
+- Operator slots `reversible` / `risk` (lifted from actions when applicable).
+- FiveAM `executor-suite` and REPL Phase-4 coverage.
+
+### Changed
+
+- Version bump to 0.4.0.
+- Modes documentation: SIMULATE/EXECUTE are live for symbolic fact effects.
+- Plans store operators in meta for simulate/execute lookup.
+
+### Not yet
+
+- External/macOS adapters (Phase 8) — no real side effects.
+- Condition restarts (`RETRY`/`SKIP`/…) (Phase 5).
+- Explanation / deliberative trace (`gp-explain`) (Phase 6).
+- Observed state from external sensors (still = post-execute context facts).
+
 ## [0.3.0] — 2026-09-26
 
 ### Added
 
-- Phase 3 operators: `make-operator`, registry on context, `action->operator`,
-  `operator-achieves` / `operators-for-goal`.
-- Means-Ends Analysis: `differences`, `achieve` / `achieve-all`,
-  `means-ends-analyze`, precondition subgoals, symbolic `apply-operator`.
-- Planner: `plan` object, `plan-for`, `plan-from-context`, `gp-plan`,
-  `gp-last-plan`, `gp-operators`, `gp-add-operator`.
-- FiveAM suites for operators, MEA, planner; REPL Phase-3 coverage.
-
-### Changed
-
-- Contexts carry an `operators` slot.
-- Version bump to 0.3.0.
-- `gp-plan` is live (sets advisory mode `:PLAN`); does not mutate live facts.
-
-### Not yet
-
-- Executor / `gp-run` / `gp-simulate` (Phase 4).
-- Hierarchical / conditional / temporal planning, alternatives search beyond
-  first successful operator, rollback strategies.
-- Explanation trace (`gp-explain`), adapters, domains, events, web UI.
+- Phase 3 operators, MEA, planner, `gp-plan`.
 
 ## [0.2.0] — 2026-09-26
 
 ### Added
 
-- Phase 2 pattern matching, unification, rules, queries (`gp-query`, `gp-infer`).
+- Phase 2 matching, unification, rules, queries.
 
 ## [0.1.0] — 2026-09-26
 
 ### Added
 
-- Phase 1 context/state/facts/goals/actions/modes and bootstrap hygiene.
+- Phase 1 context foundation and project bootstrap.

@@ -66,11 +66,38 @@
     (is (eq :plan (gp-mode)))
     (is (eq plan (gp-last-plan)))
     (is (>= (plan-length plan) 2))
-    ;; Live context facts must remain unchanged (planning is symbolic only)
     (is (fact-p '(power-state interface-01 off) (gp-facts)))
     (is (not (fact-p '(connection interface-01 computer) (gp-facts))))))
 
+(test repl-phase4-simulate-and-run
+  (gp-reset)
+  (gp-context :name 'studio-audio)
+  (gp-add-fact '(device interface-01))
+  (gp-add-fact '(power-state interface-01 off))
+  (gp-add-operator
+   (make-operator :name 'power-on
+                  :preconditions '((device ?d) (power-state ?d off))
+                  :add-list '((power-state ?d on))
+                  :delete-list '((power-state ?d off))))
+  (gp-add-operator
+   (make-operator :name 'connect
+                  :preconditions '((device ?d) (power-state ?d on))
+                  :add-list '((connection ?d computer))))
+  (gp-plan :goals '((connection interface-01 computer)))
+  (let ((sim (gp-simulate)))
+    (is (execution-result-p sim))
+    (is (eq :simulate (gp-mode)))
+    (is-true (execution-success sim))
+    (is (eq sim (gp-last-execution)))
+    ;; Live facts unchanged after simulate
+    (is (fact-p '(power-state interface-01 off) (gp-facts)))
+    (is (not (fact-p '(connection interface-01 computer) (gp-facts)))))
+  (let ((run (gp-run)))
+    (is (eq :execute (gp-mode)))
+    (is-true (execution-success run))
+    (is (fact-p '(connection interface-01 computer) (gp-facts)))
+    (is (fact-p '(power-state interface-01 on) (gp-facts)))
+    (is (eq :observed (state-kind (execution-final-state run))))))
+
 (test deferred-commands-signal
-  (signals not-yet-implemented-error (gp-run))
-  (signals not-yet-implemented-error (gp-simulate))
   (signals not-yet-implemented-error (gp-explain)))

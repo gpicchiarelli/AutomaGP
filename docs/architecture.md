@@ -1,68 +1,63 @@
-# Architecture (Phases 1–3)
+# Architecture (Phases 1–4)
 
 AUTOMA GP is layered so the **symbolic core** never embeds OS or domain
-details. The planner works only on abstract operators and actions.
+details. The planner and executor work on abstract operators and fact states.
 
 ```text
-interface/          REPL (SLIME) — first UI
+interface/          REPL (SLIME)
     ↓
-core/               Context … matcher, rules, queries,
-                    operators, MEA, planner
+core/               Context … operators, MEA, planner, executor
     ↓ (later)
-memory/             Working / knowledge / episodic / procedural + persistence
-domains/            software, documents, hardware, music, geometry
-adapters/           macOS, filesystem, processes
+memory/  domains/  adapters/
 ```
-
-## Central abstraction: Context
-
-A **context** holds facts, goals, actions, rules, operators, mode, and
-optional parent/children. Children inherit ancestor facts/rules/operators
-(local name wins for rules/operators; EQUAL fact override for facts).
-
-## Modules
-
-| Module | Phase | Responsibility |
-|--------|-------|----------------|
-| `core/modes.lisp` | 1 | Mode enum skeleton |
-| `core/matcher.lisp` | 2 | Pattern match, bindings, substitution |
-| `core/unification.lisp` | 2 | Unify with occur-check |
-| `core/facts.lisp` | 1–2 | Fact store |
-| `core/context.lisp` | 1–3 | Context object + hierarchy |
-| `core/state.lisp` | 1 | Explicit state snapshot |
-| `core/goals.lisp` | 1 | Goal registry |
-| `core/actions.lisp` | 1 | Abstract action records |
-| `core/rules.lisp` | 2 | Horn rules + forward chaining |
-| `core/queries.lisp` | 2 | Fact/rule query + backward chaining |
-| `core/operators.lisp` | 3 | Planning operators |
-| `core/mea.lisp` | 3 | Means-Ends Analysis |
-| `core/planner.lisp` | 3 | Plan objects + `plan-from-context` |
-| `interface/repl.lisp` | 1–3 | `gp-*` entry points |
-
-## Means-Ends Analysis (Phase 3)
-
-```text
-GOAL → DIFFERENCES → OPERATOR → PRECONDITIONS → SUBGOALS → SUBPLANS → PLAN
-```
-
-1. Compute differences (desired facts not holding in the current fact list).
-2. Select an operator whose add-list unifies with a difference.
-3. Unsatisfied (grounded) preconditions become subgoals.
-4. Recursively achieve subgoals, then symbolically apply add/delete lists.
-5. Assemble an ordered plan of steps.
-
-Symbolic application during planning **does not** mutate the live context and
-**does not** invoke adapters. That is Phase 4 (`gp-run` / `gp-simulate`).
-
-Planning goals must be **fact lists**. Bare symbol goals (e.g. `audio-system-ready`)
-are labels only until expressed as desired facts.
 
 ## Modes
 
-- **READ** — observe and query.
-- **PLAN** — set by `gp-plan` (advisory); planning does not require it.
-- **SIMULATE** / **EXECUTE** — reserved for Phase 4.
+| Mode | Role |
+|------|------|
+| `READ` | Observe / query |
+| `PLAN` | Build plans (`gp-plan`) — no fact mutation |
+| `SIMULATE` | Apply effects to a copy (`gp-simulate`) — live context unchanged |
+| `EXECUTE` | Apply effects to live context facts (`gp-run`) — still no adapters |
+
+## State kinds
+
+| Kind | Meaning |
+|------|---------|
+| `CURRENT` | Live / pre-run snapshot |
+| `SIMULATED` | Result of symbolic simulation |
+| `EXPECTED` | Plan's predicted final facts |
+| `OBSERVED` | Post-execute context facts (Phase 4: symbolic only) |
+
+`execution-result` carries current, expected, final, and optional divergences
+(`compare-states` of expected vs final).
+
+## State transition
+
+```text
+STATE A  +  OPERATOR (bindings)  →  STATE B
+```
+
+Implemented as `transition-facts` / `transition-state` (add/delete lists,
+optional 3-element slot conflict retract). Same mechanism used by MEA
+planning, simulation, and execution.
+
+## Executor honesty
+
+- **Simulate** never mutates the live context.
+- **Execute** updates `context-facts` only.
+- No filesystem, process, or macOS calls (Phase 8).
+- Irreversible or `:high`/`:critical` risk operators require `:confirm t`
+  on `gp-run` (or a non-nil `*execution-confirm*` function).
+
+## Module map (Phase 4 additions)
+
+| Module | Role |
+|--------|------|
+| `core/state.lisp` | State object, kinds, transition |
+| `core/executor.lisp` | Simulate / execute plans and operators |
+| `interface/repl.lisp` | `gp-simulate`, `gp-run`, `gp-last-execution` |
 
 ## Dependency policy
 
-ANSI CL + ASDF + UIOP. Tests may use FiveAM via Quicklisp.
+ANSI CL + ASDF + UIOP. Tests use FiveAM via Quicklisp.

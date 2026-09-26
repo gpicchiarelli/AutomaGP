@@ -2,5 +2,5 @@
 
 (in-package #:automa-gp)
 
-(defparameter *version* "0.3.0"
-  "AUTOMA GP version (Phase 3: operators, MEA, planner, subgoals).")
+(defparameter *version* "0.4.0"
+  "AUTOMA GP version (Phase 4: executor, simulation, state transition).")

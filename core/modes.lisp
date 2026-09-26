@@ -1,12 +1,14 @@
-;;;; core/modes.lisp — operational mode skeleton (Phase 1)
+;;;; core/modes.lisp — operational modes
 ;;;;
-;;;; Modes exist as session/context state. PLAN / SIMULATE / EXECUTE do not
-;;;; yet attach planner, simulator, or executor behavior (Phases 3–4).
+;;;; READ — observe/query
+;;;; PLAN — build plans (gp-plan)
+;;;; SIMULATE — apply effects to a copy (gp-simulate); no live mutation
+;;;; EXECUTE — apply effects to live context facts (gp-run); no adapters yet
 
 (in-package #:automa-gp)
 
 (defparameter *valid-modes* '(:read :plan :simulate :execute)
-  "Canonical operational modes. Phase 1 only stores/switches them.")
+  "Canonical operational modes.")
 
 (defun mode-p (mode)
   "Return true if MODE is a known operational mode."
@@ -21,3 +23,7 @@
     (unless (mode-p m)
       (error "Unknown AUTOMA GP mode ~S; expected one of ~S" mode *valid-modes*))
     m))
+
+(defun mode-allows-mutation-p (mode)
+  "True if MODE permits mutating live context facts."
+  (eq (ensure-mode mode) :execute))

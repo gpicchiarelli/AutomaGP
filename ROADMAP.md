@@ -20,22 +20,24 @@ system. Do not skip ahead with fake capabilities.
 - [x] Rules (Horn-style; forward chaining)
 - [x] Queries (`gp-query`, backward chaining; `gp-infer`)
 
-## Phase 3 — Means-Ends Analysis & planning *(current)*
+## Phase 3 — Means-Ends Analysis & planning
 
 - [x] Operators (abstract; actions can be lifted)
 - [x] Means-Ends Analysis (GPS-style differences → operator → subgoals)
 - [x] Planner (`plan-for`, `plan-from-context`, `gp-plan`)
 - [x] Subgoals (unsatisfied preconditions)
 
-## Phase 4 — Execution & simulation
+## Phase 4 — Execution & simulation *(current)*
 
-- [ ] Executor
-- [ ] State transition (live context update)
-- [ ] Simulation (apply effects without mutating the live context via `gp-simulate`)
+- [x] Executor (symbolic context-fact updates)
+- [x] State transition (`transition-state` / `transition-facts`)
+- [x] Simulation (`gp-simulate` — no live mutation)
+- [x] `gp-run` (live fact mutation; confirmation for irreversible/high-risk)
+- [x] CURRENT / SIMULATED / EXPECTED / OBSERVED state kinds
 
 ## Phase 5 — Conditions & failure handling
 
-- [ ] Condition System usage
+- [ ] Condition System usage (beyond current error conditions)
 - [ ] Restarts (`RETRY`, `SKIP`, `ABORT`, `USE-VALUE`, `ASK-USER`)
 - [ ] Failure handling strategy
 
