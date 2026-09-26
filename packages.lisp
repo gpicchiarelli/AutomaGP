@@ -249,6 +249,118 @@
    #:gp-explain
    #:gp-last-trace
    #:gp-trace-history
+   ;; working memory (Phase 7)
+   #:*working-memory*
+   #:working-memory
+   #:working-memory-p
+   #:working-memory-context-name
+   #:working-memory-facts
+   #:working-memory-goals
+   #:working-memory-mode
+   #:working-memory-captured-at
+   #:capture-working-memory
+   #:refresh-working-memory
+   #:clear-working-memory
+   #:working-memory-state
+   ;; knowledge memory (Phase 7)
+   #:*knowledge-memory*
+   #:knowledge-memory
+   #:knowledge-memory-p
+   #:knowledge-memory-name
+   #:knowledge-memory-facts
+   #:knowledge-memory-rules
+   #:knowledge-memory-meta
+   #:make-knowledge-memory
+   #:ensure-knowledge-memory
+   #:clear-knowledge-memory
+   #:knowledge-add-fact!
+   #:knowledge-remove-fact!
+   #:knowledge-add-rule!
+   #:knowledge-remove-rule!
+   #:knowledge-query
+   #:knowledge-from-context
+   #:knowledge-merge-into-context!
+   ;; episodic memory (Phase 7)
+   #:*episodic-memory*
+   #:*episodic-memory-limit*
+   #:episode
+   #:episode-p
+   #:episode-id
+   #:episode-kind
+   #:episode-context-name
+   #:episode-summary
+   #:episode-success
+   #:episode-payload
+   #:episode-timestamp
+   #:episodic-memory
+   #:episodic-memory-p
+   #:episodic-memory-episodes
+   #:episodic-memory-limit
+   #:make-episodic-memory
+   #:ensure-episodic-memory
+   #:clear-episodic-memory
+   #:record-episode!
+   #:record-plan-episode!
+   #:record-execution-episode!
+   #:find-episodes
+   #:last-episode
+   ;; procedural memory (Phase 7)
+   #:*procedural-memory*
+   #:gp-procedure
+   #:procedure-p
+   #:procedure-name
+   #:procedure-goals
+   #:procedure-steps
+   #:procedure-operators-used
+   #:procedure-initial-state
+   #:procedure-success-count
+   #:procedure-meta
+   #:procedural-memory
+   #:procedural-memory-p
+   #:procedural-memory-procedures
+   #:procedural-memory-meta
+   #:make-procedural-memory
+   #:ensure-procedural-memory
+   #:clear-procedural-memory
+   #:make-procedure
+   #:procedure-from-plan
+   #:remember-procedure!
+   #:remember-procedure-from-plan!
+   #:find-procedure
+   #:procedures-for-goals
+   #:procedure->plan
+   ;; persistence service (Phase 7)
+   #:*persistence-format-version*
+   #:*default-snapshot-directory*
+   #:serialize-rule
+   #:deserialize-rule
+   #:serialize-operator
+   #:deserialize-operator
+   #:serialize-action
+   #:deserialize-action
+   #:serialize-context
+   #:deserialize-context
+   #:serialize-episode
+   #:deserialize-episode
+   #:serialize-procedure
+   #:deserialize-procedure
+   #:serialize-knowledge-memory
+   #:deserialize-knowledge-memory
+   #:serialize-episodic-memory
+   #:deserialize-episodic-memory
+   #:serialize-procedural-memory
+   #:deserialize-procedural-memory
+   #:suspend-context
+   #:resume-context
+   #:ensure-snapshot-path
+   #:write-sexp-file
+   #:read-sexp-file
+   #:make-snapshot
+   #:save-snapshot
+   #:load-snapshot
+   #:persist-context
+   #:restore-context
+   #:apply-snapshot!
    ;; session / REPL
    #:*current-context*
    #:gp-reset
@@ -277,6 +389,21 @@
    #:gp-failure-strategy
    #:gp-mode
    #:gp-register-action
-   ;; deferred Phase 7+
+   #:gp-working
+   #:gp-knowledge
+   #:gp-knowledge-add
+   #:gp-knowledge-query
+   #:gp-knowledge-merge
+   #:gp-episodes
+   #:gp-last-episode
+   #:gp-remember-procedure
+   #:gp-procedures
+   #:gp-find-procedure
+   #:gp-save
+   #:gp-load
+   #:gp-save-context
+   #:gp-load-context
+   #:gp-clear-memory
+   ;; deferred Phase 8+
    #:not-yet-implemented
    #:not-yet-implemented-error))

@@ -26,16 +26,17 @@ system. Do not skip ahead with fake capabilities.
 - [x] Deliberative strategy (`*deliberative-strategy*`, `with-failure-strategy`, `gp-failure-strategy`)
 - [x] Integration with simulate/execute plan runners via `handler-bind` + restarts
 
-## Phase 6 — Explanation & introspection *(current)*
+## Phase 6 — Explanation & introspection
 
 - [x] Explanation / deliberative trace (recorded during MEA / plan / simulate / execute)
 - [x] `gp-explain` (formats recorded entries only — no invented narratives)
 - [x] Introspection helpers (`trace-of`, `last-trace`, `find-trace-entries`, `gp-last-trace`, `gp-trace-history`)
 
-## Phase 7 — Memory & persistence
+## Phase 7 — Memory & persistence *(current)*
 
-- [ ] Working / knowledge / episodic / procedural memory
-- [ ] Persistence service
+- [x] Working / knowledge / episodic / procedural memory
+- [x] Persistence as a separate service (`save-snapshot` / `load-snapshot`, not inside planner)
+- [x] Learn reusable procedures from successful plans (`gp-remember-procedure`)
 
 ## Phase 8 — macOS adapters
 

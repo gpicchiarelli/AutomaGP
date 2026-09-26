@@ -5,34 +5,43 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.7.0] — 2026-09-26
+
+### Added
+
+- Phase 7 multilevel memory: working, knowledge, episodic, procedural.
+- Persistence service (separate from planner): `save-snapshot` / `load-snapshot`,
+  `persist-context` / `restore-context`, readable sexp files via UIOP.
+- Learn reusable procedures from successful plans:
+  `gp-remember-procedure`, `procedure->plan`, `gp-find-procedure`.
+- REPL: `gp-working`, `gp-knowledge*`, `gp-episodes`, `gp-procedures`,
+  `gp-save` / `gp-load`, `gp-save-context` / `gp-load-context`, `gp-clear-memory`.
+- Automatic episodic recording on `gp-plan` / `gp-simulate` / `gp-run`
+  (disable with `:remember nil`).
+- FiveAM `memory-suite`.
+
+### Changed
+
+- Version bump to 0.7.0.
+- `gp-reset` clears working + episodic session memory (keeps knowledge/procedural).
+
+### Not yet
+
+- macOS adapters (Phase 8).
+- Automatic planner use of procedural memory (retrieval is explicit).
+- Parent/child context graph persistence (local context slots only).
+
 ## [0.6.0] — 2026-09-26
 
 ### Added
 
-- Phase 6 deliberative trace: `deliberative-trace`, `trace-record`, `with-trace`,
-  `finalize-trace`, session buffer (`*last-trace*`, `*trace-history*`).
-- MEA / planner / simulate / execute record context, goals, differences,
-  selected operators, preconditions, actions, results, and execution steps.
-- `format-explanation` / `explain-trace` / `gp-explain` derive text only from
-  recorded entries (PROMPT §17 shape).
-- Introspection: `trace-of`, `last-trace`, `find-trace-entries`, `gp-last-trace`,
-  `gp-trace-history`, `clear-trace-session`.
-- Workbench example: `docs/tavolo-di-lavoro.md`, `examples/tavolo-di-lavoro.lisp`.
-- Universal Dynamic Context Pipeline:
-  `docs/framework-pipeline-contesto.md`,
-  `examples/framework-pipeline-contesto.lisp` (Acquisition→Analysis→Output→Delivery).
-- FiveAM `explanation-suite`, `tavolo-suite`, `framework-pipeline-suite`.
-- `docs/PROMPT.md` §31 pointer to the workbench framework (does not replace the
-  master architecture).
-
-### Changed
-
-- Version bump to 0.6.0.
-- `gp-reset` clears the session trace buffer.
+- Phase 6 deliberative trace and honest `gp-explain`.
+- Workbench examples: tavolo-di-lavoro, Dynamic Context Pipeline framework.
+- FiveAM explanation / tavolo / framework suites.
 
 ### Not yet
 
-- Durable memory / persistence (Phase 7) — session history only.
+- Durable memory / persistence (Phase 7) — delivered in 0.7.0.
 - macOS adapters (Phase 8).
 
 ## [0.5.0] — 2026-09-26

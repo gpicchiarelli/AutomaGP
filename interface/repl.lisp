@@ -1,6 +1,6 @@
 ;;;; interface/repl.lisp — SLIME/REPL API surface
 ;;;;
-;;;; Phases 1–6 commands are live. Memory/persistence remain deferred (Phase 7).
+;;;; Phases 1–7 commands are live. macOS adapters remain deferred (Phase 8).
 
 (in-package #:automa-gp)
 
@@ -23,13 +23,26 @@
     (setf *current-context* (create-context :name 'default)))
   *current-context*)
 
+(defun gp-clear-memory (&key (working t) (knowledge t) (episodic t)
+                          (procedural t))
+  "Clear selected session memory stores."
+  (when working (clear-working-memory))
+  (when knowledge (clear-knowledge-memory))
+  (when episodic (clear-episodic-memory))
+  (when procedural (clear-procedural-memory))
+  t)
+
 (defun gp-reset ()
-  "Reset the REPL session to a fresh empty context in READ mode."
+  "Reset the REPL session to a fresh empty context in READ mode.
+Also clears working/episodic session memory and the deliberative trace buffer.
+Knowledge and procedural memory are kept (use GP-CLEAR-MEMORY to drop them)."
   (setf *current-context* (create-context :name 'default :mode :read))
   (setf *current-plan* nil)
   (setf *last-execution* nil)
   (setf *deliberative-strategy* nil)
   (clear-trace-session)
+  (clear-working-memory)
+  (clear-episodic-memory)
   *current-context*)
 
 (defun gp-context (&key name parent facts mode rules operators)
@@ -44,6 +57,7 @@ With :NAME (and optional keys): create/select a new current context."
                            :rules rules
                            :operators operators
                            :mode (or mode :read)))
+     (refresh-working-memory *current-context*)
      *current-context*)
     (t
      (ensure-current-context))))
@@ -76,21 +90,27 @@ With :NAME (and optional keys): create/select a new current context."
   "Assert FACT in the current context."
   (let ((ctx (ensure-current-context)))
     (setf (context-facts ctx) (add-fact! (context-facts ctx) fact))
+    (refresh-working-memory ctx)
     fact))
 
 (defun gp-remove-fact (fact)
   "Retract FACT from the current context (local facts only)."
   (let ((ctx (ensure-current-context)))
     (setf (context-facts ctx) (remove-fact! (context-facts ctx) fact))
+    (refresh-working-memory ctx)
     (context-facts ctx)))
 
 (defun gp-add-goal (goal)
   "Add GOAL to the current context."
-  (add-goal! (ensure-current-context) goal))
+  (let ((g (add-goal! (ensure-current-context) goal)))
+    (refresh-working-memory)
+    g))
 
 (defun gp-remove-goal (goal)
   "Remove GOAL from the current context."
-  (remove-goal! (ensure-current-context) goal))
+  (let ((g (remove-goal! (ensure-current-context) goal)))
+    (refresh-working-memory)
+    g))
 
 (defun gp-add-rule (rule)
   "Register RULE (a RULE object) on the current context."
@@ -121,26 +141,32 @@ With :NAME (and optional keys): create/select a new current context."
         (forward-chain facts rules :limit limit)
       (when assert
         (dolist (f new)
-          (setf (context-facts ctx) (add-fact! (context-facts ctx) f))))
+          (setf (context-facts ctx) (add-fact! (context-facts ctx) f)))
+        (refresh-working-memory ctx))
       (values all new))))
 
-(defun gp-plan (&key goals operators)
-  "Build a symbolic plan via Means-Ends Analysis. Does not mutate facts."
+(defun gp-plan (&key goals operators (remember t))
+  "Build a symbolic plan via Means-Ends Analysis. Does not mutate facts.
+When REMEMBER is true (default), records a plan episode in episodic memory."
   (let ((ctx (ensure-current-context)))
     (setf (context-mode ctx) :plan)
     (setf *current-plan*
           (plan-from-context ctx :goals goals :operators operators))
+    (refresh-working-memory ctx)
+    (when remember
+      (record-plan-episode! *current-plan* :context-name (context-name ctx)))
     *current-plan*))
 
 (defun gp-last-plan ()
   "Return the last plan produced by GP-PLAN, or NIL."
   *current-plan*)
 
-(defun gp-simulate (&key plan)
+(defun gp-simulate (&key plan (remember t))
   "Simulate PLAN (default: last plan) without mutating the live context.
 Sets mode to :SIMULATE. Returns an EXECUTION-RESULT.
 Step failures signal GP-ERROR with restarts; *DELIBERATIVE-STRATEGY* may
-auto-invoke SKIP/RETRY/ABORT/ASK. Symbolic effects only — no adapters."
+auto-invoke SKIP/RETRY/ABORT/ASK. Symbolic effects only — no adapters.
+When REMEMBER is true (default), records an episode."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
     (unless (plan-p p)
@@ -149,14 +175,18 @@ auto-invoke SKIP/RETRY/ABORT/ASK. Symbolic effects only — no adapters."
     (setf *last-execution*
           (simulate-plan p :context ctx
                          :operators (context-planning-operators ctx)))
+    (refresh-working-memory ctx)
+    (when remember
+      (record-execution-episode! *last-execution*))
     *last-execution*))
 
-(defun gp-run (&key plan (confirm nil confirm-p))
+(defun gp-run (&key plan (confirm nil confirm-p) (remember t))
   "Execute PLAN (default: last plan) against live context facts.
 Sets mode to :EXECUTE. Returns an EXECUTION-RESULT.
 Step failures signal GP-ERROR with restarts (RETRY SKIP ABORT-EXECUTION
 USE-VALUE USE-ALTERNATIVE ASK-USER). Irreversible ops also offer CONFIRM.
-Mutates context facts symbolically only — no adapters."
+Mutates context facts symbolically only — no adapters.
+When REMEMBER is true (default), records an episode."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
     (unless (plan-p p)
@@ -164,6 +194,9 @@ Mutates context facts symbolically only — no adapters."
     (setf (context-mode ctx) :execute)
     (setf *last-execution*
           (execute-plan! ctx p :confirm (if confirm-p confirm nil)))
+    (refresh-working-memory ctx)
+    (when remember
+      (record-execution-episode! *last-execution*))
     *last-execution*))
 
 (defun gp-last-execution ()
@@ -185,6 +218,7 @@ With POLICY (:SIGNAL :SKIP :RETRY :ABORT :ASK): install a fresh strategy."
     (if mode
         (progn
           (setf (context-mode ctx) (ensure-mode mode))
+          (refresh-working-memory ctx)
           (context-mode ctx))
         (context-mode ctx))))
 
@@ -209,3 +243,98 @@ plan / MEA / simulate / execute. Returns (VALUES TEXT TRACE)."
 (defun gp-trace-history ()
   "Return newest-first session trace history (in-memory buffer only)."
   (copy-list *trace-history*))
+
+;;; Phase 7 — memory & persistence
+
+(defun gp-working ()
+  "Refresh and return the session working-memory snapshot."
+  (refresh-working-memory (ensure-current-context)))
+
+(defun gp-knowledge (&key name facts rules)
+  "With no args: return (ensuring) session knowledge memory.
+With keys: replace/create knowledge memory and return it."
+  (if (or name facts rules)
+      (setf *knowledge-memory*
+            (make-knowledge-memory :name (or name 'default)
+                                   :facts facts
+                                   :rules rules))
+      (ensure-knowledge-memory)))
+
+(defun gp-knowledge-add (item)
+  "Add FACT (list) or RULE object to session knowledge memory."
+  (cond
+    ((rule-p item) (knowledge-add-rule! item))
+    ((consp item) (knowledge-add-fact! item))
+    (t (error "GP-KNOWLEDGE-ADD expects a fact list or RULE, got ~S" item))))
+
+(defun gp-knowledge-query (pattern &key (infer nil))
+  "Query PATTERN against session knowledge memory."
+  (knowledge-query pattern :infer infer))
+
+(defun gp-knowledge-merge ()
+  "Merge session knowledge into the current context."
+  (knowledge-merge-into-context! (ensure-current-context))
+  (refresh-working-memory)
+  (ensure-current-context))
+
+(defun gp-episodes (&key kind success context-name)
+  "List session episodes (optional filters)."
+  (find-episodes :kind kind :success success :context-name context-name))
+
+(defun gp-last-episode ()
+  "Most recent episode, or NIL."
+  (when (episodic-memory-p *episodic-memory*)
+    (last-episode *episodic-memory*)))
+
+(defun gp-remember-procedure (&key plan name)
+  "Store a reusable procedure from PLAN (default: last successful plan)."
+  (let ((p (or plan *current-plan*)))
+    (unless (plan-p p)
+      (error "GP-REMEMBER-PROCEDURE requires a plan"))
+    (remember-procedure-from-plan! p :name name)))
+
+(defun gp-procedures (&optional goals)
+  "List stored procedures, or those matching GOALS when supplied."
+  (if goals
+      (procedures-for-goals goals)
+      (copy-list (procedural-memory-procedures (ensure-procedural-memory)))))
+
+(defun gp-find-procedure (name)
+  "Find a stored procedure by NAME."
+  (find-procedure name))
+
+(defun gp-save (path &key (context t) (knowledge t) (episodic t)
+                       (procedural t) meta)
+  "Save a snapshot bundle to PATH. Boolean keys select sections.
+CONTEXT T means the current context."
+  (save-snapshot path
+                 :context (when context (ensure-current-context))
+                 :knowledge (when knowledge
+                              (and (knowledge-memory-p *knowledge-memory*)
+                                   *knowledge-memory*))
+                 :episodic (when episodic
+                             (and (episodic-memory-p *episodic-memory*)
+                                  *episodic-memory*))
+                 :procedural (when procedural
+                               (and (procedural-memory-p *procedural-memory*)
+                                    *procedural-memory*))
+                 :meta meta))
+
+(defun gp-load (path &key (apply t))
+  "Load a snapshot from PATH. When APPLY is true (default), install into session."
+  (let ((bundle (load-snapshot path)))
+    (when apply
+      (apply-snapshot! bundle))
+    bundle))
+
+(defun gp-save-context (path)
+  "Persist only the current context to PATH."
+  (persist-context (ensure-current-context) path))
+
+(defun gp-load-context (path &key (set-current t))
+  "Restore a context from PATH. When SET-CURRENT, make it the session context."
+  (let ((ctx (restore-context path)))
+    (when set-current
+      (setf *current-context* ctx)
+      (refresh-working-memory ctx))
+    ctx))

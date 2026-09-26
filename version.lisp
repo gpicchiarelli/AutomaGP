@@ -2,5 +2,5 @@
 
 (in-package #:automa-gp)
 
-(defparameter *version* "0.6.0"
-  "AUTOMA GP version (Phase 6: explanation & deliberative trace).")
+(defparameter *version* "0.7.0"
+  "AUTOMA GP version (Phase 7: multilevel memory & persistence).")
