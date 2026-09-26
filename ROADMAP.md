@@ -13,25 +13,25 @@ system. Do not skip ahead with fake capabilities.
 - [x] Modes skeleton (`READ` / `PLAN` / `SIMULATE` / `EXECUTE`)
 - [x] Minimal honest REPL API
 
-## Phase 2 — Pattern matching & knowledge queries *(current)*
+## Phase 2 — Pattern matching & knowledge queries
 
 - [x] Pattern matching (`match`, `match-all`, substitution)
 - [x] Unification (`unify`, occur-check)
 - [x] Rules (Horn-style; forward chaining)
 - [x] Queries (`gp-query`, backward chaining; `gp-infer`)
 
-## Phase 3 — Means-Ends Analysis & planning
+## Phase 3 — Means-Ends Analysis & planning *(current)*
 
-- [ ] Operators
-- [ ] Means-Ends Analysis
-- [ ] Planner
-- [ ] Subgoals
+- [x] Operators (abstract; actions can be lifted)
+- [x] Means-Ends Analysis (GPS-style differences → operator → subgoals)
+- [x] Planner (`plan-for`, `plan-from-context`, `gp-plan`)
+- [x] Subgoals (unsatisfied preconditions)
 
 ## Phase 4 — Execution & simulation
 
 - [ ] Executor
-- [ ] State transition
-- [ ] Simulation (apply effects without mutating the live context)
+- [ ] State transition (live context update)
+- [ ] Simulation (apply effects without mutating the live context via `gp-simulate`)
 
 ## Phase 5 — Conditions & failure handling
 

@@ -1,6 +1,6 @@
 ;;;; automa-gp.asd — AUTOMA GP ASDF system definition
 ;;;;
-;;;; Phase 1–2 load core through queries + REPL.
+;;;; Phases 1–3 load through planner + REPL.
 ;;;; Later-phase files exist as scaffolds and are NOT components yet.
 
 (defsystem "automa-gp"
@@ -23,7 +23,10 @@
                              (:file "goals")
                              (:file "actions")
                              (:file "rules")
-                             (:file "queries")))
+                             (:file "queries")
+                             (:file "operators")
+                             (:file "mea")
+                             (:file "planner")))
                (:module "interface"
                 :serial t
                 :components ((:file "repl"))))
@@ -47,6 +50,9 @@
                              (:file "test-unification")
                              (:file "test-rules")
                              (:file "test-queries")
+                             (:file "test-operators")
+                             (:file "test-mea")
+                             (:file "test-planner")
                              (:file "test-repl"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))

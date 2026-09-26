@@ -43,6 +43,7 @@
    #:context-goals
    #:context-actions
    #:context-rules
+   #:context-operators
    #:context-mode
    #:context-meta
    #:make-context
@@ -54,6 +55,8 @@
    #:compare-contexts
    #:context-all-facts
    #:context-all-rules
+   #:context-all-operators
+   #:context-planning-operators
    ;; state
    #:state
    #:state-p
@@ -104,6 +107,50 @@
    #:prove
    #:prove-all
    #:*query-depth-limit*
+   ;; operators
+   #:operator
+   #:operator-p
+   #:operator-name
+   #:operator-parameters
+   #:operator-preconditions
+   #:operator-add-list
+   #:operator-delete-list
+   #:operator-cost
+   #:operator-action
+   #:operator-meta
+   #:make-operator
+   #:action->operator
+   #:register-operator!
+   #:remove-operator!
+   #:operators-of
+   #:operator-achieves
+   #:operators-for-goal
+   ;; MEA
+   #:*plan-depth-limit*
+   #:goal-holds-p
+   #:differences
+   #:apply-operator
+   #:precondition-subgoals
+   #:achieve
+   #:achieve-all
+   #:means-ends-analyze
+   ;; planner
+   #:plan
+   #:plan-p
+   #:plan-goals
+   #:plan-steps
+   #:plan-success
+   #:plan-initial-state
+   #:plan-final-state
+   #:plan-remaining
+   #:plan-operators-used
+   #:plan-meta
+   #:plan-for
+   #:plan-from-context
+   #:plan-length
+   #:plan-cost
+   #:normalize-planning-goals
+   #:*current-plan*
    ;; session / REPL
    #:*current-context*
    #:gp-reset
@@ -113,18 +160,22 @@
    #:gp-goals
    #:gp-actions
    #:gp-rules
+   #:gp-operators
    #:gp-add-fact
    #:gp-remove-fact
    #:gp-add-goal
    #:gp-remove-goal
    #:gp-add-rule
    #:gp-remove-rule
+   #:gp-add-operator
+   #:gp-remove-operator
    #:gp-query
    #:gp-infer
+   #:gp-plan
+   #:gp-last-plan
    #:gp-mode
    #:gp-register-action
-   ;; deferred Phase 3+
-   #:gp-plan
+   ;; deferred Phase 4+
    #:gp-explain
    #:gp-run
    #:gp-simulate

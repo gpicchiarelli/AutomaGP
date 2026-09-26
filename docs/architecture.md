@@ -1,14 +1,13 @@
-# Architecture (Phases 1–2)
+# Architecture (Phases 1–3)
 
 AUTOMA GP is layered so the **symbolic core** never embeds OS or domain
-details. Adapters and domains plug in later; the planner (Phase 3+) works only
-on abstract operators and actions.
+details. The planner works only on abstract operators and actions.
 
 ```text
 interface/          REPL (SLIME) — first UI
     ↓
-core/               Context, state, facts, matcher, unification, rules, queries,
-                    goals, actions, modes
+core/               Context … matcher, rules, queries,
+                    operators, MEA, planner
     ↓ (later)
 memory/             Working / knowledge / episodic / procedural + persistence
 domains/            software, documents, hardware, music, geometry
@@ -17,10 +16,9 @@ adapters/           macOS, filesystem, processes
 
 ## Central abstraction: Context
 
-A **context** is the unit GP works inside. It holds facts, goals, actions,
-rules, a mode, optional parent/children, and metadata. Children inherit
-ancestor facts and rules as a **union**; an identical local fact (EQUAL)
-replaces the ancestor copy; a same-named local rule replaces an ancestor rule.
+A **context** holds facts, goals, actions, rules, operators, mode, and
+optional parent/children. Children inherit ancestor facts/rules/operators
+(local name wins for rules/operators; EQUAL fact override for facts).
 
 ## Modules
 
@@ -29,42 +27,41 @@ replaces the ancestor copy; a same-named local rule replaces an ancestor rule.
 | `core/modes.lisp` | 1 | Mode enum skeleton |
 | `core/matcher.lisp` | 2 | Pattern match, bindings, substitution |
 | `core/unification.lisp` | 2 | Unify with occur-check |
-| `core/facts.lisp` | 1–2 | Fact store; uses matcher |
-| `core/context.lisp` | 1–2 | Context object + hierarchy |
+| `core/facts.lisp` | 1–2 | Fact store |
+| `core/context.lisp` | 1–3 | Context object + hierarchy |
 | `core/state.lisp` | 1 | Explicit state snapshot |
 | `core/goals.lisp` | 1 | Goal registry |
 | `core/actions.lisp` | 1 | Abstract action records |
 | `core/rules.lisp` | 2 | Horn rules + forward chaining |
 | `core/queries.lisp` | 2 | Fact/rule query + backward chaining |
-| `interface/repl.lisp` | 1–2 | `gp-*` entry points |
+| `core/operators.lisp` | 3 | Planning operators |
+| `core/mea.lisp` | 3 | Means-Ends Analysis |
+| `core/planner.lisp` | 3 | Plan objects + `plan-from-context` |
+| `interface/repl.lisp` | 1–3 | `gp-*` entry points |
 
-## Symbolic representation
+## Means-Ends Analysis (Phase 3)
 
-Facts are ordinary Lisp lists, e.g. `(power-state interface-01 off)`. Pattern
-variables are symbols whose names begin with `?`. The anonymous variable `?`
-matches anything and does not bind. Segment variables (`?*x`) are not supported.
+```text
+GOAL → DIFFERENCES → OPERATOR → PRECONDITIONS → SUBGOALS → SUBPLANS → PLAN
+```
 
-Bindings use `*no-bindings*` (empty success) and `*fail*` (failure sentinel).
+1. Compute differences (desired facts not holding in the current fact list).
+2. Select an operator whose add-list unifies with a difference.
+3. Unsatisfied (grounded) preconditions become subgoals.
+4. Recursively achieve subgoals, then symbolically apply add/delete lists.
+5. Assemble an ordered plan of steps.
 
-## Rules & queries
+Symbolic application during planning **does not** mutate the live context and
+**does not** invoke adapters. That is Phase 4 (`gp-run` / `gp-simulate`).
 
-- **Rules** are Horn-style: conjunction of antecedent patterns ⇒ consequent
-  fact pattern(s).
-- **Forward chaining** (`forward-chain` / `gp-infer`) derives new facts to a
-  fixpoint (iteration limit).
-- **Backward chaining** (`query` / `gp-query` with `:infer t`) proves a goal
-  against facts and rule consequents (depth limit).
-- No negation-as-failure, cuts, Prolog I/O, or truth-maintenance.
+Planning goals must be **fact lists**. Bare symbol goals (e.g. `audio-system-ready`)
+are labels only until expressed as desired facts.
 
-## Modes (skeleton)
+## Modes
 
-- **READ** — observe and query (default).
-- **PLAN** / **SIMULATE** / **EXECUTE** — switchable; engines not attached yet.
-
-## Deliberate non-goals (current)
-
-No MEA, planner, executor, condition-restart policy, persistence, or macOS
-calls in `core/`. Remaining scaffold files stay unloaded stubs.
+- **READ** — observe and query.
+- **PLAN** — set by `gp-plan` (advisory); planning does not require it.
+- **SIMULATE** / **EXECUTE** — reserved for Phase 4.
 
 ## Dependency policy
 

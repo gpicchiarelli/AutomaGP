@@ -41,6 +41,11 @@
     :accessor context-rules
     :initform nil
     :documentation "Local symbolic rules (Phase 2).")
+   (operators
+    :initarg :operators
+    :accessor context-operators
+    :initform nil
+    :documentation "Local planning operators (Phase 3).")
    (mode
     :initarg :mode
     :accessor context-mode
@@ -56,7 +61,8 @@
 (defun context-p (object)
   (typep object 'context))
 
-(defun make-context (&key name parent facts goals actions rules mode meta children)
+(defun make-context (&key name parent facts goals actions rules operators
+                       mode meta children)
   "Construct a CONTEXT. MODE defaults to :READ."
   (make-instance 'context
                  :name name
@@ -66,10 +72,12 @@
                  :goals (copy-list goals)
                  :actions (copy-tree actions)
                  :rules (copy-list rules)
+                 :operators (copy-list operators)
                  :mode (if mode (ensure-mode mode) :read)
                  :meta (copy-tree meta)))
 
-(defun create-context (&key name parent facts goals actions rules mode meta)
+(defun create-context (&key name parent facts goals actions rules operators
+                         mode meta)
   "Create a context and, if PARENT is given, register it as a child."
   (let ((ctx (make-context :name name
                            :parent parent
@@ -77,6 +85,7 @@
                            :goals goals
                            :actions actions
                            :rules rules
+                           :operators operators
                            :mode mode
                            :meta meta)))
     (when parent
@@ -116,7 +125,8 @@ For inference, see QUERY / GP-QUERY."
                                  (facts nil facts-p)
                                  (goals nil goals-p)
                                  (actions nil actions-p)
-                                 (rules nil rules-p))
+                                 (rules nil rules-p)
+                                 (operators nil operators-p))
   "Destructively modify CONTEXT slots when supplied."
   (when name (setf (context-name context) name))
   (when mode (setf (context-mode context) (ensure-mode mode)))
@@ -125,10 +135,11 @@ For inference, see QUERY / GP-QUERY."
   (when goals-p (setf (context-goals context) (copy-list goals)))
   (when actions-p (setf (context-actions context) (copy-tree actions)))
   (when rules-p (setf (context-rules context) (copy-list rules)))
+  (when operators-p (setf (context-operators context) (copy-list operators)))
   context)
 
 (defun clone-context (context &key name as-child)
-  "Deep-enough copy of CONTEXT (facts/goals/actions/rules/meta lists copied).
+  "Deep-enough copy of CONTEXT (facts/goals/actions/rules/operators/meta).
 Parent link is cleared unless AS-CHILD is true (then registered under original)."
   (let ((copy (make-context :name (or name (context-name context))
                             :parent nil
@@ -136,6 +147,7 @@ Parent link is cleared unless AS-CHILD is true (then registered under original).
                             :goals (copy-list (context-goals context))
                             :actions (copy-tree (context-actions context))
                             :rules (copy-list (context-rules context))
+                            :operators (copy-list (context-operators context))
                             :mode (context-mode context)
                             :meta (copy-tree (context-meta context))
                             :children nil)))
