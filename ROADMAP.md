@@ -35,7 +35,7 @@ system. Do not skip ahead with fake capabilities.
 
 - [x] filesystem / processes / macos adapters (opt-in on EXECUTE)
 
-## Phase 9 — Domain adapters *(current)*
+## Phase 9 — Domain adapters
 
 - [x] `domains/software` — repo → compile → test
 - [x] `domains/documents` — ingest → classify → archive (pipeline-aligned)
@@ -44,9 +44,11 @@ system. Do not skip ahead with fake capabilities.
 - [x] `domains/geometry` — points → segments → triangle
 - [x] `gp-load-domain` registry (no core MEA changes)
 
-## Phase 10 — Event system
+## Phase 10 — Event system *(current)*
 
-- [ ] Events bound to context
+- [x] Events bound to context (`gp-emit` / `gp-events`)
+- [x] Event → reaction → goal → plan → update (`gp-react`)
+- [x] Goal-directed and event-driven behavior coexist
 
 ## Phase 11 — Web interface
 

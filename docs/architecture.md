@@ -1,24 +1,33 @@
-# Architecture (Phases 1–9)
+# Architecture (Phases 1–10)
 
-Domain packs add knowledge **outside** the symbolic core. MEA/planner/executor
-are unchanged; domains only `register-operator!` / `register-rule!` / facts.
+Domain packs and events sit outside the MEA kernel. Events bind to a context;
+reactions assert facts / add goals; planning reuses the same planner.
 
 ```text
-interface/     REPL (gp-load-domain)
+interface/     REPL (gp-emit · gp-react · gp-load-domain)
     ↓
 domains/       software · documents · hardware · music · geometry
     ↓
 adapters/      filesystem · processes · macos
     ↓
-memory/        …
+memory/        working · knowledge · episodic · procedural · persistence
     ↓
-core/          mea → planner → executor  (domain-agnostic)
+core/          events → mea → planner → executor  (domain-agnostic)
 ```
+
+## Events (Phase 10 / PROMPT §16)
+
+- `emit-event!` / `gp-emit` — post `(type . data)` on the context; optional fact assert
+- `event-reaction` — match event → assert facts + add goals
+- `process-pending-events!` / `gp-react` — drain pending; optional `:plan t`
+- Goal-directed `gp-plan` remains available with or without events
+
+Honest limits: no filesystem watchers; events are posted by API/REPL.
 
 ## Domains (Phase 9 / PROMPT §12)
 
-Each pack exports `install-*-domain` and a `*-demo-plan`. Optional
-`:external` meta reuses Phase-8 adapters (never required for planning).
+Each pack exports `install-*-domain` and a `*-demo-plan`. Documents registers
+an `on-file-created` reaction for the §16 example.
 
 ## Adapters (Phase 8)
 

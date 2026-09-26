@@ -85,6 +85,43 @@
                  :adapter adapter
                  :authorization authorization)))
 
+(defun serialize-event (event)
+  (list :event
+        :id (event-id event)
+        :type (event-type event)
+        :data (copy-list (event-data event))
+        :timestamp (event-timestamp event)
+        :status (event-status event)
+        :meta (copy-tree (event-meta event))))
+
+(defun deserialize-event (form)
+  (destructuring-bind (&key id type data timestamp status meta
+                         &allow-other-keys)
+      (cdr form)
+    (make-event :id id
+                :type type
+                :data data
+                :timestamp timestamp
+                :status (or status :pending)
+                :meta meta)))
+
+(defun serialize-event-reaction (reaction)
+  (list :event-reaction
+        :name (event-reaction-name reaction)
+        :when (copy-tree (event-reaction-when reaction))
+        :assert (copy-tree (event-reaction-assert reaction))
+        :goals (copy-tree (event-reaction-goals reaction))
+        :meta (copy-tree (event-reaction-meta reaction))))
+
+(defun deserialize-event-reaction (form)
+  (destructuring-bind (&key name when assert goals meta &allow-other-keys)
+      (cdr form)
+    (make-event-reaction :name name
+                         :when when
+                         :assert assert
+                         :goals goals
+                         :meta meta)))
+
 (defun serialize-context (context)
   "Serialize CONTEXT (local slots only — no parent/children links)."
   (list :context
@@ -96,11 +133,15 @@
         :actions (mapcar (lambda (pair)
                            (serialize-action (cdr pair)))
                          (context-actions context))
+        :events (mapcar #'serialize-event (context-events context))
+        :event-reactions (mapcar #'serialize-event-reaction
+                                 (context-event-reactions context))
         :mode (context-mode context)
         :meta (copy-tree (context-meta context))))
 
 (defun deserialize-context (form)
-  (destructuring-bind (&key name facts goals rules operators actions mode meta
+  (destructuring-bind (&key name facts goals rules operators actions
+                         events event-reactions mode meta
                          &allow-other-keys)
       (cdr form)
     (let ((ctx (make-context :name name
@@ -114,6 +155,12 @@
         (register-operator! ctx (deserialize-operator o)))
       (dolist (a actions)
         (register-action! ctx (deserialize-action a)))
+      (dolist (e events)
+        (setf (context-events ctx)
+              (append (context-events ctx)
+                      (list (deserialize-event e)))))
+      (dolist (er event-reactions)
+        (register-event-reaction! ctx (deserialize-event-reaction er)))
       ctx)))
 
 (defun serialize-episode (ep)

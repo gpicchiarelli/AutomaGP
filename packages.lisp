@@ -45,6 +45,8 @@
    #:context-actions
    #:context-rules
    #:context-operators
+   #:context-events
+   #:context-event-reactions
    #:context-mode
    #:context-meta
    #:make-context
@@ -58,6 +60,7 @@
    #:context-all-rules
    #:context-all-operators
    #:context-planning-operators
+   #:context-all-event-reactions
    ;; state
    #:state
    #:state-p
@@ -432,6 +435,45 @@
    #:*known-domains*
    #:gp-load-domain
    #:gp-domains
-   ;; deferred Phase 10+
+   ;; events (Phase 10)
+   #:*event-counter*
+   #:*last-reaction*
+   #:gp-event
+   #:event-p
+   #:event-id
+   #:event-type
+   #:event-data
+   #:event-timestamp
+   #:event-status
+   #:event-meta
+   #:make-event
+   #:event-form
+   #:parse-event-form
+   #:event-reaction
+   #:event-reaction-p
+   #:event-reaction-name
+   #:event-reaction-when
+   #:event-reaction-assert
+   #:event-reaction-goals
+   #:event-reaction-meta
+   #:make-event-reaction
+   #:register-event-reaction!
+   #:remove-event-reaction!
+   #:event-reactions-of
+   #:match-event-reaction
+   #:events-of
+   #:pending-events
+   #:clear-events!
+   #:emit-event!
+   #:react-to-event!
+   #:process-pending-events!
+   #:gp-emit
+   #:gp-events
+   #:gp-react
+   #:gp-add-reaction
+   #:gp-remove-reaction
+   #:gp-reactions
+   #:gp-last-reaction
+   ;; utilities
    #:not-yet-implemented
    #:not-yet-implemented-error))

@@ -5,6 +5,26 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.10.0] — 2026-09-26
+
+### Added
+
+- Phase 10 context-bound event system (`gp-event`, event reactions).
+- Flow: emit → reaction (assert facts / add goals) → optional plan.
+- REPL: `gp-emit`, `gp-events`, `gp-react`, `gp-add-reaction`,
+  `gp-reactions`, `gp-last-reaction`.
+- Documents domain registers `file-created` → classify goal (PROMPT §16).
+- Events/reactions included in context persistence.
+- FiveAM `events-suite`.
+
+### Changed
+
+- Version bump to 0.10.0.
+
+### Not yet
+
+- Web UI (Phase 11), OS file watchers, full autonomy loop (Phase 12).
+
 ## [0.9.0] — 2026-09-26
 
 ### Added

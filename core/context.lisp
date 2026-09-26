@@ -46,6 +46,16 @@
     :accessor context-operators
     :initform nil
     :documentation "Local planning operators (Phase 3).")
+   (events
+    :initarg :events
+    :accessor context-events
+    :initform nil
+    :documentation "Context-bound event log (Phase 10), oldest first.")
+   (event-reactions
+    :initarg :event-reactions
+    :accessor context-event-reactions
+    :initform nil
+    :documentation "Event reactions (match event → facts/goals), Phase 10.")
    (mode
     :initarg :mode
     :accessor context-mode
@@ -62,7 +72,7 @@
   (typep object 'context))
 
 (defun make-context (&key name parent facts goals actions rules operators
-                       mode meta children)
+                       events event-reactions mode meta children)
   "Construct a CONTEXT. MODE defaults to :READ."
   (make-instance 'context
                  :name name
@@ -73,11 +83,13 @@
                  :actions (copy-tree actions)
                  :rules (copy-list rules)
                  :operators (copy-list operators)
+                 :events (copy-list events)
+                 :event-reactions (copy-list event-reactions)
                  :mode (if mode (ensure-mode mode) :read)
                  :meta (copy-tree meta)))
 
 (defun create-context (&key name parent facts goals actions rules operators
-                         mode meta)
+                         events event-reactions mode meta)
   "Create a context and, if PARENT is given, register it as a child."
   (let ((ctx (make-context :name name
                            :parent parent
@@ -86,6 +98,8 @@
                            :actions actions
                            :rules rules
                            :operators operators
+                           :events events
+                           :event-reactions event-reactions
                            :mode mode
                            :meta meta)))
     (when parent
@@ -126,7 +140,9 @@ For inference, see QUERY / GP-QUERY."
                                  (goals nil goals-p)
                                  (actions nil actions-p)
                                  (rules nil rules-p)
-                                 (operators nil operators-p))
+                                 (operators nil operators-p)
+                                 (events nil events-p)
+                                 (event-reactions nil event-reactions-p))
   "Destructively modify CONTEXT slots when supplied."
   (when name (setf (context-name context) name))
   (when mode (setf (context-mode context) (ensure-mode mode)))
@@ -136,11 +152,15 @@ For inference, see QUERY / GP-QUERY."
   (when actions-p (setf (context-actions context) (copy-tree actions)))
   (when rules-p (setf (context-rules context) (copy-list rules)))
   (when operators-p (setf (context-operators context) (copy-list operators)))
+  (when events-p (setf (context-events context) (copy-list events)))
+  (when event-reactions-p
+    (setf (context-event-reactions context) (copy-list event-reactions)))
   context)
 
 (defun clone-context (context &key name as-child)
-  "Deep-enough copy of CONTEXT (facts/goals/actions/rules/operators/meta).
-Parent link is cleared unless AS-CHILD is true (then registered under original)."
+  "Deep-enough copy of CONTEXT (facts/goals/actions/rules/operators/events/meta).
+Parent link is cleared unless AS-CHILD is true (then registered under original).
+Event objects are shallow-copied references; reactions are shared by identity."
   (let ((copy (make-context :name (or name (context-name context))
                             :parent nil
                             :facts (copy-list (context-facts context))
@@ -148,6 +168,9 @@ Parent link is cleared unless AS-CHILD is true (then registered under original).
                             :actions (copy-tree (context-actions context))
                             :rules (copy-list (context-rules context))
                             :operators (copy-list (context-operators context))
+                            :events (copy-list (context-events context))
+                            :event-reactions
+                            (copy-list (context-event-reactions context))
                             :mode (context-mode context)
                             :meta (copy-tree (context-meta context))
                             :children nil)))

@@ -49,6 +49,18 @@
               :then '(automa-gp::document-workflow-complete ?s)
               :meta (list :domain *documents-domain-name*))))
 
+(defun %documents-event-reactions ()
+  "Phase 10: file-created → seed source/class → goal document-classified."
+  (list
+   (make-event-reaction
+    :name 'automa-gp::on-file-created
+    :when '(automa-gp::file-created ?path)
+    :assert '((automa-gp::document-source ?path)
+              (automa-gp::classification-target automa-gp::report))
+    :goals '((automa-gp::document-classified ?path automa-gp::report))
+    :meta (list :domain *documents-domain-name*
+                :prompt-example t))))
+
 (defun install-documents-domain (&optional (context *current-context*)
                                  &key (seed-demo t) archive-path
                                  &allow-other-keys)
@@ -59,6 +71,8 @@
     (register-operator! context op))
   (dolist (r (%documents-rules))
     (register-rule! context r))
+  (dolist (er (%documents-event-reactions))
+    (register-event-reaction! context er))
   (when seed-demo
     (dolist (f '((automa-gp::document-reader automa-gp::ready)
                  (automa-gp::archive automa-gp::ready)))

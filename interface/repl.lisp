@@ -1,6 +1,6 @@
 ;;;; interface/repl.lisp — SLIME/REPL API surface
 ;;;;
-;;;; Phases 1–7 commands are live. macOS adapters remain deferred (Phase 8).
+;;;; Phases 1–10 commands are live. Web UI remains deferred (Phase 11).
 
 (in-package #:automa-gp)
 
@@ -40,6 +40,7 @@ Knowledge and procedural memory are kept (use GP-CLEAR-MEMORY to drop them)."
   (setf *current-plan* nil)
   (setf *last-execution* nil)
   (setf *deliberative-strategy* nil)
+  (setf *last-reaction* nil)
   (clear-trace-session)
   (clear-working-memory)
   (clear-episodic-memory)
@@ -348,3 +349,51 @@ CONTEXT T means the current context."
       (setf *current-context* ctx)
       (refresh-working-memory ctx))
     ctx))
+
+;;; Phase 10 — context-bound events
+
+(defun gp-emit (form &key (react nil) (plan nil) (infer nil)
+                       (assert-fact t) (remember t) meta)
+  "Post event FORM ((TYPE . DATA), e.g. (FILE-CREATED \"doc.pdf\")) on the
+current context. By default only records the event (and asserts it as a fact).
+When :REACT is true, process pending events (reactions → facts/goals).
+When :PLAN is also true, build a plan for resulting goals.
+Returns the GP-EVENT (and leaves *LAST-REACTION* when reacting)."
+  (let* ((ctx (ensure-current-context))
+         (event (emit-event! ctx form :assert-fact assert-fact :meta meta)))
+    (when react
+      (gp-react :plan plan :infer infer :remember remember))
+    (refresh-working-memory ctx)
+    event))
+
+(defun gp-events (&key status)
+  "List events on the current context (oldest first). Optional :STATUS filter."
+  (events-of (ensure-current-context) :status status))
+
+(defun gp-react (&key (plan nil) (infer nil) (remember t))
+  "Process pending events: reactions assert facts / add goals, optional plan.
+Returns the reaction summary plist (*LAST-REACTION*). Goal-directed
+GP-PLAN still works independently of events."
+  (let* ((ctx (ensure-current-context))
+         (summary (process-pending-events! ctx :plan plan :infer infer))
+         (plan-obj (getf summary :plan)))
+    (when (and remember (plan-p plan-obj))
+      (record-plan-episode! plan-obj :context-name (context-name ctx)))
+    (refresh-working-memory ctx)
+    summary))
+
+(defun gp-add-reaction (reaction)
+  "Register an EVENT-REACTION on the current context."
+  (register-event-reaction! (ensure-current-context) reaction))
+
+(defun gp-remove-reaction (name)
+  "Remove event reaction named NAME from the current context."
+  (remove-event-reaction! (ensure-current-context) name))
+
+(defun gp-reactions ()
+  "Event reactions visible on the current context (incl. parents)."
+  (context-all-event-reactions (ensure-current-context)))
+
+(defun gp-last-reaction ()
+  "Summary plist from the last GP-REACT / PROCESS-PENDING-EVENTS!, or NIL."
+  *last-reaction*)

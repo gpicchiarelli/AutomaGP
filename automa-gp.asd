@@ -1,6 +1,6 @@
 ;;;; automa-gp.asd — AUTOMA GP ASDF system definition
 ;;;;
-;;;; Phases 1–9 load through adapters + domains + memory + REPL.
+;;;; Phases 1–10 load through adapters + domains + memory + REPL.
 
 (defsystem "automa-gp"
   :description "AUTOMA GP — context-centric symbolic deliberative automaton"
@@ -28,7 +28,8 @@
                              (:file "mea")
                              (:file "planner")
                              (:file "conditions")
-                             (:file "executor")))
+                             (:file "executor")
+                             (:file "events")))
                (:module "adapters"
                 :serial t
                 :components ((:file "filesystem")
@@ -99,6 +100,7 @@
                              (:file "test-persistence")
                              (:file "test-adapters")
                              (:file "test-domains")
+                             (:file "test-events")
                              (:file "test-repl"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))
