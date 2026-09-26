@@ -5,8 +5,8 @@
 
 (in-package #:automa-gp)
 
-(defparameter *web-api-version* "0.11.0"
-  "API surface version (aligned with AUTOMA GP Phase 11).")
+(defparameter *web-api-version* "0.12.0"
+  "API surface version (aligned with AUTOMA GP Phase 12).")
 
 (defun %serialize-bindings (bindings)
   (json-array
@@ -107,6 +107,34 @@
     (list :text (or text "")
           :has-trace (and (deliberative-trace-p trace) t))))
 
+(defun %serialize-autonomy (summary)
+  (cond
+    ((null summary) :null)
+    ((not (listp summary)) :null)
+    (t
+     (list :status (getf summary :status)
+           :halt (getf summary :halt)
+           :authority (getf summary :authority)
+           :authorized (getf summary :authorized)
+           :authorize-reason (getf summary :authorize-reason)
+           :iterations (getf summary :iterations)
+           :phases (json-array (getf summary :phases))
+           :plan (or (getf summary :plan) :null)
+           :execution (or (getf summary :execution) :null)
+           :goals (json-array (getf summary :goals))
+           :pending-events (or (getf summary :pending-events) 0)))))
+
+(defun %api-autonomy-status ()
+  (let ((p (ensure-autonomy-policy)))
+    (list :ok t
+          :policy (list :authority (policy-authority p)
+                        :max-steps (policy-max-steps p)
+                        :adapters (policy-adapters p)
+                        :auto-confirm (policy-auto-confirm p)
+                        :react-events (policy-react-events p)
+                        :learn (policy-learn p))
+          :last (%serialize-autonomy *last-autonomy*))))
+
 (defun %body-get (body key &optional default)
   (let ((v (getf body key :missing)))
     (if (eq v :missing) default v)))
@@ -163,6 +191,8 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
           ((and (eq m :get) (string= p "/api/reaction"))
            (values 200 (list :reaction
                              (%serialize-last-reaction *last-reaction*))))
+          ((and (eq m :get) (string= p "/api/autonomy"))
+           (values 200 (%api-autonomy-status)))
 
           ((and (eq m :post) (string= p "/api/reset"))
            (gp-reset)
@@ -250,6 +280,58 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                            :reaction (%serialize-last-reaction summary)
                            :plan (%serialize-plan *current-plan*)
                            :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/autonomy/policy"))
+           (let* ((auth (%body-get body :authority :missing))
+                  (args nil))
+             (unless (eq auth :missing)
+               (setf args (list* :authority
+                                 (if (stringp auth)
+                                     (intern (string-upcase auth) :keyword)
+                                     auth)
+                                 args)))
+             (dolist (key '(:max-steps :adapters :auto-confirm
+                            :react-events :learn))
+               (let ((v (%body-get body key :missing)))
+                 (unless (eq v :missing)
+                   (setf args (list* key v args)))))
+             (apply #'gp-policy args)
+             (values 200 (%api-autonomy-status))))
+
+          ((and (eq m :post) (string= p "/api/autonomy/step"))
+           (let* ((auth (%body-get body :authority :missing))
+                  (pol (if (eq auth :missing)
+                           (ensure-autonomy-policy)
+                           (make-autonomy-policy
+                            :authority (if (stringp auth)
+                                           (intern (string-upcase auth) :keyword)
+                                           auth)
+                            :auto-confirm (%body-get body :auto-confirm nil)
+                            :adapters (%body-get body :adapters nil)
+                            :max-steps (or (%body-get body :max-steps) 8))))
+                  (summary (gp-autonomous-step :policy pol)))
+             (values 200 (list :ok t
+                               :autonomy (%serialize-autonomy summary)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))
+                               :plan (%serialize-plan *current-plan*)))))
+
+          ((and (eq m :post) (string= p "/api/autonomy/loop"))
+           (let* ((auth (%body-get body :authority :simulate))
+                  (pol (make-autonomy-policy
+                        :authority (if (stringp auth)
+                                       (intern (string-upcase auth) :keyword)
+                                       (or auth :simulate))
+                        :auto-confirm (%body-get body :auto-confirm nil)
+                        :adapters (%body-get body :adapters nil)
+                        :max-steps (or (%body-get body :max-steps) 8)))
+                  (summary (gp-autonomous-loop :policy pol
+                                               :max-steps (policy-max-steps pol))))
+             (values 200 (list :ok t
+                               :autonomy (%serialize-autonomy summary)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))
+                               :plan (%serialize-plan *current-plan*)))))
 
           (t (values 404 (list :ok nil
                                :error "not-found"

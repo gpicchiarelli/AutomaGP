@@ -1,6 +1,6 @@
 ;;;; automa-gp.asd — AUTOMA GP ASDF system definition
 ;;;;
-;;;; Phases 1–11: core + optional Hunchentoot web system.
+;;;; Phases 1–12: core + autonomy + optional Hunchentoot web system.
 
 (defsystem "automa-gp"
   :description "AUTOMA GP — context-centric symbolic deliberative automaton"
@@ -42,6 +42,8 @@
                              (:file "episodic")
                              (:file "procedural")
                              (:file "persistence")))
+               ;; Autonomy needs planner + memory; load after both.
+               (:file "autonomy" :pathname "core/autonomy")
                (:module "domains"
                 :serial t
                 :components ((:module "software"
@@ -115,6 +117,7 @@
                              (:file "test-domains")
                              (:file "test-events")
                              (:file "test-web")
+                             (:file "test-autonomy")
                              (:file "test-repl"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))

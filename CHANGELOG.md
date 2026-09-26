@@ -5,6 +5,28 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.12.0] — 2026-09-26
+
+### Added
+
+- Phase 12 controlled autonomy loop (PROMPT §28):
+  `autonomous-step` / `autonomous-loop`, REPL `gp-autonomous-step` /
+  `gp-autonomous-loop` / `gp-policy`.
+- Explicit authority gates: `:READ` | `:SIMULATE` (default) | `:EXECUTE`.
+- Confirmation required for irreversible / high-risk operators unless
+  `auto-confirm` or `confirm-fn` authorizes.
+- Web: `/api/autonomy`, `/api/autonomy/step`, `/api/autonomy/loop`.
+- FiveAM `autonomy-suite`.
+
+### Changed
+
+- Version bump to 0.12.0 — 12-phase roadmap complete at scaffold + working-core.
+
+### Honest limits
+
+- Autonomy ≠ unattended OS destruction; default authority is `:SIMULATE`.
+- Adapters remain opt-in; no remote bind / auth layer.
+
 ## [0.11.0] — 2026-09-26
 
 ### Added

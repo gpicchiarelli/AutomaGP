@@ -484,6 +484,35 @@
    #:json->sexp
    #:web-api-handle
    #:web-api-handle-json
+   ;; autonomy (Phase 12)
+   #:*valid-authorities*
+   #:*autonomy-policy*
+   #:*last-autonomy*
+   #:autonomy-policy
+   #:autonomy-policy-p
+   #:policy-authority
+   #:policy-max-steps
+   #:policy-adapters
+   #:policy-auto-confirm
+   #:policy-confirm-fn
+   #:policy-react-events
+   #:policy-infer
+   #:policy-learn
+   #:policy-replan-on-discrepancy
+   #:policy-remember-procedure
+   #:ensure-authority
+   #:make-autonomy-policy
+   #:ensure-autonomy-policy
+   #:authority>=
+   #:plan-requires-confirmation-p
+   #:plan-risky-operators
+   #:goals-satisfied-p
+   #:autonomous-step
+   #:autonomous-loop
+   #:gp-policy
+   #:gp-autonomous-step
+   #:gp-autonomous-loop
+   #:gp-last-autonomy
    ;; utilities
    #:not-yet-implemented
    #:not-yet-implemented-error))

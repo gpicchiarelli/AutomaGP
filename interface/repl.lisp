@@ -1,6 +1,6 @@
 ;;;; interface/repl.lisp — SLIME/REPL API surface
 ;;;;
-;;;; Phases 1–10 REPL commands. Optional web console: (ql:quickload :automa-gp/web).
+;;;; Phases 1–12 REPL. Optional web: (ql:quickload :automa-gp/web).
 
 (in-package #:automa-gp)
 
@@ -34,13 +34,16 @@
 
 (defun gp-reset ()
   "Reset the REPL session to a fresh empty context in READ mode.
-Also clears working/episodic session memory and the deliberative trace buffer.
+Also clears working/episodic session memory, the deliberative trace buffer,
+and the autonomy policy (back to the safe default on next use).
 Knowledge and procedural memory are kept (use GP-CLEAR-MEMORY to drop them)."
   (setf *current-context* (create-context :name 'default :mode :read))
   (setf *current-plan* nil)
   (setf *last-execution* nil)
   (setf *deliberative-strategy* nil)
   (setf *last-reaction* nil)
+  (setf *last-autonomy* nil)
+  (setf *autonomy-policy* nil)
   (clear-trace-session)
   (clear-working-memory)
   (clear-episodic-memory)
@@ -397,3 +400,62 @@ GP-PLAN still works independently of events."
 (defun gp-last-reaction ()
   "Summary plist from the last GP-REACT / PROCESS-PENDING-EVENTS!, or NIL."
   *last-reaction*)
+
+;;; Phase 12 — controlled autonomy
+
+(defun gp-policy (&key (authority nil authority-p)
+                    (max-steps nil max-steps-p)
+                    (adapters nil adapters-p)
+                    (auto-confirm nil auto-confirm-p)
+                    (confirm-fn nil confirm-fn-p)
+                    (react-events t react-events-p)
+                    (infer nil infer-p)
+                    (learn t learn-p)
+                    (replan-on-discrepancy t replan-p)
+                    (remember-procedure nil remember-p)
+                    (set t))
+  "Get or install the session *AUTONOMY-POLICY*.
+With no policy keys: return current policy (or a fresh default).
+With keys: build a policy; when SET is true (default), install it."
+  (if (or authority-p max-steps-p adapters-p auto-confirm-p confirm-fn-p
+          react-events-p infer-p learn-p replan-p remember-p)
+      (let* ((base (ensure-autonomy-policy))
+             (p (make-autonomy-policy
+                 :authority (if authority-p authority (policy-authority base))
+                 :max-steps (if max-steps-p max-steps (policy-max-steps base))
+                 :adapters (if adapters-p adapters (policy-adapters base))
+                 :auto-confirm (if auto-confirm-p auto-confirm
+                                   (policy-auto-confirm base))
+                 :confirm-fn (if confirm-fn-p confirm-fn
+                                 (policy-confirm-fn base))
+                 :react-events (if react-events-p react-events
+                                   (policy-react-events base))
+                 :infer (if infer-p infer (policy-infer base))
+                 :learn (if learn-p learn (policy-learn base))
+                 :replan-on-discrepancy
+                 (if replan-p replan-on-discrepancy
+                     (policy-replan-on-discrepancy base))
+                 :remember-procedure
+                 (if remember-p remember-procedure
+                     (policy-remember-procedure base)))))
+        (when set (setf *autonomy-policy* p))
+        p)
+      (ensure-autonomy-policy)))
+
+(defun gp-autonomous-step (&key policy (remember t))
+  "One controlled autonomy cycle (PROMPT §28). Respects policy authority
+(:READ | :SIMULATE | :EXECUTE). Default policy authority is :SIMULATE."
+  (ensure-current-context)
+  (autonomous-step :policy (or policy (ensure-autonomy-policy))
+                   :remember remember))
+
+(defun gp-autonomous-loop (&key policy max-steps (remember t))
+  "Repeat GP-AUTONOMOUS-STEP until done, halted, or max steps."
+  (ensure-current-context)
+  (autonomous-loop :policy (or policy (ensure-autonomy-policy))
+                   :max-steps max-steps
+                   :remember remember))
+
+(defun gp-last-autonomy ()
+  "Summary plist from the last autonomous step/loop, or NIL."
+  *last-autonomy*)

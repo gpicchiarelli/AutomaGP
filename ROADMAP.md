@@ -50,15 +50,17 @@ system. Do not skip ahead with fake capabilities.
 - [x] Event → reaction → goal → plan → update (`gp-react`)
 - [x] Goal-directed and event-driven behavior coexist
 
-## Phase 11 — Web interface *(current)*
+## Phase 11 — Web interface
 
 - [x] Thin Hunchentoot operator console (`automa-gp/web`)
 - [x] JSON API façade in core (no chatbot / no second brain)
 - [x] REPL remains first-class; web optional
 
-## Phase 12 — Autonomous symbolic operation
+## Phase 12 — Autonomous symbolic operation *(current)*
 
-- [ ] Controlled autonomy loop
+- [x] Controlled autonomy loop (`gp-autonomous-step` / `gp-autonomous-loop`)
+- [x] Explicit policy gates (:READ / :SIMULATE / :EXECUTE + confirm)
+- [x] Web console autonomy status / step / loop
 
 ---
 

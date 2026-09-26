@@ -24,7 +24,7 @@
       (web-api-handle :get "/api/status")
     (is (= 200 code))
     (is (eq t (getf body :ok)))
-    (is (string= "0.11.0" (getf body :api))))
+    (is (string= "0.12.0" (getf body :api))))
   (multiple-value-bind (code body)
       (web-api-handle :post "/api/reset")
     (is (= 200 code))

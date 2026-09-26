@@ -1,16 +1,16 @@
-# Architecture (Phases 1–11)
-
-The web layer is optional and contains **no deliberative logic**.
+# Architecture (Phases 1–12)
 
 ```text
-browser  →  automa-gp/web (Hunchentoot)  →  web-api-handle  →  core/REPL
-slime    →  interface/repl.lisp          ↗
+browser  →  automa-gp/web  →  web-api-handle  →  core / REPL / autonomy
+slime    →  interface/repl.lisp              ↗
 ```
 
 ```text
 interface/     REPL · JSON · web-api · (web via automa-gp/web)
     ↓
 domains/       software · documents · hardware · music · geometry
+    ↓
+autonomy       policy-gated observe→plan→(simulate|execute)→update
     ↓
 adapters/      filesystem · processes · macos
     ↓
@@ -19,19 +19,20 @@ memory/        working · knowledge · episodic · procedural · persistence
 core/          events · mea · planner · executor
 ```
 
-## Web (Phase 11 / PROMPT §18)
+## Autonomy (Phase 12 / PROMPT §28)
 
-- System `automa-gp` — core + `web-api-handle` (no Hunchentoot)
-- System `automa-gp/web` — Hunchentoot console on `127.0.0.1:47391`
-- API: `/api/status|context|facts|goals|plan|explain|events|…`
-- Mutations: `/api/reset|plan|simulate|run|emit|react|load-domain|add-fact`
+- `make-autonomy-policy` — `:authority` `:read` | `:simulate` | `:execute`
+- `autonomous-step` / `gp-autonomous-step` — one controlled cycle
+- `autonomous-loop` / `gp-autonomous-loop` — repeat until done/halt/max-steps
+- High-risk / irreversible operators require `auto-confirm` or `confirm-fn`
+- Default authority `:simulate`; adapters still opt-in
 
-## Events (Phase 10)
+## Web (Phase 11)
 
-`gp-emit` / `gp-react` — event → reaction → goals → optional plan.
+Optional Hunchentoot console on `127.0.0.1:47391`.
 
 ## Dependency policy
 
 Core: ANSI CL + ASDF + UIOP.  
-Web (optional): Hunchentoot via Quicklisp.  
+Web (optional): Hunchentoot.  
 Tests: FiveAM.

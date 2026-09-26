@@ -156,6 +156,20 @@
       <input id=\"fact\" placeholder='[\"toolchain\",\"ready\"]' style=\"width:100%\"/>
       <button type=\"button\" class=\"secondary\" id=\"btnFact\">Add fact</button>
     </section>
+    <section class=\"panel stack\">
+      <h2>Autonomy</h2>
+      <label for=\"authority\">Authority</label>
+      <select id=\"authority\">
+        <option value=\"simulate\" selected>simulate (safe)</option>
+        <option value=\"read\">read</option>
+        <option value=\"execute\">execute</option>
+      </select>
+      <div class=\"row\">
+        <button type=\"button\" id=\"btnAutoStep\">Step</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnAutoLoop\">Loop</button>
+      </div>
+      <p class=\"status\" style=\"margin:0\">Default is simulate — never unattended OS destruction.</p>
+    </section>
   </aside>
   <section class=\"stack\">
     <div class=\"grid2\">
@@ -166,6 +180,7 @@
       <div class=\"panel\"><h2>Events</h2><pre id=\"events\">[]</pre></div>
       <div class=\"panel\"><h2>Plan</h2><pre id=\"plan\">null</pre></div>
     </div>
+    <div class=\"panel\"><h2>Autonomy</h2><pre id=\"autonomy\">null</pre></div>
     <div class=\"panel\"><h2>Explain</h2><pre id=\"explain\">(no trace)</pre></div>
   </section>
 </main>
@@ -198,6 +213,7 @@ async function refresh() {
   show('goalsOut', (await api('GET', '/api/goals')).goals);
   show('events', (await api('GET', '/api/events')).events);
   show('plan', (await api('GET', '/api/plan')).plan);
+  show('autonomy', (await api('GET', '/api/autonomy')));
   const ex = await api('GET', '/api/explain');
   show('explain', ex.text || '(no trace)');
 }
@@ -234,6 +250,19 @@ document.getElementById('btnFact').onclick = () => {
   try { fact = parseInput('fact'); } catch (e) { alert(e.message); return; }
   api('POST', '/api/add-fact', { fact }).then(refresh).catch(e => alert(e.message));
 };
+document.getElementById('btnAutoStep').onclick = () =>
+  api('POST', '/api/autonomy/step', {
+    authority: document.getElementById('authority').value,
+    auto_confirm: false,
+    adapters: false
+  }).then(refresh).catch(e => alert(e.message));
+document.getElementById('btnAutoLoop').onclick = () =>
+  api('POST', '/api/autonomy/loop', {
+    authority: document.getElementById('authority').value,
+    max_steps: 4,
+    auto_confirm: false,
+    adapters: false
+  }).then(refresh).catch(e => alert(e.message));
 refresh().catch(e => {
   document.getElementById('statusLine').textContent = e.message;
   document.getElementById('statusLine').classList.add('err');
