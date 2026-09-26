@@ -5,6 +5,24 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.9.0] — 2026-09-26
+
+### Added
+
+- Phase 9 domain packs (knowledge/operators/actions without core changes):
+  `software`, `documents`, `hardware`, `music`, `geometry`.
+- `gp-load-domain` / `gp-domains` registry.
+- Demo planners per domain; documents/software can hook Phase-8 adapters.
+- FiveAM `domains-suite`.
+
+### Changed
+
+- Version bump to 0.9.0.
+
+### Not yet
+
+- Event system (Phase 10), web UI (Phase 11).
+
 ## [0.8.0] — 2026-09-26
 
 ### Added

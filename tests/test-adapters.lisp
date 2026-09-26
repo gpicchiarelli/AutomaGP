@@ -28,14 +28,9 @@
       (run-program '("echo" "automa-gp") :output :string)
     (is (eql 0 code))
     (is (search "automa-gp" out)))
-  ;; Current image PID must be running (kill -0).
-  (is-true (process-running-p
-            #+sbcl (sb-posix:getpid)
-            #-sbcl (parse-integer
-                    (string-trim '(#\Space #\Newline #\Return)
-                                 (nth-value 0
-                                  (run-program '("sh" "-c" "echo $$")
-                                               :output :string))))))
+  ;; Current image PID must be running (kill -0). Name lookup via pgrep
+  ;; is not used here: the process title is not a stable "sbcl".
+  (is-true (process-running-p (current-process-id)))
   (is-false (process-running-p "automa-gp-no-such-process-xyzzy")))
 
 (test macos-dispatch-safe

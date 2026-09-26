@@ -28,6 +28,11 @@ Returns (VALUES OUTPUT EXIT-CODE). OUTPUT may be a string when :OUTPUT :STRING."
       (declare (ignore err))
       (values out code))))
 
+(defun current-process-id ()
+  "PID of this Lisp image. SBCL only (the project target)."
+  #+sbcl (sb-unix:unix-getpid)
+  #-sbcl (error "CURRENT-PROCESS-ID is implemented for SBCL."))
+
 (defun process-running-p (name-or-pid)
   "Abstract: true if a process with PID (integer) or name (string/symbol) runs.
 Uses kill -0 for PIDs; for names tries `pgrep -x` then `pgrep -f`.

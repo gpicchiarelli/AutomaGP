@@ -1,3 +1,7 @@
-;;;; domains/hardware/package.lisp — NOT YET IMPLEMENTED (Phase 9)
+;;;; domains/hardware/package.lisp
 
-(in-package #:cl-user)
+(defpackage #:automa-gp/domain/hardware
+  (:use #:cl #:automa-gp)
+  (:export #:install-hardware-domain
+           #:*hardware-domain-name*
+           #:hardware-demo-plan))

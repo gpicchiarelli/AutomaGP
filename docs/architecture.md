@@ -1,47 +1,29 @@
-# Architecture (Phases 1–8)
+# Architecture (Phases 1–9)
 
-AUTOMA GP keeps OS/domain details out of the symbolic core. MEA and the planner
-never call macOS APIs. Side effects go through **adapters**, only on EXECUTE
-when explicitly enabled.
+Domain packs add knowledge **outside** the symbolic core. MEA/planner/executor
+are unchanged; domains only `register-operator!` / `register-rule!` / facts.
 
 ```text
-interface/     REPL
+interface/     REPL (gp-load-domain)
     ↓
-adapters/      filesystem · processes · macos   ← OS boundary
+domains/       software · documents · hardware · music · geometry
     ↓
-memory/        working · knowledge · episodic · procedural · persistence
+adapters/      filesystem · processes · macos
     ↓
-core/          … mea → planner → conditions → executor
+memory/        …
+    ↓
+core/          mea → planner → executor  (domain-agnostic)
 ```
 
-## Modes
+## Domains (Phase 9 / PROMPT §12)
 
-`READ` → `PLAN` → `SIMULATE` → `EXECUTE`
+Each pack exports `install-*-domain` and a `*-demo-plan`. Optional
+`:external` meta reuses Phase-8 adapters (never required for planning).
 
-- **SIMULATE:** symbolic only; never invokes adapters.
-- **EXECUTE:** symbolic fact updates always; adapters run only if
-  `*invoke-adapters*` / `(gp-run :adapters t)`.
+## Adapters (Phase 8)
 
-## Adapters (Phase 8 / PROMPT §13)
-
-| Module | Role |
-|--------|------|
-| `filesystem.lisp` | `file-exists-p`, `directory-files`, read/write helpers |
-| `processes.lisp` | `run-program`, `process-running-p` |
-| `macos.lisp` | dispatch, `macos-p`, hostname/uname, optional `open` |
-
-Operators may carry:
-
-```lisp
-:meta (:external (:adapter :filesystem :op :write-string
-                  :args (:path #P"/tmp/x" :content "…")))
-```
-
-## Memory (Phase 7) & trace (Phase 6)
-
-Unchanged: multilevel memory + separate persistence; deliberative traces for
-`gp-explain`.
+Opt-in on EXECUTE via `*invoke-adapters*` / `(gp-run :adapters t)`.
 
 ## Dependency policy
 
-ANSI CL + ASDF + UIOP. Tests: FiveAM (adapter tests use temp directories only).
+ANSI CL + ASDF + UIOP. Tests: FiveAM.

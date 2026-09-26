@@ -1,3 +1,7 @@
-;;;; domains/music/package.lisp — NOT YET IMPLEMENTED (Phase 9)
+;;;; domains/music/package.lisp
 
-(in-package #:cl-user)
+(defpackage #:automa-gp/domain/music
+  (:use #:cl #:automa-gp)
+  (:export #:install-music-domain
+           #:*music-domain-name*
+           #:music-demo-plan))

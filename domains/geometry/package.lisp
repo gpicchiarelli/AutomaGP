@@ -1,3 +1,7 @@
-;;;; domains/geometry/package.lisp — NOT YET IMPLEMENTED (Phase 9)
+;;;; domains/geometry/package.lisp
 
-(in-package #:cl-user)
+(defpackage #:automa-gp/domain/geometry
+  (:use #:cl #:automa-gp)
+  (:export #:install-geometry-domain
+           #:*geometry-domain-name*
+           #:geometry-demo-plan))

@@ -1,3 +1,7 @@
-;;;; domains/documents/package.lisp — NOT YET IMPLEMENTED (Phase 9)
+;;;; domains/documents/package.lisp
 
-(in-package #:cl-user)
+(defpackage #:automa-gp/domain/documents
+  (:use #:cl #:automa-gp)
+  (:export #:install-documents-domain
+           #:*documents-domain-name*
+           #:documents-demo-plan))

@@ -21,8 +21,7 @@ system. Do not skip ahead with fake capabilities.
 
 ## Phase 5 — Conditions & failure handling
 
-- [x] Idiomatic CL condition hierarchy (`gp-condition` / `gp-error`)
-- [x] Restarts + deliberative failure strategy
+- [x] Conditions, restarts, deliberative strategy
 
 ## Phase 6 — Explanation & introspection
 
@@ -30,19 +29,20 @@ system. Do not skip ahead with fake capabilities.
 
 ## Phase 7 — Memory & persistence
 
-- [x] Working / knowledge / episodic / procedural memory
-- [x] Persistence as a separate service
+- [x] Multilevel memory + separate persistence service
 
-## Phase 8 — macOS adapters *(current)*
+## Phase 8 — macOS adapters
 
-- [x] `adapters/macos.lisp`, `filesystem.lisp`, `processes.lisp`
-- [x] Abstract ops: `run-program`, `file-exists-p`, `directory-files`, `process-running-p`
-- [x] EXECUTE may invoke `:external` specs when `*invoke-adapters*` / `:adapters t`
-- [x] MEA/planner remain OS-free; symbolic-only path default
+- [x] filesystem / processes / macos adapters (opt-in on EXECUTE)
 
-## Phase 9 — Domain adapters
+## Phase 9 — Domain adapters *(current)*
 
-- [ ] software, documents, hardware, music, geometry
+- [x] `domains/software` — repo → compile → test
+- [x] `domains/documents` — ingest → classify → archive (pipeline-aligned)
+- [x] `domains/hardware` — power → connect → configure
+- [x] `domains/music` — interface → MIDI route → session
+- [x] `domains/geometry` — points → segments → triangle
+- [x] `gp-load-domain` registry (no core MEA changes)
 
 ## Phase 10 — Event system
 

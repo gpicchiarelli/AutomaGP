@@ -415,6 +415,7 @@
    #:adapter-delete-file
    #:filesystem-dispatch
    #:run-program
+   #:current-process-id
    #:process-running-p
    #:processes-dispatch
    #:macos-p
@@ -427,6 +428,10 @@
    #:maybe-invoke-external!
    #:with-adapters-enabled
    #:gp-adapters
-   ;; deferred Phase 9+
+   ;; domain packs (Phase 9)
+   #:*known-domains*
+   #:gp-load-domain
+   #:gp-domains
+   ;; deferred Phase 10+
    #:not-yet-implemented
    #:not-yet-implemented-error))

@@ -1,7 +1,6 @@
 ;;;; automa-gp.asd — AUTOMA GP ASDF system definition
 ;;;;
-;;;; Phases 1–8 load through adapters + memory + REPL.
-;;;; Later-phase domain packs exist as scaffolds and are NOT components yet.
+;;;; Phases 1–9 load through adapters + domains + memory + REPL.
 
 (defsystem "automa-gp"
   :description "AUTOMA GP — context-centric symbolic deliberative automaton"
@@ -42,6 +41,29 @@
                              (:file "episodic")
                              (:file "procedural")
                              (:file "persistence")))
+               (:module "domains"
+                :serial t
+                :components ((:module "software"
+                              :serial t
+                              :components ((:file "package")
+                                           (:file "domain")))
+                             (:module "documents"
+                              :serial t
+                              :components ((:file "package")
+                                           (:file "domain")))
+                             (:module "hardware"
+                              :serial t
+                              :components ((:file "package")
+                                           (:file "domain")))
+                             (:module "music"
+                              :serial t
+                              :components ((:file "package")
+                                           (:file "domain")))
+                             (:module "geometry"
+                              :serial t
+                              :components ((:file "package")
+                                           (:file "domain")))
+                             (:file "registry")))
                (:module "interface"
                 :serial t
                 :components ((:file "repl"))))
@@ -76,6 +98,7 @@
                              (:file "test-memory")
                              (:file "test-persistence")
                              (:file "test-adapters")
+                             (:file "test-domains")
                              (:file "test-repl"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))

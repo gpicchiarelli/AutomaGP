@@ -10,54 +10,52 @@ CONTEXT → REPRESENT → REASON → PLAN → ACT → OBSERVE → UPDATE
 Spec: [`docs/PROMPT.md`](docs/PROMPT.md) · Architecture:
 [`docs/architecture.md`](docs/architecture.md) · Roadmap: [`ROADMAP.md`](ROADMAP.md).
 
-## Status (Phase 8 / v0.8.0)
+## Status (Phase 9 / v0.9.0)
 
-Phases 1–7 plus **OS adapters** (filesystem / processes / macOS) kept outside
-the symbolic core. EXECUTE is symbolic by default; opt in with `:adapters t`.
+Phases 1–8 plus **domain packs** that register knowledge and operators without
+changing the MEA/planner core.
 
-**Not yet:** domain packs, events, web UI.
+**Not yet:** event system, web UI, full autonomy loop.
 
-## Adapters (REPL)
+## Domain packs (REPL)
 
 ```lisp
 (ql:quickload :automa-gp)
 (in-package :automa-gp)
 
-;; Abstract primitives (UIOP-backed) — usable directly for inspection:
-(file-exists-p "/tmp")
-(directory-files "/tmp" "*.txt")
-(run-program '("echo" "hi") :output :string)
-(process-running-p (uiop:getpid))
+(gp-reset)
+(gp-load-domain :software)
+(automa-gp/domain/software:software-demo-plan (gp-context) :project 'myapp)
+;; or:
+(gp-add-fact '(project myapp))
+(gp-plan :goals '((tests-ok myapp)))
+(gp-simulate)
 
-;; Bind an operator to a real side effect via :EXTERNAL meta:
-(gp-add-fact '(path-ready marker))
-(gp-add-operator
- (make-operator
-  :name 'write-marker
-  :preconditions '((path-ready ?name))
-  :add-list '((file-created ?name))
-  :meta (list :external
-              (list :adapter :filesystem
-                    :op :write-string
-                    :args (list :path "/tmp/automa-gp-marker.txt"
-                                :content "ok")))))
-(gp-plan :goals '((file-created marker)))
-(gp-simulate)              ; never touches the filesystem
-(gp-run :adapters t)       ; may write the file
+;; Documents (pipeline-shaped):
+(gp-reset)
+(automa-gp/domain/documents:documents-demo-plan
+ (gp-context) :source "note.txt" :class 'memo)
+
+;; Hardware / music / geometry:
+(automa-gp/domain/hardware:hardware-demo-plan (gp-context))
+(automa-gp/domain/music:music-demo-plan (gp-context))
+(automa-gp/domain/geometry:geometry-demo-plan (gp-context))
+
+(gp-domains)   ; => (SOFTWARE) etc.
 ```
 
-## Memory & explanation
+| Domain | Demo goal chain |
+|--------|-----------------|
+| software | fetch → compile → test |
+| documents | ingest → classify → archive |
+| hardware | power-on → connect → configure |
+| music | power interface → MIDI route → session |
+| geometry | define points → segments → triangle |
 
-```lisp
-(gp-remember-procedure :name 'connect-interface)
-(gp-save "/tmp/studio.agp")
-(gp-explain :plan)
-```
+## Adapters
 
-## Workbench examples
-
-- [`docs/tavolo-di-lavoro.md`](docs/tavolo-di-lavoro.md)
-- [`docs/framework-pipeline-contesto.md`](docs/framework-pipeline-contesto.md)
+EXECUTE is symbolic by default. `(gp-run :adapters t)` runs `:external` specs
+(e.g. software `compile-project` → `true`, documents archive → temp file write).
 
 ## Tests
 
