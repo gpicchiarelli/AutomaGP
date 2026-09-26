@@ -28,6 +28,7 @@
   (setf *current-context* (create-context :name 'default :mode :read))
   (setf *current-plan* nil)
   (setf *last-execution* nil)
+  (setf *deliberative-strategy* nil)
   *current-context*)
 
 (defun gp-context (&key name parent facts mode rules operators)
@@ -137,7 +138,8 @@ With :NAME (and optional keys): create/select a new current context."
 (defun gp-simulate (&key plan)
   "Simulate PLAN (default: last plan) without mutating the live context.
 Sets mode to :SIMULATE. Returns an EXECUTION-RESULT.
-Symbolic effects only — no adapters / macOS side effects."
+Step failures signal GP-ERROR with restarts; *DELIBERATIVE-STRATEGY* may
+auto-invoke SKIP/RETRY/ABORT/ASK. Symbolic effects only — no adapters."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
     (unless (plan-p p)
@@ -151,8 +153,9 @@ Symbolic effects only — no adapters / macOS side effects."
 (defun gp-run (&key plan (confirm nil confirm-p))
   "Execute PLAN (default: last plan) against live context facts.
 Sets mode to :EXECUTE. Returns an EXECUTION-RESULT.
-Mutates context facts symbolically only — no adapters.
-Irreversible/high-risk operators require :CONFIRM T (or *EXECUTION-CONFIRM*)."
+Step failures signal GP-ERROR with restarts (RETRY SKIP ABORT-EXECUTION
+USE-VALUE USE-ALTERNATIVE ASK-USER). Irreversible ops also offer CONFIRM.
+Mutates context facts symbolically only — no adapters."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
     (unless (plan-p p)
@@ -165,6 +168,15 @@ Irreversible/high-risk operators require :CONFIRM T (or *EXECUTION-CONFIRM*)."
 (defun gp-last-execution ()
   "Return the last EXECUTION-RESULT from GP-SIMULATE or GP-RUN."
   *last-execution*)
+
+(defun gp-failure-strategy (&optional policy &key (retry-limit 3))
+  "Get or set the session *DELIBERATIVE-STRATEGY*.
+With no args: return current strategy (or NIL).
+With POLICY (:SIGNAL :SKIP :RETRY :ABORT :ASK): install a fresh strategy."
+  (if policy
+      (setf *deliberative-strategy*
+            (make-strategy :policy policy :retry-limit retry-limit))
+      *deliberative-strategy*))
 
 (defun gp-mode (&optional mode)
   "Get or set the current context mode (:READ :PLAN :SIMULATE :EXECUTE)."
@@ -179,7 +191,7 @@ Irreversible/high-risk operators require :CONFIRM T (or *EXECUTION-CONFIRM*)."
   "Register an ACTION object on the current context."
   (register-action! (ensure-current-context) action))
 
-;;; Deferred Phase 5+ — honest signals
+;;; Deferred Phase 6+ — honest signals
 
 (defun gp-explain (&rest args)
   "Not yet implemented (Phase 6)."

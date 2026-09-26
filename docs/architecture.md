@@ -1,63 +1,54 @@
-# Architecture (Phases 1–4)
+# Architecture (Phases 1–5)
 
-AUTOMA GP is layered so the **symbolic core** never embeds OS or domain
-details. The planner and executor work on abstract operators and fact states.
+AUTOMA GP keeps OS/domain details out of the symbolic core. Failures use the
+Common Lisp **condition system** with established **restarts**, not bare
+catch-all handlers.
 
 ```text
-interface/          REPL (SLIME)
+interface/     REPL
     ↓
-core/               Context … operators, MEA, planner, executor
-    ↓ (later)
-memory/  domains/  adapters/
+core/          … planner → conditions → executor
 ```
 
 ## Modes
 
-| Mode | Role |
-|------|------|
-| `READ` | Observe / query |
-| `PLAN` | Build plans (`gp-plan`) — no fact mutation |
-| `SIMULATE` | Apply effects to a copy (`gp-simulate`) — live context unchanged |
-| `EXECUTE` | Apply effects to live context facts (`gp-run`) — still no adapters |
+`READ` → `PLAN` → `SIMULATE` → `EXECUTE` (symbolic facts through Phase 5;
+adapters arrive in Phase 8).
 
-## State kinds
+## Conditions & restarts (Phase 5)
 
-| Kind | Meaning |
-|------|---------|
-| `CURRENT` | Live / pre-run snapshot |
-| `SIMULATED` | Result of symbolic simulation |
-| `EXPECTED` | Plan's predicted final facts |
-| `OBSERVED` | Post-execute context facts (Phase 4: symbolic only) |
+| Condition | Typical cause |
+|-----------|----------------|
+| `precondition-failure` | Operator preconditions not held |
+| `confirmation-required` | Irreversible / high-risk execute |
+| `unknown-operator` | Plan step names a missing operator |
+| `action-failed` | General step failure |
 
-`execution-result` carries current, expected, final, and optional divergences
-(`compare-states` of expected vs final).
+| Restart | Effect |
+|---------|--------|
+| `:retry` | Re-enter the step |
+| `:skip` | Skip step; continue plan |
+| `:abort-execution` | Stop the plan |
+| `:use-value` | Supply replacement fact list |
+| `:use-alternative` | Retry with another operator |
+| `:ask-user` | Choose among the above (`*ask-user-fn*`) |
+| `:confirm` | Proceed past confirmation-required |
 
-## State transition
+### Deliberative strategy
 
-```text
-STATE A  +  OPERATOR (bindings)  →  STATE B
-```
+`*deliberative-strategy*` / `with-failure-strategy` / `gp-failure-strategy`
+select automatic policy: `:signal` (default for interactive), `:skip`,
+`:retry`, `:abort`, `:ask`. Plan runners bind a handler that applies the
+strategy, then defaults to `:abort-execution` when `*plan-runner-default-abort*`
+is true — so batch simulate/run still completes with a result object.
 
-Implemented as `transition-facts` / `transition-state` (add/delete lists,
-optional 3-element slot conflict retract). Same mechanism used by MEA
-planning, simulation, and execution.
+Strategy events are recorded and copied onto `execution-result`.
 
-## Executor honesty
+## State transition & executor
 
-- **Simulate** never mutates the live context.
-- **Execute** updates `context-facts` only.
-- No filesystem, process, or macOS calls (Phase 8).
-- Irreversible or `:high`/`:critical` risk operators require `:confirm t`
-  on `gp-run` (or a non-nil `*execution-confirm*` function).
-
-## Module map (Phase 4 additions)
-
-| Module | Role |
-|--------|------|
-| `core/state.lisp` | State object, kinds, transition |
-| `core/executor.lisp` | Simulate / execute plans and operators |
-| `interface/repl.lisp` | `gp-simulate`, `gp-run`, `gp-last-execution` |
+Unchanged from Phase 4: symbolic `transition-facts`; simulate does not mutate
+live context; execute updates context facts only.
 
 ## Dependency policy
 
-ANSI CL + ASDF + UIOP. Tests use FiveAM via Quicklisp.
+ANSI CL + ASDF + UIOP. Tests: FiveAM.

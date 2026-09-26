@@ -161,6 +161,44 @@
    #:plan-cost
    #:normalize-planning-goals
    #:*current-plan*
+   ;; conditions / restarts (Phase 5)
+   #:gp-condition
+   #:gp-error
+   #:gp-condition-operator
+   #:gp-condition-bindings
+   #:gp-condition-step
+   #:gp-condition-mode
+   #:gp-condition-context
+   #:precondition-failure
+   #:precondition-failure-missing
+   #:precondition-failure-operator
+   #:precondition-failure-bindings
+   #:confirmation-required
+   #:confirmation-required-reason
+   #:confirmation-required-operator
+   #:confirmation-required-bindings
+   #:unknown-operator
+   #:unknown-operator-name
+   #:action-failed
+   #:action-failed-reason
+   #:deliberative-strategy
+   #:make-strategy
+   #:strategy-policy
+   #:strategy-retry-limit
+   #:strategy-retry-count
+   #:strategy-events
+   #:strategy-skipped
+   #:*deliberative-strategy*
+   #:*ask-user-fn*
+   #:*plan-runner-default-abort*
+   #:*gp-alternative-operator*
+   #:record-strategy-event
+   #:strategy-events-of
+   #:with-failure-strategy
+   #:maybe-invoke-strategy
+   #:plan-runner-condition-handler
+   #:call-with-gp-restarts
+   #:make-step-result
    ;; executor / simulation
    #:execution-result
    #:execution-result-p
@@ -172,12 +210,10 @@
    #:execution-final-state
    #:execution-divergences
    #:execution-plan
+   #:execution-strategy-events
    #:execution-meta
    #:*last-execution*
    #:*execution-confirm*
-   #:precondition-failure
-   #:confirmation-required
-   #:unknown-operator
    #:expected-state-from-plan
    #:operator-needs-confirmation-p
    #:simulate-operator
@@ -209,9 +245,10 @@
    #:gp-simulate
    #:gp-run
    #:gp-last-execution
+   #:gp-failure-strategy
    #:gp-mode
    #:gp-register-action
-   ;; deferred Phase 5+
+   ;; deferred Phase 6+
    #:gp-explain
    #:not-yet-implemented
    #:not-yet-implemented-error))

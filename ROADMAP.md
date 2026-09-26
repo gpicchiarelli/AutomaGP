@@ -5,75 +5,58 @@ system. Do not skip ahead with fake capabilities.
 
 ## Phase 1 — Context foundation
 
-- [x] Context (create, query, modify, clone, compare; parent/child)
-- [x] State
-- [x] Facts (lists; `fact-p` / find with simple `?x`)
-- [x] Goals
-- [x] Actions (abstract model)
-- [x] Modes skeleton (`READ` / `PLAN` / `SIMULATE` / `EXECUTE`)
-- [x] Minimal honest REPL API
+- [x] Context, state, facts, goals, actions, modes, REPL
 
 ## Phase 2 — Pattern matching & knowledge queries
 
-- [x] Pattern matching (`match`, `match-all`, substitution)
-- [x] Unification (`unify`, occur-check)
-- [x] Rules (Horn-style; forward chaining)
-- [x] Queries (`gp-query`, backward chaining; `gp-infer`)
+- [x] Matcher, unification, rules, queries
 
 ## Phase 3 — Means-Ends Analysis & planning
 
-- [x] Operators (abstract; actions can be lifted)
-- [x] Means-Ends Analysis (GPS-style differences → operator → subgoals)
-- [x] Planner (`plan-for`, `plan-from-context`, `gp-plan`)
-- [x] Subgoals (unsatisfied preconditions)
+- [x] Operators, MEA, planner, subgoals, `gp-plan`
 
-## Phase 4 — Execution & simulation *(current)*
+## Phase 4 — Execution & simulation
 
-- [x] Executor (symbolic context-fact updates)
-- [x] State transition (`transition-state` / `transition-facts`)
-- [x] Simulation (`gp-simulate` — no live mutation)
-- [x] `gp-run` (live fact mutation; confirmation for irreversible/high-risk)
-- [x] CURRENT / SIMULATED / EXPECTED / OBSERVED state kinds
+- [x] Executor, state transition, `gp-simulate`, `gp-run`
 
-## Phase 5 — Conditions & failure handling
+## Phase 5 — Conditions & failure handling *(current)*
 
-- [ ] Condition System usage (beyond current error conditions)
-- [ ] Restarts (`RETRY`, `SKIP`, `ABORT`, `USE-VALUE`, `ASK-USER`)
-- [ ] Failure handling strategy
+- [x] Idiomatic CL condition hierarchy (`gp-condition` / `gp-error`)
+- [x] Restarts: `:retry` `:skip` `:abort-execution` `:use-value` `:ask-user` `:use-alternative` (+ `:confirm`)
+- [x] Deliberative strategy (`*deliberative-strategy*`, `with-failure-strategy`, `gp-failure-strategy`)
+- [x] Integration with simulate/execute plan runners via `handler-bind` + restarts
 
 ## Phase 6 — Explanation & introspection
 
 - [ ] Explanation / deliberative trace
-- [ ] Introspection helpers (prefer native CL/SBCL)
+- [ ] `gp-explain`
+- [ ] Introspection helpers
 
 ## Phase 7 — Memory & persistence
 
 - [ ] Working / knowledge / episodic / procedural memory
-- [ ] Persistence service (separate from planner)
+- [ ] Persistence service
 
 ## Phase 8 — macOS adapters
 
-- [ ] `adapters/macos.lisp`, `filesystem.lisp`, `processes.lisp`
-- [ ] Abstract OS ops via UIOP / safe wrappers (core stays OS-free)
+- [ ] macOS / filesystem / processes adapters
 
 ## Phase 9 — Domain adapters
 
-- [ ] `domains/software`, `documents`, `hardware`, `music`, `geometry`
-- [ ] Domain knowledge and operators without touching the core planner
+- [ ] software, documents, hardware, music, geometry
 
 ## Phase 10 — Event system
 
 - [ ] Events bound to context
-- [ ] Goal-directed + event-driven behavior
 
 ## Phase 11 — Web interface
 
-- [ ] Thin UI over the symbolic core (REPL remains primary)
+- [ ] Thin UI over the symbolic core
 
 ## Phase 12 — Autonomous symbolic operation
 
-- [ ] Controlled autonomy: understand → goal → plan → authorize → act → observe → update
+- [ ] Controlled autonomy loop
 
 ---
 
-Priority order for all work: **correctness → clarity → testability → performance**.
+Priority: **correctness → clarity → testability → performance**.

@@ -1,9 +1,11 @@
-;;;; core/executor.lisp — symbolic simulation & execution (Phase 4)
+;;;; core/executor.lisp — symbolic simulation & execution (Phases 4–5)
 ;;;;
 ;;;; Applies operator effects to fact states. SIMULATE never mutates the live
 ;;;; context. EXECUTE updates context facts only — no macOS/adapters (Phase 8).
 ;;;;
-;;;; State kinds: CURRENT (live) → SIMULATED / EXPECTED / OBSERVED.
+;;;; Phase 5: step failures signal GP-ERROR with restarts (RETRY SKIP
+;;;; ABORT-EXECUTION USE-VALUE USE-ALTERNATIVE ASK-USER). Plan runners use
+;;;; HANDLER-BIND + deliberative strategy — not bare catch-all handlers.
 
 (in-package #:automa-gp)
 
@@ -13,29 +15,6 @@
 (defvar *execution-confirm* nil
   "Optional function (OPERATOR BINDINGS) → true to allow irreversible EXECUTE.
 If NIL, irreversible/high-risk steps require :CONFIRM T on GP-RUN.")
-
-(define-condition precondition-failure (error)
-  ((operator :initarg :operator :reader precondition-failure-operator)
-   (missing :initarg :missing :reader precondition-failure-missing)
-   (bindings :initarg :bindings :reader precondition-failure-bindings))
-  (:report (lambda (c stream)
-             (format stream "Preconditions not satisfied for ~A; missing ~S"
-                     (operator-name (precondition-failure-operator c))
-                     (precondition-failure-missing c)))))
-
-(define-condition confirmation-required (error)
-  ((operator :initarg :operator :reader confirmation-required-operator)
-   (bindings :initarg :bindings :reader confirmation-required-bindings)
-   (reason :initarg :reason :reader confirmation-required-reason))
-  (:report (lambda (c stream)
-             (format stream "Confirmation required to EXECUTE ~A (~A)"
-                     (operator-name (confirmation-required-operator c))
-                     (confirmation-required-reason c)))))
-
-(define-condition unknown-operator (error)
-  ((name :initarg :name :reader unknown-operator-name))
-  (:report (lambda (c stream)
-             (format stream "Unknown operator ~S" (unknown-operator-name c)))))
 
 (defclass execution-result ()
   ((mode
@@ -75,6 +54,11 @@ If NIL, irreversible/high-risk steps require :CONFIRM T on GP-RUN.")
     :initarg :plan
     :accessor execution-plan
     :initform nil)
+   (strategy-events
+    :initarg :strategy-events
+    :accessor execution-strategy-events
+    :initform nil
+    :documentation "Copy of deliberative strategy events from the run.")
    (meta
     :initarg :meta
     :accessor execution-meta
@@ -94,19 +78,27 @@ If NIL, irreversible/high-risk steps require :CONFIRM T on GP-RUN.")
   (or (not (operator-reversible operator))
       (member (operator-risk operator) '(:high :critical) :test #'eq)))
 
-(defun ensure-confirmed (operator bindings &key confirm)
-  "Signal CONFIRMATION-REQUIRED unless CONFIRM or *EXECUTION-CONFIRM* allows."
+(defun ensure-confirmed (operator bindings &key confirm mode context)
+  "Signal CONFIRMATION-REQUIRED with a CONFIRM restart unless already allowed."
   (when (operator-needs-confirmation-p operator)
     (let ((ok (or confirm
                   (and *execution-confirm*
                        (funcall *execution-confirm* operator bindings)))))
       (unless ok
-        (error 'confirmation-required
-               :operator operator
-               :bindings bindings
-               :reason (if (not (operator-reversible operator))
-                           :irreversible
-                           :high-risk))))))
+        (restart-case
+            (error 'confirmation-required
+                   :operator operator
+                   :bindings bindings
+                   :mode mode
+                   :context context
+                   :reason (if (not (operator-reversible operator))
+                               :irreversible
+                               :high-risk))
+          (:confirm ()
+            :report "Confirm and proceed with this operator"
+            (record-strategy-event :confirm
+                                   :operator (operator-name operator))
+            t))))))
 
 (defun check-operator-preconditions (facts operator bindings)
   "Return missing precondition facts, or NIL if all hold."
@@ -127,33 +119,83 @@ If NIL, irreversible/high-risk steps require :CONFIRM T on GP-RUN.")
       ((eq b *no-bindings*) *no-bindings*)
       (t b))))
 
-(defun make-step-result (operator bindings before after &key status missing)
-  (list :operator (operator-name operator)
-        :bindings (if (eq bindings *no-bindings*) nil bindings)
-        :status status
-        :missing missing
-        :before (copy-list before)
-        :after (copy-list after)))
+;;; --- Single-step core (signals conditions; no plan-level catch) ---
 
-;;; --- Simulation (no live mutation) ---
-
-(defun simulate-operator (facts operator bindings)
-  "Apply OPERATOR symbolically to FACTS.
-Returns (VALUES NEW-FACTS STEP-RESULT). Signals PRECONDITION-FAILURE."
+(defun %apply-operator-checked (facts operator bindings &key mode context)
+  "Check preconditions and apply OPERATOR. Signals PRECONDITION-FAILURE."
   (let* ((b (extend-bindings-from-state
              (operator-preconditions operator) bindings facts))
          (missing (check-operator-preconditions facts operator b)))
     (when missing
       (error 'precondition-failure
-             :operator operator :missing missing :bindings b))
+             :operator operator
+             :missing missing
+             :bindings b
+             :mode mode
+             :context context))
     (let ((new (transition-facts facts operator b)))
-      (values new (make-step-result operator b facts new :status :ok)))))
+      (values new b))))
+
+(defun simulate-operator (facts operator bindings &key mode context)
+  "Apply OPERATOR symbolically to FACTS.
+Returns (VALUES NEW-FACTS STEP-RESULT). Signals GP-ERROR on failure."
+  (multiple-value-bind (new b)
+      (%apply-operator-checked facts operator bindings
+                               :mode (or mode :simulate)
+                               :context context)
+    (values new (make-step-result operator b facts new :status :ok))))
+
+(defun execute-operator! (context operator bindings &key confirm)
+  "EXECUTE OPERATOR against live CONTEXT facts (symbolic only).
+Returns (VALUES NEW-FACTS STEP-RESULT). Signals GP-ERROR on failure.
+Establishes CONFIRM restart for irreversible ops when confirmation needed."
+  (ensure-confirmed operator bindings
+                    :confirm confirm
+                    :mode :execute
+                    :context context)
+  (let ((facts (context-all-facts context)))
+    (multiple-value-bind (new b)
+        (%apply-operator-checked facts operator bindings
+                                 :mode :execute
+                                 :context context)
+      (commit-facts-to-context! context new)
+      (values new (make-step-result operator b facts new :status :executed)))))
+
+(defun commit-facts-to-context! (context facts)
+  "Set CONTEXT local facts to FACTS (Phase-4: write full visible set locally)."
+  (setf (context-facts context) (copy-list facts))
+  context)
+
+(defun alternatives-for-step (step operators)
+  "Other operators that achieve the step's goal (excluding the planned one)."
+  (let* ((goal (getf step :goal))
+         (planned (getf step :operator)))
+    (when (and goal operators)
+      (loop for pair in (operators-for-goal goal operators)
+            for op = (car pair)
+            unless (equal (operator-name op) planned)
+              collect op))))
+
+(defun run-step-with-restarts (thunk &key operator bindings alternatives
+                                       mode context step facts)
+  "Wrap THUNK with GP restarts and return (VALUES FACTS RESULT FLAG)."
+  (call-with-gp-restarts
+   thunk
+   :operator operator
+   :bindings bindings
+   :alternatives alternatives
+   :mode mode
+   :context context
+   :step step
+   :facts-on-skip facts))
+
+;;; --- Plan runners ---
 
 (defun simulate-plan (plan &key context operators
                              (initial-facts nil initial-p))
   "Simulate PLAN steps without mutating any context.
-Returns an EXECUTION-RESULT with mode :SIMULATE.
-Operator lookup uses CONTEXT and/or OPERATORS."
+Each step establishes recovery restarts; *DELIBERATIVE-STRATEGY* / default
+abort handler decide automatic recovery."
   (unless (plan-p plan)
     (error "SIMULATE-PLAN requires a PLAN, got ~S" plan))
   (let* ((ops (or operators
@@ -165,27 +207,47 @@ Operator lookup uses CONTEXT and/or OPERATORS."
          (current (make-state facts :kind :current :source :simulate))
          (expected (expected-state-from-plan plan))
          (step-results nil)
-         (ok t))
-    (dolist (step (plan-steps plan))
-      (handler-case
-          (let* ((op (resolve-operator (getf step :operator)
-                                       :context context
-                                       :operators ops))
-                 (b (bindings-from-step step)))
-            (multiple-value-bind (new result)
-                (simulate-operator facts op b)
-              (setf facts new)
-              (push result step-results)))
-        (precondition-failure (c)
-          (setf ok nil)
-          (push (make-step-result
-                 (precondition-failure-operator c)
-                 (precondition-failure-bindings c)
-                 facts facts
-                 :status :precondition-failure
-                 :missing (precondition-failure-missing c))
-                step-results)
-          (return))))
+         (ok t)
+         (aborted nil))
+    (handler-bind ((gp-error #'plan-runner-condition-handler))
+      (dolist (step (plan-steps plan))
+        (let* ((op0 (resolve-operator (getf step :operator)
+                                      :context context
+                                      :operators ops))
+               (b0 (bindings-from-step step))
+               (alts (alternatives-for-step step ops)))
+          (multiple-value-bind (new result flag)
+              (run-step-with-restarts
+               (lambda ()
+                 (let ((op (or *gp-alternative-operator* op0)))
+                   (simulate-operator facts op b0
+                                      :mode :simulate
+                                      :context context)))
+               :operator op0
+               :bindings b0
+               :alternatives alts
+               :mode :simulate
+               :context context
+               :step step
+               :facts facts)
+            (setf facts (or new facts))
+            (push result step-results)
+            (when (eq flag :abort)
+              (setf ok nil aborted t)
+              (return))
+            (when (and (null flag)
+                       (not (member (getf result :status)
+                                    '(:ok :skipped :use-value :executed))))
+              (setf ok nil)
+              (return))
+            (when (eq flag :skip)
+              ;; continue with unchanged success expectation softened
+              nil)))))
+    (when aborted (setf ok nil))
+    ;; If last step aborted/failed without completing goals, mark failure
+    (when (and expected ok)
+      (unless (null (differences facts (plan-goals plan)))
+        (setf ok nil)))
     (let* ((final (make-state facts :kind :simulated :source :simulate))
            (div (when (and expected ok)
                   (compare-states expected final))))
@@ -198,58 +260,52 @@ Operator lookup uses CONTEXT and/or OPERATORS."
                      :final-state final
                      :divergences div
                      :plan plan
-                     :meta '(:note "symbolic simulation; no adapters")))))
-
-;;; --- Execution (mutates live context facts) ---
-
-(defun commit-facts-to-context! (context facts)
-  "Set CONTEXT local facts to FACTS (Phase-4: write full visible set locally)."
-  (setf (context-facts context) (copy-list facts))
-  context)
-
-(defun execute-operator! (context operator bindings &key confirm)
-  "EXECUTE OPERATOR against live CONTEXT facts (symbolic only).
-Returns (VALUES NEW-FACTS STEP-RESULT)."
-  (ensure-confirmed operator bindings :confirm confirm)
-  (let* ((facts (context-all-facts context))
-         (b (extend-bindings-from-state
-             (operator-preconditions operator) bindings facts))
-         (missing (check-operator-preconditions facts operator b)))
-    (when missing
-      (error 'precondition-failure
-             :operator operator :missing missing :bindings b))
-    (let ((new (transition-facts facts operator b)))
-      (commit-facts-to-context! context new)
-      (values new (make-step-result operator b facts new :status :executed)))))
+                     :strategy-events (strategy-events-of)
+                     :meta '(:note "symbolic simulation; restarts available; no adapters")))))
 
 (defun execute-plan! (context plan &key confirm)
   "EXECUTE PLAN steps against live CONTEXT. Mutates context facts.
-Returns an EXECUTION-RESULT with mode :EXECUTE and OBSERVED final state."
+Each step establishes recovery restarts; strategy may alter deliberative policy."
   (unless (plan-p plan)
     (error "EXECUTE-PLAN! requires a PLAN, got ~S" plan))
-  (let* ((current (state-from-context context :kind :current))
+  (let* ((ops (context-planning-operators context))
+         (current (state-from-context context :kind :current))
          (expected (expected-state-from-plan plan))
          (step-results nil)
          (ok t)
+         (aborted nil)
          (facts (context-all-facts context)))
-    (dolist (step (plan-steps plan))
-      (let* ((op (resolve-operator (getf step :operator) :context context))
-             (b (bindings-from-step step)))
-        (handler-case
-            (multiple-value-bind (new result)
-                (execute-operator! context op b :confirm confirm)
-              (setf facts new)
-              (push result step-results))
-          (precondition-failure (c)
-            (setf ok nil)
-            (push (make-step-result
-                   (precondition-failure-operator c)
-                   (precondition-failure-bindings c)
-                   facts facts
-                   :status :precondition-failure
-                   :missing (precondition-failure-missing c))
-                  step-results)
-            (return)))))
+    (handler-bind ((gp-error #'plan-runner-condition-handler))
+      (dolist (step (plan-steps plan))
+        (let* ((op0 (resolve-operator (getf step :operator) :context context))
+               (b0 (bindings-from-step step))
+               (alts (alternatives-for-step step ops)))
+          (multiple-value-bind (new result flag)
+              (run-step-with-restarts
+               (lambda ()
+                 (let ((op (or *gp-alternative-operator* op0)))
+                   (execute-operator! context op b0 :confirm confirm)))
+               :operator op0
+               :bindings b0
+               :alternatives alts
+               :mode :execute
+               :context context
+               :step step
+               :facts facts)
+            (setf facts (or new (context-all-facts context)))
+            (push result step-results)
+            (cond
+              ((eq flag :abort)
+               (setf ok nil aborted t)
+               (return))
+              ((eq flag :skip) nil)
+              ((eq flag :use-value)
+               (commit-facts-to-context! context facts))
+              (t nil))))))
+    (when aborted (setf ok nil))
+    (when (and expected ok)
+      (unless (null (differences (context-all-facts context) (plan-goals plan)))
+        (setf ok nil)))
     (let* ((observed (state-from-context context :kind :observed))
            (div (when (and expected ok)
                   (compare-states expected observed))))
@@ -262,4 +318,5 @@ Returns an EXECUTION-RESULT with mode :EXECUTE and OBSERVED final state."
                      :final-state observed
                      :divergences div
                      :plan plan
-                     :meta '(:note "symbolic execute; context facts updated; no adapters")))))
+                     :strategy-events (strategy-events-of)
+                     :meta '(:note "symbolic execute; restarts available; no adapters")))))
