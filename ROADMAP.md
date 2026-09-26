@@ -56,11 +56,14 @@ system. Do not skip ahead with fake capabilities.
 - [x] JSON API façade in core (no chatbot / no second brain)
 - [x] REPL remains first-class; web optional
 
-## Phase 12 — Autonomous symbolic operation *(current)*
+## Phase 12 — Autonomous symbolic operation
 
 - [x] Controlled autonomy loop (`gp-autonomous-step` / `gp-autonomous-loop`)
 - [x] Explicit policy gates (:READ / :SIMULATE / :EXECUTE + confirm)
 - [x] Web console autonomy status / step / loop
+
+**Roadmap status:** phases 1–12 delivered as scaffold + working core (v0.12.0).
+Further work is deepening domains, adapters, and autonomy policy — not missing phases.
 
 ---
 
