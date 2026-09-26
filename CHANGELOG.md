@@ -13,12 +13,17 @@ and this project follows the incremental phases in `docs/PROMPT.md` §25.
   `finalize-trace`, session buffer (`*last-trace*`, `*trace-history*`).
 - MEA / planner / simulate / execute record context, goals, differences,
   selected operators, preconditions, actions, results, and execution steps.
-- `format-explanation` / `explain` / `gp-explain` derive text only from recorded
-  entries (PROMPT §17 shape).
+- `format-explanation` / `explain-trace` / `gp-explain` derive text only from
+  recorded entries (PROMPT §17 shape).
 - Introspection: `trace-of`, `last-trace`, `find-trace-entries`, `gp-last-trace`,
   `gp-trace-history`, `clear-trace-session`.
 - Workbench example: `docs/tavolo-di-lavoro.md`, `examples/tavolo-di-lavoro.lisp`.
-- FiveAM `explanation-suite` and REPL explain coverage.
+- Universal Dynamic Context Pipeline:
+  `docs/framework-pipeline-contesto.md`,
+  `examples/framework-pipeline-contesto.lisp` (Acquisition→Analysis→Output→Delivery).
+- FiveAM `explanation-suite`, `tavolo-suite`, `framework-pipeline-suite`.
+- `docs/PROMPT.md` §31 pointer to the workbench framework (does not replace the
+  master architecture).
 
 ### Changed
 

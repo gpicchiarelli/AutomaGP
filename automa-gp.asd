@@ -60,6 +60,7 @@
                              (:file "test-conditions")
                              (:file "test-explanation")
                              (:file "test-tavolo")
+                             (:file "test-framework-pipeline")
                              (:file "test-repl"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))

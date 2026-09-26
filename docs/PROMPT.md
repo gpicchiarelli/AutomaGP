@@ -1212,3 +1212,21 @@ Il principio architetturale fondamentale è:
 AUTOMA GP deve essere prima di tutto un **ambiente simbolico operativo basato sul contesto**, non un semplice programma e non un semplice assistente conversazionale.
 
 Questa versione rende **CONTEXT** l'astrazione centrale: GP non “gestisce il mondo”, ma entra in un contesto, ne costruisce una rappresentazione simbolica e opera al suo interno.
+
+---
+
+### 31. FRAMEWORK UNIVERSALE DI TAVOLO DI LAVORO (riferimento)
+
+Questo documento (`docs/PROMPT.md`) resta la **specifica architetturale** del sistema deliberativo. Non è sostituito da modelli di dominio.
+
+Per i **tavoli di lavoro** (workbench) AutomaGP può istanziare il modello universale
+**Acquisizione → Analisi → Output → Invio** descritto in:
+
+- [`docs/framework-pipeline-contesto.md`](framework-pipeline-contesto.md) — Framework di Pipeline a Contesto Dinamico
+- [`examples/framework-pipeline-contesto.lisp`](../examples/framework-pipeline-contesto.lisp) — forma REPL caricabile
+
+Esempio concreto (operatori non generalizzati):
+[`docs/tavolo-di-lavoro.md`](tavolo-di-lavoro.md).
+
+Gli operatori di quel framework restano **simbolici** finché non esistono adapter
+di dominio; il nucleo MEA/planner/executor non cambia.

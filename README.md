@@ -32,14 +32,23 @@ narratives).
 (gp-last-trace)             ; raw deliberative-trace object
 ```
 
-## Workbench example
+## Workbench examples
 
 Italian walkthrough of a symbolic “tavolo di lavoro” (plan → simulate → run):
-[`docs/tavolo-di-lavoro.md`](docs/tavolo-di-lavoro.md). Loadable companion:
+[`docs/tavolo-di-lavoro.md`](docs/tavolo-di-lavoro.md) ·
+[`examples/tavolo-di-lavoro.lisp`](examples/tavolo-di-lavoro.lisp).
+
+Universal **Dynamic Context Pipeline** (Acquisition → Analysis → Output → Delivery):
+[`docs/framework-pipeline-contesto.md`](docs/framework-pipeline-contesto.md) ·
+[`examples/framework-pipeline-contesto.lisp`](examples/framework-pipeline-contesto.lisp).
 
 ```lisp
 (ql:quickload :automa-gp)
 (load "examples/tavolo-di-lavoro.lisp")
+(gp-explain :plan)
+
+;; Or the generalized operator set (github → manager PDF):
+(load "examples/framework-pipeline-contesto.lisp")
 (gp-explain :plan)
 ```
 
