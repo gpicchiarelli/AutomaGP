@@ -2,5 +2,5 @@
 
 (in-package #:automa-gp)
 
-(defparameter *version* "0.7.0"
-  "AUTOMA GP version (Phase 7: multilevel memory & persistence).")
+(defparameter *version* "0.8.0"
+  "AUTOMA GP version (Phase 8: macOS / filesystem / process adapters).")

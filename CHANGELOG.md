@@ -5,6 +5,28 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.8.0] — 2026-09-26
+
+### Added
+
+- Phase 8 OS adapters (separated from symbolic core):
+  `adapters/filesystem.lisp`, `adapters/processes.lisp`, `adapters/macos.lisp`.
+- Abstract primitives via UIOP: `file-exists-p`, `directory-files`, `run-program`,
+  `process-running-p`, plus safe helpers for temp-file I/O.
+- Operator `:external` meta dispatch on EXECUTE when `*invoke-adapters*` /
+  `(gp-run :adapters t)` / `gp-adapters`.
+- SIMULATE never invokes adapters; default EXECUTE remains symbolic-only.
+- FiveAM `adapters-suite` (temp directories only).
+
+### Changed
+
+- Version bump to 0.8.0.
+
+### Not yet
+
+- Full domain packs (Phase 9).
+- Privileged macOS automation beyond thin `open` / hostname helpers.
+
 ## [0.7.0] — 2026-09-26
 
 ### Added

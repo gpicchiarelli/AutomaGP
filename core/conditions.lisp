@@ -73,11 +73,13 @@
 ;;; Step result helper (shared by executor)
 ;;; ---------------------------------------------------------------------------
 
-(defun make-step-result (operator bindings before after &key status missing)
+(defun make-step-result (operator bindings before after &key status missing
+                                                         external)
   (list :operator (gp-operator-name operator)
         :bindings (if (eq bindings *no-bindings*) nil bindings)
         :status status
         :missing missing
+        :external external
         :before (copy-list before)
         :after (copy-list after)))
 

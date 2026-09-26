@@ -1,8 +1,12 @@
-# Contributing to AUTOMA GP
+# Contribuire a AUTOMA GP
 
-AUTOMA GP is a **context-centric symbolic deliberative automaton** in Common
-Lisp (SBCL / macOS). It is not a chatbot. Contributions should respect the
-master prompt in `docs/PROMPT.md` and the incremental phases in `ROADMAP.md`.
+AUTOMA GP è un agente di IA simbolica per il proprio computer: software
+libero, senza scopo di lucro, in Common Lisp (SBCL). Contributi in italiano
+o in inglese sono benvenuti.
+
+A good change keeps that promise checkable. The system loads, the tests pass,
+and the docs stay faithful to what the code can do. The master prompt is
+`docs/PROMPT.md`. The phases are `ROADMAP.md`.
 
 ## Principles
 
@@ -10,9 +14,11 @@ master prompt in `docs/PROMPT.md` and the incremental phases in `ROADMAP.md`.
 2. Idiomatic ANSI Common Lisp. Prefer standard CL + UIOP. Do not invent
    Quicklisp libraries; verify availability before proposing a dependency.
 3. CLOS only where it earns its keep; simple data stays as lists/structs.
-4. Never claim unimplemented capabilities. Mark Phase 2+ work explicitly.
-5. No chatbot UI, no premature planner/MEA/web adapter work unless you are
-   advancing the matching roadmap phase with tests.
+4. Never claim unimplemented capabilities. Name the roadmap phase when the
+   work is still ahead.
+5. Do not add a conversational product surface, a planner shortcut, or an
+   operating-system adapter unless you are advancing that roadmap phase
+   with tests.
 
 ## Development loop
 

@@ -1,54 +1,47 @@
-# Architecture (Phases 1–7)
+# Architecture (Phases 1–8)
 
-AUTOMA GP keeps OS/domain details out of the symbolic core. Failures use the
-Common Lisp **condition system**. Significant decisions are recorded into a
-**deliberative trace**. Multilevel **memory** is in-process; **persistence**
-is a separate file service (never inside the planner).
+AUTOMA GP keeps OS/domain details out of the symbolic core. MEA and the planner
+never call macOS APIs. Side effects go through **adapters**, only on EXECUTE
+when explicitly enabled.
 
 ```text
-interface/     REPL (gp-explain, gp-save, gp-remember-procedure, …)
+interface/     REPL
     ↓
-memory/        working → knowledge → episodic → procedural → persistence
+adapters/      filesystem · processes · macos   ← OS boundary
     ↓
-core/          operators → explanation → mea → planner → conditions → executor
+memory/        working · knowledge · episodic · procedural · persistence
+    ↓
+core/          … mea → planner → conditions → executor
 ```
 
 ## Modes
 
-`READ` → `PLAN` → `SIMULATE` → `EXECUTE` (symbolic facts; adapters in Phase 8).
+`READ` → `PLAN` → `SIMULATE` → `EXECUTE`
 
-## Memory (Phase 7)
+- **SIMULATE:** symbolic only; never invokes adapters.
+- **EXECUTE:** symbolic fact updates always; adapters run only if
+  `*invoke-adapters*` / `(gp-run :adapters t)`.
 
-| Layer | Role |
-|-------|------|
-| Working | Snapshot of current context facts/goals/mode |
-| Knowledge | General facts/rules, import/export with contexts |
-| Episodic | Past plan/simulate/execute episodes (bounded) |
-| Procedural | Reusable procedures learned from successful plans |
+## Adapters (Phase 8 / PROMPT §13)
 
-Retrieval of procedures is **explicit** (`gp-find-procedure` /
-`procedure->plan`). The planner does not auto-rewrite from procedural memory.
+| Module | Role |
+|--------|------|
+| `filesystem.lisp` | `file-exists-p`, `directory-files`, read/write helpers |
+| `processes.lisp` | `run-program`, `process-running-p` |
+| `macos.lisp` | dispatch, `macos-p`, hostname/uname, optional `open` |
 
-## Persistence (Phase 7)
+Operators may carry:
 
-`save-snapshot` / `load-snapshot` write readable s-expression bundles
-(contexts, knowledge, episodic, procedural, meta). `persist-context` /
-`restore-context` for context-only files. UIOP + ANSI file I/O only.
+```lisp
+:meta (:external (:adapter :filesystem :op :write-string
+                  :args (:path #P"/tmp/x" :content "…")))
+```
 
-Honest limits: no parent/child graph in snapshots (local slots); no DB;
-no encryption.
+## Memory (Phase 7) & trace (Phase 6)
 
-## Deliberative trace (Phase 6)
-
-Recorded during MEA / plan / simulate / execute; `gp-explain` formats entries
-only. Session buffer — use persistence to save contexts/memory, not traces
-as a first-class store (traces remain attachable on plan/execution meta).
-
-## Conditions & restarts (Phase 5)
-
-Restarts: `:retry` `:skip` `:abort-execution` `:use-value` `:use-alternative`
-`:ask-user` `:confirm`. Strategy via `*deliberative-strategy*`.
+Unchanged: multilevel memory + separate persistence; deliberative traces for
+`gp-explain`.
 
 ## Dependency policy
 
-ANSI CL + ASDF + UIOP. Tests: FiveAM.
+ANSI CL + ASDF + UIOP. Tests: FiveAM (adapter tests use temp directories only).

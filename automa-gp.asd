@@ -1,7 +1,7 @@
 ;;;; automa-gp.asd — AUTOMA GP ASDF system definition
 ;;;;
-;;;; Phases 1–7 load through memory + persistence + REPL.
-;;;; Later-phase files exist as scaffolds and are NOT components yet.
+;;;; Phases 1–8 load through adapters + memory + REPL.
+;;;; Later-phase domain packs exist as scaffolds and are NOT components yet.
 
 (defsystem "automa-gp"
   :description "AUTOMA GP — context-centric symbolic deliberative automaton"
@@ -30,6 +30,11 @@
                              (:file "planner")
                              (:file "conditions")
                              (:file "executor")))
+               (:module "adapters"
+                :serial t
+                :components ((:file "filesystem")
+                             (:file "processes")
+                             (:file "macos")))
                (:module "memory"
                 :serial t
                 :components ((:file "working")
@@ -70,6 +75,7 @@
                              (:file "test-framework-pipeline")
                              (:file "test-memory")
                              (:file "test-persistence")
+                             (:file "test-adapters")
                              (:file "test-repl"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))

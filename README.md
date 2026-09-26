@@ -10,56 +10,54 @@ CONTEXT → REPRESENT → REASON → PLAN → ACT → OBSERVE → UPDATE
 Spec: [`docs/PROMPT.md`](docs/PROMPT.md) · Architecture:
 [`docs/architecture.md`](docs/architecture.md) · Roadmap: [`ROADMAP.md`](ROADMAP.md).
 
-## Status (Phase 7 / v0.7.0)
+## Status (Phase 8 / v0.8.0)
 
-Phases 1–6 plus **multilevel memory** (working / knowledge / episodic /
-procedural) and a separate **persistence** service for symbolic snapshots.
+Phases 1–7 plus **OS adapters** (filesystem / processes / macOS) kept outside
+the symbolic core. EXECUTE is symbolic by default; opt in with `:adapters t`.
 
-**Not yet:** macOS adapters, domains, events, web UI.
+**Not yet:** domain packs, events, web UI.
 
-## Memory & persistence (REPL)
+## Adapters (REPL)
 
 ```lisp
 (ql:quickload :automa-gp)
 (in-package :automa-gp)
 
-(gp-plan :goals '((connection interface-01 computer)))
-(gp-remember-procedure :name 'connect-iface)
-(gp-episodes)                 ; plan/simulate/execute history
-(gp-save "/tmp/studio.agp")   ; snapshot: context + memory
-(gp-reset)
-(gp-load "/tmp/studio.agp")   ; restore session pieces
+;; Abstract primitives (UIOP-backed) — usable directly for inspection:
+(file-exists-p "/tmp")
+(directory-files "/tmp" "*.txt")
+(run-program '("echo" "hi") :output :string)
+(process-running-p (uiop:getpid))
+
+;; Bind an operator to a real side effect via :EXTERNAL meta:
+(gp-add-fact '(path-ready marker))
+(gp-add-operator
+ (make-operator
+  :name 'write-marker
+  :preconditions '((path-ready ?name))
+  :add-list '((file-created ?name))
+  :meta (list :external
+              (list :adapter :filesystem
+                    :op :write-string
+                    :args (list :path "/tmp/automa-gp-marker.txt"
+                                :content "ok")))))
+(gp-plan :goals '((file-created marker)))
+(gp-simulate)              ; never touches the filesystem
+(gp-run :adapters t)       ; may write the file
 ```
 
-## Explanation (REPL)
+## Memory & explanation
 
 ```lisp
-(gp-plan :goals '((connection interface-01 computer)))
+(gp-remember-procedure :name 'connect-interface)
+(gp-save "/tmp/studio.agp")
 (gp-explain :plan)
-(gp-simulate)
-(gp-explain)
 ```
 
 ## Workbench examples
 
-Italian walkthrough of a symbolic “tavolo di lavoro” (plan → simulate → run):
-[`docs/tavolo-di-lavoro.md`](docs/tavolo-di-lavoro.md) ·
-[`examples/tavolo-di-lavoro.lisp`](examples/tavolo-di-lavoro.lisp).
-
-Universal **Dynamic Context Pipeline** (Acquisition → Analysis → Output → Delivery):
-[`docs/framework-pipeline-contesto.md`](docs/framework-pipeline-contesto.md) ·
-[`examples/framework-pipeline-contesto.lisp`](examples/framework-pipeline-contesto.lisp).
-
-## Failure handling (REPL)
-
-```lisp
-(gp-failure-strategy :skip)
-(gp-plan :goals '((connection interface-01 computer)))
-(gp-simulate)
-```
-
-Restarts: `:retry` `:skip` `:abort-execution` `:use-value` `:use-alternative`
-`:ask-user` (and `:confirm` for irreversible ops).
+- [`docs/tavolo-di-lavoro.md`](docs/tavolo-di-lavoro.md)
+- [`docs/framework-pipeline-contesto.md`](docs/framework-pipeline-contesto.md)
 
 ## Tests
 

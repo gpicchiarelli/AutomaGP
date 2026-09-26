@@ -22,25 +22,23 @@ system. Do not skip ahead with fake capabilities.
 ## Phase 5 — Conditions & failure handling
 
 - [x] Idiomatic CL condition hierarchy (`gp-condition` / `gp-error`)
-- [x] Restarts: `:retry` `:skip` `:abort-execution` `:use-value` `:ask-user` `:use-alternative` (+ `:confirm`)
-- [x] Deliberative strategy (`*deliberative-strategy*`, `with-failure-strategy`, `gp-failure-strategy`)
-- [x] Integration with simulate/execute plan runners via `handler-bind` + restarts
+- [x] Restarts + deliberative failure strategy
 
 ## Phase 6 — Explanation & introspection
 
-- [x] Explanation / deliberative trace (recorded during MEA / plan / simulate / execute)
-- [x] `gp-explain` (formats recorded entries only — no invented narratives)
-- [x] Introspection helpers (`trace-of`, `last-trace`, `find-trace-entries`, `gp-last-trace`, `gp-trace-history`)
+- [x] Deliberative trace + honest `gp-explain`
 
-## Phase 7 — Memory & persistence *(current)*
+## Phase 7 — Memory & persistence
 
 - [x] Working / knowledge / episodic / procedural memory
-- [x] Persistence as a separate service (`save-snapshot` / `load-snapshot`, not inside planner)
-- [x] Learn reusable procedures from successful plans (`gp-remember-procedure`)
+- [x] Persistence as a separate service
 
-## Phase 8 — macOS adapters
+## Phase 8 — macOS adapters *(current)*
 
-- [ ] macOS / filesystem / processes adapters
+- [x] `adapters/macos.lisp`, `filesystem.lisp`, `processes.lisp`
+- [x] Abstract ops: `run-program`, `file-exists-p`, `directory-files`, `process-running-p`
+- [x] EXECUTE may invoke `:external` specs when `*invoke-adapters*` / `:adapters t`
+- [x] MEA/planner remain OS-free; symbolic-only path default
 
 ## Phase 9 — Domain adapters
 

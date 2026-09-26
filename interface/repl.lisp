@@ -180,12 +180,14 @@ When REMEMBER is true (default), records an episode."
       (record-execution-episode! *last-execution*))
     *last-execution*))
 
-(defun gp-run (&key plan (confirm nil confirm-p) (remember t))
+(defun gp-run (&key plan (confirm nil confirm-p) (remember t)
+                 (adapters nil adapters-p))
   "Execute PLAN (default: last plan) against live context facts.
 Sets mode to :EXECUTE. Returns an EXECUTION-RESULT.
 Step failures signal GP-ERROR with restarts (RETRY SKIP ABORT-EXECUTION
 USE-VALUE USE-ALTERNATIVE ASK-USER). Irreversible ops also offer CONFIRM.
-Mutates context facts symbolically only — no adapters.
+Symbolic effects always apply. When ADAPTERS is true, operators with
+:EXTERNAL meta may invoke OS adapters (Phase 8). Default: adapters off.
 When REMEMBER is true (default), records an episode."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
@@ -193,11 +195,19 @@ When REMEMBER is true (default), records an episode."
       (error "GP-RUN requires a plan; call GP-PLAN first or pass :PLAN."))
     (setf (context-mode ctx) :execute)
     (setf *last-execution*
-          (execute-plan! ctx p :confirm (if confirm-p confirm nil)))
+          (execute-plan! ctx p
+                         :confirm (if confirm-p confirm nil)
+                         :adapters (if adapters-p adapters *invoke-adapters*)))
     (refresh-working-memory ctx)
     (when remember
       (record-execution-episode! *last-execution*))
     *last-execution*))
+
+(defun gp-adapters (&optional (enabled nil enabled-p))
+  "Get or set session *INVOKE-ADAPTERS* (default NIL = symbolic EXECUTE)."
+  (if enabled-p
+      (setf *invoke-adapters* (and enabled t))
+      *invoke-adapters*))
 
 (defun gp-last-execution ()
   "Return the last EXECUTION-RESULT from GP-SIMULATE or GP-RUN."

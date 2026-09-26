@@ -404,6 +404,29 @@
    #:gp-save-context
    #:gp-load-context
    #:gp-clear-memory
-   ;; deferred Phase 8+
+   ;; OS adapters (Phase 8)
+   #:*invoke-adapters*
+   #:file-exists-p
+   #:directory-files
+   #:adapter-ensure-directory
+   #:adapter-probe-file
+   #:adapter-read-file-string
+   #:adapter-write-file-string
+   #:adapter-delete-file
+   #:filesystem-dispatch
+   #:run-program
+   #:process-running-p
+   #:processes-dispatch
+   #:macos-p
+   #:adapter-hostname
+   #:adapter-uname
+   #:adapter-open
+   #:macos-dispatch
+   #:operator-external-spec
+   #:invoke-external-spec
+   #:maybe-invoke-external!
+   #:with-adapters-enabled
+   #:gp-adapters
+   ;; deferred Phase 9+
    #:not-yet-implemented
    #:not-yet-implemented-error))

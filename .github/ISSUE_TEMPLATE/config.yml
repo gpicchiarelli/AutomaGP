@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Il senso del progetto
+    url: https://github.com/gpicchiarelli/AutomaGP#automa-gp
+    about: Che cos'è AUTOMA GP, che cosa sa fare oggi, e dove sta andando.
+  - name: Come contribuire
+    url: https://github.com/gpicchiarelli/AutomaGP/blob/main/CONTRIBUTING.md
+    about: Principi, ciclo di sviluppo, e licenza dei contributi.

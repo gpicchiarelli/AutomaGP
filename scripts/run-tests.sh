@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run AUTOMA GP Phase 1 tests with SBCL + Quicklisp.
+# Run the AUTOMA GP test suite with SBCL + Quicklisp.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"

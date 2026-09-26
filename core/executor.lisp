@@ -1,13 +1,20 @@
 ;;;; core/executor.lisp — symbolic simulation & execution (Phases 4–5)
 ;;;;
 ;;;; Applies operator effects to fact states. SIMULATE never mutates the live
-;;;; context. EXECUTE updates context facts only — no macOS/adapters (Phase 8).
+;;;; context and never calls OS adapters. EXECUTE updates context facts; when
+;;;; *INVOKE-ADAPTERS* is true, optional :EXTERNAL specs on operators are
+;;;; dispatched through adapters/ (Phase 8) — still no OS calls in MEA/planner.
 ;;;;
 ;;;; Phase 5: step failures signal GP-ERROR with restarts (RETRY SKIP
 ;;;; ABORT-EXECUTION USE-VALUE USE-ALTERNATIVE ASK-USER). Plan runners use
 ;;;; HANDLER-BIND + deliberative strategy — not bare catch-all handlers.
 
 (in-package #:automa-gp)
+
+(defvar *invoke-adapters* nil
+  "When true, EXECUTE may run operator :EXTERNAL adapter specs (Phase 8).
+Defined here so the executor can bind it; adapters implement the dispatch.
+Default NIL keeps EXECUTE symbolic-only. SIMULATE never invokes adapters.")
 
 (defvar *last-execution* nil
   "Last EXECUTION-RESULT from GP-SIMULATE or GP-RUN.")
@@ -146,7 +153,9 @@ Returns (VALUES NEW-FACTS STEP-RESULT). Signals GP-ERROR on failure."
     (values new (make-step-result operator b facts new :status :ok))))
 
 (defun execute-operator! (context operator bindings &key confirm)
-  "EXECUTE OPERATOR against live CONTEXT facts (symbolic only).
+  "EXECUTE OPERATOR against live CONTEXT facts.
+Symbolic effects always apply. When *INVOKE-ADAPTERS* is true and OPERATOR
+has :EXTERNAL meta, the matching OS adapter runs (Phase 8).
 Returns (VALUES NEW-FACTS STEP-RESULT). Signals GP-ERROR on failure.
 Establishes CONFIRM restart for irreversible ops when confirmation needed."
   (ensure-confirmed operator bindings
@@ -158,8 +167,12 @@ Establishes CONFIRM restart for irreversible ops when confirmation needed."
         (%apply-operator-checked facts operator bindings
                                  :mode :execute
                                  :context context)
-      (commit-facts-to-context! context new)
-      (values new (make-step-result operator b facts new :status :executed)))))
+      (let ((ext (when (fboundp 'maybe-invoke-external!)
+                   (maybe-invoke-external! operator b))))
+        (commit-facts-to-context! context new)
+        (values new (make-step-result operator b facts new
+                                      :status :executed
+                                      :external ext))))))
 
 (defun commit-facts-to-context! (context facts)
   "Set CONTEXT local facts to FACTS (Phase-4: write full visible set locally)."
@@ -280,11 +293,15 @@ Records a deliberative execution trace. Step restarts as in Phase 5."
                        :meta (list :note "symbolic simulation; restarts available; no adapters"
                                    :trace *current-trace*))))))
 
-(defun execute-plan! (context plan &key confirm)
+(defun execute-plan! (context plan &key confirm (adapters nil adapters-p))
   "EXECUTE PLAN steps against live CONTEXT. Mutates context facts.
-Records a deliberative execution trace."
+Records a deliberative execution trace.
+When ADAPTERS is true, bind *INVOKE-ADAPTERS* for this run so operators with
+:EXTERNAL meta may perform OS side effects (Phase 8). Default is the current
+*INVOKE-ADAPTERS* value (normally NIL → symbolic only)."
   (unless (plan-p plan)
     (error "EXECUTE-PLAN! requires a PLAN, got ~S" plan))
+  (let ((*invoke-adapters* (if adapters-p adapters *invoke-adapters*)))
   (with-trace (:execute :context-name (context-name context))
     (trace-record :context :name (context-name context))
     (trace-record :goals :goals (plan-goals plan))
@@ -354,5 +371,8 @@ Records a deliberative execution trace."
                        :divergences div
                        :plan plan
                        :strategy-events (strategy-events-of)
-                       :meta (list :note "symbolic execute; restarts available; no adapters"
-                                   :trace *current-trace*))))))
+                       :meta (list :note (if *invoke-adapters*
+                                             "execute with adapters enabled"
+                                             "symbolic execute; adapters off")
+                                   :adapters *invoke-adapters*
+                                   :trace *current-trace*)))))))
