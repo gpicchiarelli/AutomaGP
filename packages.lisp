@@ -1,4 +1,4 @@
-;;;; packages.lisp — package definitions for AUTOMA GP (Phase 1)
+;;;; packages.lisp — package definitions for AUTOMA GP
 
 (defpackage #:automa-gp
   (:use #:cl)
@@ -9,8 +9,23 @@
    #:*valid-modes*
    #:mode-p
    #:ensure-mode
-   ;; facts
+   ;; matcher / bindings
+   #:*fail*
+   #:*no-bindings*
+   #:fail-p
    #:variable-symbol-p
+   #:anonymous-variable-p
+   #:lookup-binding
+   #:extend-bindings
+   #:substitute-bindings
+   #:match
+   #:match-p
+   #:match-all
+   ;; unification
+   #:occurs-check-p
+   #:unify
+   #:unify-p
+   ;; facts
    #:fact-equal
    #:fact-matches-p
    #:fact-p
@@ -27,6 +42,7 @@
    #:context-facts
    #:context-goals
    #:context-actions
+   #:context-rules
    #:context-mode
    #:context-meta
    #:make-context
@@ -37,6 +53,7 @@
    #:clone-context
    #:compare-contexts
    #:context-all-facts
+   #:context-all-rules
    ;; state
    #:state
    #:state-p
@@ -66,6 +83,27 @@
    #:find-action
    #:actions-of
    #:action-applicable-p
+   ;; rules
+   #:rule
+   #:rule-p
+   #:rule-name
+   #:rule-if
+   #:rule-then
+   #:rule-meta
+   #:make-rule
+   #:register-rule!
+   #:remove-rule!
+   #:rules-of
+   #:rule-conclusions
+   #:forward-chain
+   #:*forward-chain-limit*
+   ;; queries
+   #:query
+   #:query-facts
+   #:query-bindings
+   #:prove
+   #:prove-all
+   #:*query-depth-limit*
    ;; session / REPL
    #:*current-context*
    #:gp-reset
@@ -74,15 +112,18 @@
    #:gp-facts
    #:gp-goals
    #:gp-actions
+   #:gp-rules
    #:gp-add-fact
    #:gp-remove-fact
    #:gp-add-goal
    #:gp-remove-goal
+   #:gp-add-rule
+   #:gp-remove-rule
+   #:gp-query
+   #:gp-infer
    #:gp-mode
    #:gp-register-action
-   ;; deferred Phase 2+ (honest signals)
-   #:gp-rules
-   #:gp-query
+   ;; deferred Phase 3+
    #:gp-plan
    #:gp-explain
    #:gp-run

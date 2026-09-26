@@ -1,7 +1,6 @@
-;;;; interface/repl.lisp — SLIME/REPL API surface (Phase 1)
+;;;; interface/repl.lisp — SLIME/REPL API surface
 ;;;;
-;;;; First official interface. Commands that belong to later phases signal
-;;;; NOT-YET-IMPLEMENTED rather than faking behavior.
+;;;; Phase 1–2 commands are live. Later phases signal NOT-YET-IMPLEMENTED.
 
 (in-package #:automa-gp)
 
@@ -29,15 +28,16 @@
   (setf *current-context* (create-context :name 'default :mode :read))
   *current-context*)
 
-(defun gp-context (&key name parent facts mode)
+(defun gp-context (&key name parent facts mode rules)
   "With no args: return the current context.
 With :NAME (and optional keys): create/select a new current context."
   (cond
-    ((or name parent facts mode)
+    ((or name parent facts mode rules)
      (setf *current-context*
            (create-context :name (or name 'unnamed)
                            :parent parent
                            :facts facts
+                           :rules rules
                            :mode (or mode :read)))
      *current-context*)
     (t
@@ -59,6 +59,10 @@ With :NAME (and optional keys): create/select a new current context."
   "Actions registered on the current context."
   (actions-of (ensure-current-context)))
 
+(defun gp-rules ()
+  "Rules visible in the current context (including parent inheritance)."
+  (context-all-rules (ensure-current-context)))
+
 (defun gp-add-fact (fact)
   "Assert FACT in the current context."
   (let ((ctx (ensure-current-context)))
@@ -79,9 +83,37 @@ With :NAME (and optional keys): create/select a new current context."
   "Remove GOAL from the current context."
   (remove-goal! (ensure-current-context) goal))
 
+(defun gp-add-rule (rule)
+  "Register RULE (a RULE object) on the current context."
+  (register-rule! (ensure-current-context) rule))
+
+(defun gp-remove-rule (name)
+  "Remove the rule named NAME from the current context."
+  (remove-rule! (ensure-current-context) name))
+
+(defun gp-query (pattern &key (infer t))
+  "Query PATTERN in the current context.
+INFER (default T) enables backward chaining over rules.
+Returns a list of plists (:BINDINGS :FACT :SOURCE)."
+  (query pattern (ensure-current-context) :infer infer))
+
+(defun gp-infer (&key (assert nil) (limit *forward-chain-limit*))
+  "Forward-chain rules over current facts.
+Returns (VALUES ALL-FACTS NEW-FACTS).
+If ASSERT is true, newly derived facts are added to the current context."
+  (let* ((ctx (ensure-current-context))
+         (facts (context-all-facts ctx))
+         (rules (context-all-rules ctx)))
+    (multiple-value-bind (all new)
+        (forward-chain facts rules :limit limit)
+      (when assert
+        (dolist (f new)
+          (setf (context-facts ctx) (add-fact! (context-facts ctx) f))))
+      (values all new))))
+
 (defun gp-mode (&optional mode)
   "Get or set the current context mode (:READ :PLAN :SIMULATE :EXECUTE).
-Phase 1 only stores the mode; PLAN/SIMULATE/EXECUTE have no attached engine."
+PLAN/SIMULATE/EXECUTE still have no attached planner/executor (Phases 3–4)."
   (let ((ctx (ensure-current-context)))
     (if mode
         (progn
@@ -93,16 +125,7 @@ Phase 1 only stores the mode; PLAN/SIMULATE/EXECUTE have no attached engine."
   "Register an ACTION object on the current context."
   (register-action! (ensure-current-context) action))
 
-;;; Deferred Phase 2+ — honest signals
-
-(defun gp-rules ()
-  "Not yet implemented (Phase 2)."
-  (not-yet-implemented 'gp-rules 2))
-
-(defun gp-query (&rest args)
-  "Not yet implemented (Phase 2). Use CONTEXT-QUERY / FIND-FACTS for Phase-1 patterns."
-  (declare (ignore args))
-  (not-yet-implemented 'gp-query 2))
+;;; Deferred Phase 3+ — honest signals
 
 (defun gp-plan ()
   "Not yet implemented (Phase 3)."

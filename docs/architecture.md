@@ -1,4 +1,4 @@
-# Architecture (Phase 1)
+# Architecture (Phases 1–2)
 
 AUTOMA GP is layered so the **symbolic core** never embeds OS or domain
 details. Adapters and domains plug in later; the planner (Phase 3+) works only
@@ -7,7 +7,8 @@ on abstract operators and actions.
 ```text
 interface/          REPL (SLIME) — first UI
     ↓
-core/               Context, state, facts, goals, actions, modes
+core/               Context, state, facts, matcher, unification, rules, queries,
+                    goals, actions, modes
     ↓ (later)
 memory/             Working / knowledge / episodic / procedural + persistence
 domains/            software, documents, hardware, music, geometry
@@ -16,48 +17,55 @@ adapters/           macOS, filesystem, processes
 
 ## Central abstraction: Context
 
-A **context** is the unit GP works inside (project, procedure, device set,
-session, …). It holds facts, goals, a mode, optional parent/children, and
-metadata. Contexts can be created, queried, modified, cloned, and compared.
-Children inherit ancestor facts as a **union**; an identical local fact
-(EQUAL) replaces the ancestor copy. Predicate-level shadowing is not Phase 1.
+A **context** is the unit GP works inside. It holds facts, goals, actions,
+rules, a mode, optional parent/children, and metadata. Children inherit
+ancestor facts and rules as a **union**; an identical local fact (EQUAL)
+replaces the ancestor copy; a same-named local rule replaces an ancestor rule.
 
-## Phase 1 modules
+## Modules
 
-| Module | Responsibility |
-|--------|----------------|
-| `core/context.lisp` | Context object + hierarchy + clone/compare |
-| `core/facts.lisp` | Fact assert/retract; `fact-p`; simple `?x` find |
-| `core/state.lisp` | Explicit state snapshot from a context’s facts |
-| `core/goals.lisp` | Goal registry on a context |
-| `core/actions.lisp` | Abstract action records (no OS calls) |
-| `core/modes.lisp` | Mode enum + session mode; no planner/executor |
-| `interface/repl.lisp` | `gp-*` entry points |
+| Module | Phase | Responsibility |
+|--------|-------|----------------|
+| `core/modes.lisp` | 1 | Mode enum skeleton |
+| `core/matcher.lisp` | 2 | Pattern match, bindings, substitution |
+| `core/unification.lisp` | 2 | Unify with occur-check |
+| `core/facts.lisp` | 1–2 | Fact store; uses matcher |
+| `core/context.lisp` | 1–2 | Context object + hierarchy |
+| `core/state.lisp` | 1 | Explicit state snapshot |
+| `core/goals.lisp` | 1 | Goal registry |
+| `core/actions.lisp` | 1 | Abstract action records |
+| `core/rules.lisp` | 2 | Horn rules + forward chaining |
+| `core/queries.lisp` | 2 | Fact/rule query + backward chaining |
+| `interface/repl.lisp` | 1–2 | `gp-*` entry points |
 
 ## Symbolic representation
 
 Facts are ordinary Lisp lists, e.g. `(power-state interface-01 off)`. Pattern
-variables are symbols whose names begin with `?`. Phase 1 provides only
-shallow find/match against facts — not general unification or a rule engine.
+variables are symbols whose names begin with `?`. The anonymous variable `?`
+matches anything and does not bind. Segment variables (`?*x`) are not supported.
+
+Bindings use `*no-bindings*` (empty success) and `*fail*` (failure sentinel).
+
+## Rules & queries
+
+- **Rules** are Horn-style: conjunction of antecedent patterns ⇒ consequent
+  fact pattern(s).
+- **Forward chaining** (`forward-chain` / `gp-infer`) derives new facts to a
+  fixpoint (iteration limit).
+- **Backward chaining** (`query` / `gp-query` with `:infer t`) proves a goal
+  against facts and rule consequents (depth limit).
+- No negation-as-failure, cuts, Prolog I/O, or truth-maintenance.
 
 ## Modes (skeleton)
 
 - **READ** — observe and query (default).
-- **PLAN** — reserved; planning not implemented.
-- **SIMULATE** — reserved; effect application not implemented.
-- **EXECUTE** — reserved; external actions not implemented.
+- **PLAN** / **SIMULATE** / **EXECUTE** — switchable; engines not attached yet.
 
-Mode can be switched; later phases attach real behavior. Destructive external
-actions must never be implied by Phase 1 APIs.
+## Deliberate non-goals (current)
 
-## Deliberate non-goals of this layer
-
-No MEA, no planner, no executor, no condition-restart policy, no persistence,
-no macOS calls in `core/`. Placeholder files under `core/`, `memory/`,
-`adapters/`, and `domains/` document future phases without exporting fake
-capabilities.
+No MEA, planner, executor, condition-restart policy, persistence, or macOS
+calls in `core/`. Remaining scaffold files stay unloaded stubs.
 
 ## Dependency policy
 
-ANSI CL + ASDF + UIOP. Tests may use FiveAM via Quicklisp. No other libraries
-unless verified on Quicklisp and justified.
+ANSI CL + ASDF + UIOP. Tests may use FiveAM via Quicklisp.

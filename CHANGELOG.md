@@ -5,6 +5,32 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.2.0] — 2026-09-26
+
+### Added
+
+- Phase 2 pattern matching: `match`, `match-p`, `match-all`, `substitute-bindings`,
+  anonymous `?` variable.
+- Unification with occur-check: `unify`, `unify-p`.
+- Horn-style rules on contexts: `make-rule`, `register-rule!`, `forward-chain`,
+  parent-chain rule visibility.
+- Queries: `query` / `gp-query` (facts-only or backward chaining), `gp-infer`
+  (forward chain, optional assert), `gp-add-rule`, `gp-remove-rule`, `gp-rules`.
+- FiveAM suites for matcher, unification, rules, queries; REPL Phase-2 coverage.
+
+### Changed
+
+- `fact-matches-p` / `find-facts` now use the Phase-2 matcher.
+- Contexts carry a `rules` slot; clone/modify updated accordingly.
+- Version bump to 0.2.0.
+
+### Not yet
+
+- MEA / planner / operators (Phase 3).
+- Executor / simulation (Phase 4).
+- Negation, cuts, segment variables, TMS, certainty factors.
+- Condition restarts, explanation, memory, adapters, domains, events, web UI.
+
 ## [0.1.0] — 2026-09-26
 
 ### Added
@@ -20,10 +46,3 @@ and this project follows the incremental phases in `docs/PROMPT.md` §25.
 - Docs: master prompt (`docs/PROMPT.md`), architecture note, ROADMAP.
 - Scaffold directories for memory, domains, adapters, and later core modules
   (explicitly not implemented).
-
-### Not yet
-
-- Pattern matching / unification / rules (Phase 2).
-- MEA / planner (Phase 3).
-- Executor / full simulation (Phase 4).
-- Condition restarts, explanation, memory, adapters, domains, events, web UI.

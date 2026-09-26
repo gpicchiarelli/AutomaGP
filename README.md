@@ -18,7 +18,7 @@ Primary references: Peter Norvig, *Paradigms of Artificial Intelligence
 Programming*; Lisp symbolic systems; GPS / Means-Ends Analysis. The full
 master specification lives in [`docs/PROMPT.md`](docs/PROMPT.md).
 
-## Status (Phase 1)
+## Status (Phase 2)
 
 Working and tested:
 
@@ -26,15 +26,17 @@ Working and tested:
 |------|---------|
 | Context | create, query, modify, clone, compare; parent/child hierarchy |
 | State | explicit fact-set snapshot of a context |
-| Facts | symbolic lists; `fact-p`; `find-facts` with simple `?x` variables |
-| Goals | add / remove / list / active goals |
-| Actions | name, params, preconditions, effects, cost, risk, reversible, adapter, authorization |
+| Facts | symbolic lists; `fact-p`; `find-facts` via Phase-2 matcher |
+| Matcher | `match` / `match-all` / substitution; anonymous `?` |
+| Unification | `unify` with occur-check |
+| Rules | Horn-style on context; forward chaining |
+| Queries | `gp-query` (facts or backward chain); `gp-infer` |
+| Goals / Actions | Phase 1 model unchanged |
 | Modes | skeleton: `READ` / `PLAN` / `SIMULATE` / `EXECUTE` (switching only) |
-| REPL | Phase-1 commands below |
 
-**Not implemented yet** (honest stubs / deferred): pattern matching engine,
-unification, rules, MEA, planner, executor, condition restarts, explanation,
-memory, persistence, macOS/domain adapters, events, web UI.
+**Not implemented yet:** MEA, planner, executor, simulation, negation/cuts,
+segment variables, TMS, condition restarts, explanation, memory, persistence,
+macOS/domain adapters, events, web UI.
 
 See [`ROADMAP.md`](ROADMAP.md) and [`docs/architecture.md`](docs/architecture.md).
 
@@ -42,7 +44,7 @@ See [`ROADMAP.md`](ROADMAP.md) and [`docs/architecture.md`](docs/architecture.md
 
 - SBCL (tested with 2.x)
 - ASDF (bundled with SBCL)
-- Quicklisp (for FiveAM tests; core Phase 1 uses only CL + UIOP)
+- Quicklisp (for FiveAM tests; core uses only CL + UIOP)
 
 ## Quick start (SLIME / SLY)
 
@@ -56,50 +58,38 @@ See [`ROADMAP.md`](ROADMAP.md) and [`docs/architecture.md`](docs/architecture.md
 (gp-reset)
 (gp-context :name 'studio-audio)
 (gp-add-fact '(device interface-01))
-(gp-add-fact '(power-state interface-01 off))
+(gp-add-fact '(power-state interface-01 on))
+(gp-add-rule (make-rule :name 'powered-when-on
+                        :if '((device ?d) (power-state ?d on))
+                        :then '(powered ?d)))
+(gp-query '(powered ?x))
+(gp-infer :assert t)
 (gp-facts)
-(gp-add-goal 'audio-system-ready)
-(gp-state)
-(gp-mode) ; => :READ
 ```
 
-Without Quicklisp path registration:
-
-```lisp
-(require :asdf)
-(asdf:load-asd "/absolute/path/to/AutomaGP/automa-gp.asd")
-(asdf:load-system :automa-gp)
-```
-
-## REPL surface (Phase 1)
+## REPL surface
 
 | Form | Role |
 |------|------|
 | `(gp-context &key name)` | Show or create/select current context |
 | `(gp-state)` | Current state snapshot |
 | `(gp-facts)` | Facts in current context |
-| `(gp-goals)` | Goals in current context |
-| `(gp-actions)` | Registered actions |
-| `(gp-add-fact fact)` | Assert a fact |
-| `(gp-remove-fact fact)` | Retract a fact |
+| `(gp-goals)` / `(gp-actions)` / `(gp-rules)` | Registries |
+| `(gp-add-fact fact)` / `(gp-remove-fact fact)` | Assert / retract |
 | `(gp-add-goal goal)` | Add a goal |
-| `(gp-mode &optional mode)` | Get/set `:READ` `:PLAN` `:SIMULATE` `:EXECUTE` |
-| `(gp-reset)` | Clear session to a fresh empty context |
+| `(gp-add-rule rule)` / `(gp-remove-rule name)` | Rule registry |
+| `(gp-query pattern &key (infer t))` | Query facts / rules |
+| `(gp-infer &key assert limit)` | Forward-chain; optional assert |
+| `(gp-mode &optional mode)` | Get/set mode skeleton |
+| `(gp-reset)` | Fresh empty context |
 
-Deferred (signal “not yet implemented”): `gp-rules`, `gp-plan`, `gp-explain`,
-`gp-run`, `gp-simulate`, `gp-query`.
+Deferred (signal “not yet implemented”): `gp-plan`, `gp-explain`, `gp-run`,
+`gp-simulate`.
 
 ## Tests
 
 ```bash
 ./scripts/run-tests.sh
-```
-
-Or from a REPL after Quicklisp is available:
-
-```lisp
-(ql:quickload :automa-gp/tests)
-(asdf:test-system :automa-gp)
 ```
 
 ## License

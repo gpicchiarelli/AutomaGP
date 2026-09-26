@@ -36,6 +36,11 @@
     :accessor context-actions
     :initform nil
     :documentation "Action registry for this context (alist name → action).")
+   (rules
+    :initarg :rules
+    :accessor context-rules
+    :initform nil
+    :documentation "Local symbolic rules (Phase 2).")
    (mode
     :initarg :mode
     :accessor context-mode
@@ -51,7 +56,7 @@
 (defun context-p (object)
   (typep object 'context))
 
-(defun make-context (&key name parent facts goals actions mode meta children)
+(defun make-context (&key name parent facts goals actions rules mode meta children)
   "Construct a CONTEXT. MODE defaults to :READ."
   (make-instance 'context
                  :name name
@@ -60,16 +65,18 @@
                  :facts (copy-list facts)
                  :goals (copy-list goals)
                  :actions (copy-tree actions)
+                 :rules (copy-list rules)
                  :mode (if mode (ensure-mode mode) :read)
                  :meta (copy-tree meta)))
 
-(defun create-context (&key name parent facts goals actions mode meta)
+(defun create-context (&key name parent facts goals actions rules mode meta)
   "Create a context and, if PARENT is given, register it as a child."
   (let ((ctx (make-context :name name
                            :parent parent
                            :facts facts
                            :goals goals
                            :actions actions
+                           :rules rules
                            :mode mode
                            :meta meta)))
     (when parent
@@ -101,13 +108,15 @@ Ancestors contribute first; a local fact EQUAL to an ancestor fact replaces it."
     result))
 
 (defun context-query (context pattern)
-  "Find facts visible in CONTEXT matching PATTERN (simple ? variables)."
+  "Find facts visible in CONTEXT matching PATTERN (no rule inference).
+For inference, see QUERY / GP-QUERY."
   (find-facts pattern (context-all-facts context)))
 
 (defun context-modify! (context &key name mode meta
                                  (facts nil facts-p)
                                  (goals nil goals-p)
-                                 (actions nil actions-p))
+                                 (actions nil actions-p)
+                                 (rules nil rules-p))
   "Destructively modify CONTEXT slots when supplied."
   (when name (setf (context-name context) name))
   (when mode (setf (context-mode context) (ensure-mode mode)))
@@ -115,16 +124,18 @@ Ancestors contribute first; a local fact EQUAL to an ancestor fact replaces it."
   (when facts-p (setf (context-facts context) (copy-list facts)))
   (when goals-p (setf (context-goals context) (copy-list goals)))
   (when actions-p (setf (context-actions context) (copy-tree actions)))
+  (when rules-p (setf (context-rules context) (copy-list rules)))
   context)
 
 (defun clone-context (context &key name as-child)
-  "Deep-enough copy of CONTEXT (facts/goals/actions/meta lists copied).
+  "Deep-enough copy of CONTEXT (facts/goals/actions/rules/meta lists copied).
 Parent link is cleared unless AS-CHILD is true (then registered under original)."
   (let ((copy (make-context :name (or name (context-name context))
                             :parent nil
                             :facts (copy-list (context-facts context))
                             :goals (copy-list (context-goals context))
                             :actions (copy-tree (context-actions context))
+                            :rules (copy-list (context-rules context))
                             :mode (context-mode context)
                             :meta (copy-tree (context-meta context))
                             :children nil)))

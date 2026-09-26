@@ -3,7 +3,7 @@
 Aligned to `docs/PROMPT.md` §25. Each phase must leave a loadable, tested
 system. Do not skip ahead with fake capabilities.
 
-## Phase 1 — Context foundation *(current)*
+## Phase 1 — Context foundation
 
 - [x] Context (create, query, modify, clone, compare; parent/child)
 - [x] State
@@ -13,12 +13,12 @@ system. Do not skip ahead with fake capabilities.
 - [x] Modes skeleton (`READ` / `PLAN` / `SIMULATE` / `EXECUTE`)
 - [x] Minimal honest REPL API
 
-## Phase 2 — Pattern matching & knowledge queries
+## Phase 2 — Pattern matching & knowledge queries *(current)*
 
-- [ ] Pattern matching
-- [ ] Unification
-- [ ] Rules
-- [ ] Queries (`gp-query`, …)
+- [x] Pattern matching (`match`, `match-all`, substitution)
+- [x] Unification (`unify`, occur-check)
+- [x] Rules (Horn-style; forward chaining)
+- [x] Queries (`gp-query`, backward chaining; `gp-infer`)
 
 ## Phase 3 — Means-Ends Analysis & planning
 
