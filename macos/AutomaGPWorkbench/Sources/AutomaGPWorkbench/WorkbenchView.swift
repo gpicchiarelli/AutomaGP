@@ -199,8 +199,14 @@ struct WorkbenchView: View {
                             }
                             Button("Usa questo piano") { model.use(name: card.name) }
                                 .controlSize(.small)
-                                .disabled(!card.applies)
-                                .help(card.applies
+                                .disabled(!model.connected
+                                          || !card.applies
+                                          || model.archiveProbePending)
+                                .help(!model.connected
+                                      ? "Server non raggiungibile."
+                                      : model.archiveProbePending
+                                      ? "Aggiorno se la procedura applica ancora allo stato attuale."
+                                      : card.applies
                                       ? "Ricostruisce il piano da \(card.name)"
                                       : "Non applica allo stato attuale. Ripristina i fatti o scegli un'altra procedura.")
                         }
@@ -248,12 +254,15 @@ struct WorkbenchView: View {
                 Button("Induci regola") { model.learnRule() }
                     .buttonStyle(.borderedProminent)
                     .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(model.actionName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(!model.connected
+                              || model.actionName.trimmingCharacters(in: .whitespaces).isEmpty)
                 HStack {
                     Button("Annota lo stato") { model.noteState() }
                         .controlSize(.small)
+                        .disabled(!model.connected)
                     Button("Senza variabili") { model.learn() }
                         .controlSize(.small)
+                        .disabled(!model.connected)
                         .help("Unisce un secondo esempio solo se i termini restano gli stessi. Non introduce variabili.")
                 }
             } else {
@@ -265,7 +274,8 @@ struct WorkbenchView: View {
                         .textFieldStyle(.roundedBorder)
                         .onSubmit { model.ask() }
                     Button("Chiedi") { model.ask() }
-                        .disabled(model.phraseDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!model.connected
+                                  || model.phraseDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .help("Il nome dell'operatore, di una reazione o di una regola vale come predicato. Una parola dichiarata, come accendi, vale anche per accendere. Una parola da sola vale se è un termine di un solo obiettivo senza variabili, anche in un'altra forma come pronti, prontissimo, prontamente o prontezza per pronto, o accensione e accendimento per accendi, o un pezzo esatto del suo nome. Una parola che è la radice di un nome, come power-one per power-on, non viene proposta. Se le altre parole descrivono l'obiettivo e la prima non ne fa parte, l'obiettivo viene nominato e la parola non viene dichiarata. Se è in più di un obiettivo, li nomina e non ne registra nessuno. Non esegue comandi.")
                 }
                 if !model.choices.isEmpty {
@@ -287,6 +297,7 @@ struct WorkbenchView: View {
                             Button(choice.declaresWord ? "Chiama così" : "Usa questo") {
                                 model.choose(choice)
                             }
+                            .disabled(!model.connected)
                             .help(choice.declaresWord
                                   ? "Dichiara la parola su questo nome, registra l'obiettivo e aggiorna il piano. Non esegue."
                                   : "Registra solo questo obiettivo e aggiorna il piano. Non esegue.")
@@ -295,12 +306,12 @@ struct WorkbenchView: View {
                 }
                 HStack {
                     Button("Pianifica") { model.planOpenGoals() }
-                        .disabled(model.openGoals == 0)
+                        .disabled(!model.connected || model.openGoals == 0)
                         .help("Pianifica gli obiettivi già nel contesto. Non simula e non esegue.")
                     Button("Simula") { model.simulate() }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
-                        .disabled(!model.canSimulate)
+                        .disabled(!model.connected || !model.canSimulate)
                         .keyboardShortcut(.return, modifiers: .command)
                         .help(!model.hasPlan
                               ? "Serve un piano. Pianifica o formula un obiettivo."
@@ -308,25 +319,27 @@ struct WorkbenchView: View {
                               ? "Il piano non è riuscito. Completa i fatti o pianifica di nuovo."
                               : !model.externalMatches
                               ? "L'azione sul computer non è più quella del piano. Pianifica di nuovo."
-                              : model.executeLacksSupport
-                                ? "I fatti non sostengono più l'azione sul computer. Pianifica di nuovo."
-                                : "Applica il piano su una copia. I fatti del contesto restano fermi.")
+                              : !model.externalSupported
+                              ? "I fatti non sostengono più l'azione sul computer. Pianifica di nuovo."
+                              : "Applica il piano su una copia. I fatti del contesto restano fermi.")
                     Button("Esegui…") { confirmExecute = true }
-                        .disabled(!model.canExecute)
+                        .disabled(!model.connected || !model.canExecute)
                         .tint(.red)
                         .help(!model.hasPlan
                               ? "Serve un piano. Pianifica o formula un obiettivo."
                               : !model.planSuccess
                               ? "Il piano non è riuscito. Completa i fatti o pianifica di nuovo."
+                              : !model.externalMatches
+                              ? "L'azione sul computer non è più quella del piano. Pianifica di nuovo."
+                              : !model.externalSupported
+                              ? "I fatti non sostengono più l'azione sul computer. Pianifica di nuovo."
+                              : model.planExternalPending
+                              ? "Attende l'elenco live delle azioni sul computer di questo aggiornamento."
                               : model.executeConfirmsComputer
                               ? "Chiede conferma, poi aggiorna i fatti e compie l'azione sul computer."
-                              : model.executeLacksSupport
-                                ? "I fatti non sostengono più l'azione sul computer. Pianifica di nuovo."
-                                : !model.externalMatches
-                                  ? "L'azione sul computer non è più quella del piano. Pianifica di nuovo."
-                                  : model.executeWithholdsComputer
-                                    ? "Chiede conferma, poi aggiorna i fatti. L'azione sul computer non parte: le precondizioni non ci sono più."
-                                    : "Chiede conferma, poi aggiorna i fatti. Non tocca il computer.")
+                              : model.executeWithholdsComputer
+                              ? "Chiede conferma, poi aggiorna i fatti. L'azione sul computer non parte: le precondizioni non ci sono più."
+                              : "Chiede conferma, poi aggiorna i fatti. Non tocca il computer.")
                 }
                 if model.connected && !model.hasPlan {
                     Text("Nessun piano. Simula ed Esegui restano fermi finché non pianifichi.")
@@ -338,12 +351,17 @@ struct WorkbenchView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                } else if model.connected && model.planExternalPending {
+                    Text("Esegui attende l'elenco live delle azioni sul computer di questo aggiornamento.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else if model.executeConfirmsComputer {
                     Text("Sul computer, solo dopo conferma: \(model.externalSummary)")
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
-                } else if model.executeLacksSupport {
+                } else if model.connected && model.planReady && !model.externalSupported {
                     Text("L'azione sul computer non parte: i fatti non la sostengono più. Pianifica di nuovo.")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -353,7 +371,7 @@ struct WorkbenchView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
-                } else if !model.externalMatches {
+                } else if model.connected && model.planReady && !model.externalMatches {
                     Text("L'azione sul computer non è più quella del piano. Pianifica di nuovo.")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -361,15 +379,16 @@ struct WorkbenchView: View {
                 }
                 HStack {
                     Picker("Autonomia", selection: Binding(
-                        get: { model.authority == "execute" ? "execute" : "simulate" },
+                        get: { model.autonomyAuthority },
                         set: { model.setAuthority($0) }
                     )) {
+                        Text("Leggi").tag("read")
                         Text("Simula").tag("simulate")
                         Text("Esegui").tag("execute")
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .help("Tetto di passo e ciclo autonomi. Non li lancia.")
+                    .help("Tetto di passo e ciclo autonomi. Non li lancia. Leggi riconosce gli eventi, poi si ferma.")
                     Button(model.authority == "execute" ? "Passo…" : "Passo") {
                         if model.authority == "execute" {
                             confirmAutonomy = true
@@ -382,8 +401,10 @@ struct WorkbenchView: View {
                     .help(!model.autonomyHasWork
                           ? "Nessun obiettivo aperto né evento in attesa."
                           : model.authority == "execute"
-                          ? "Chiede conferma, poi un ciclo: osserva, pianifica ed esegue. Sul computer solo se il piano nuovo lo richiede."
-                          : "Un ciclo: osserva, pianifica e simula. I fatti del contesto restano fermi.")
+                          ? "Chiede conferma, poi un passo: osserva, pianifica ed esegue. Sul computer solo se il piano nuovo lo richiede."
+                          : model.authority == "read"
+                          ? "Un passo: riconosce gli eventi in attesa, poi si ferma. Non pianifica, non simula e non esegue."
+                          : "Un passo: osserva, pianifica e simula. I fatti del contesto restano fermi.")
                     Button(model.authority == "execute" ? "Ciclo…" : "Ciclo") {
                         if model.authority == "execute" {
                             confirmAutonomyLoop = true
@@ -397,6 +418,8 @@ struct WorkbenchView: View {
                           ? "Nessun obiettivo aperto né evento in attesa."
                           : model.authority == "execute"
                           ? "Chiede conferma, poi fino a \(model.autonomyMaxSteps) passi con esecuzione. Si ferma a obiettivo o a un rifiuto."
+                          : model.authority == "read"
+                          ? "Fino a \(model.autonomyMaxSteps) passi: ognuno può riconoscere eventi, poi si ferma sulla sola lettura."
                           : "Fino a \(model.autonomyMaxSteps) passi di simulazione. I fatti restano fermi. Si ferma a obiettivo o a un rifiuto.")
                 }
                 HStack {
@@ -417,6 +440,8 @@ struct WorkbenchView: View {
                 }
                 Text(model.authority == "execute"
                      ? "L'autonomia può eseguire. Passo… e Ciclo… chiedono conferma."
+                     : model.authority == "read"
+                     ? "L'autonomia è sola lettura: riconosce gli eventi, poi si ferma senza pianificare."
                      : "L'autonomia si ferma alla simulazione. Fino a \(model.autonomyMaxSteps) passi per ciclo.")
                     .font(.caption)
                     .foregroundStyle(model.authority == "execute" ? Color.red : Color.secondary)
@@ -435,9 +460,13 @@ struct WorkbenchView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 if model.pendingEvents > 0 {
-                    Text(model.pendingEvents == 1
-                         ? "1 evento in attesa. Passo lo riconosce prima di pianificare."
-                         : "\(model.pendingEvents) eventi in attesa. Passo li riconosce prima di pianificare.")
+                    Text(model.authority == "read"
+                         ? (model.pendingEvents == 1
+                            ? "1 evento in attesa. Passo lo riconosce, poi si ferma sulla sola lettura."
+                            : "\(model.pendingEvents) eventi in attesa. Passo li riconosce, poi si ferma sulla sola lettura.")
+                         : (model.pendingEvents == 1
+                            ? "1 evento in attesa. Passo lo riconosce prima di pianificare."
+                            : "\(model.pendingEvents) eventi in attesa. Passo li riconosce prima di pianificare."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -464,7 +493,8 @@ struct WorkbenchView: View {
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { model.nameOperator() }
                         Button("Chiama così") { model.nameOperator() }
-                            .disabled(model.wordDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(!model.connected
+                                      || model.wordDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .help("Dichiara una parola per questo operatore. Chiedi la riconosce, anche con la stessa radice.")
                     }
                 }
@@ -504,7 +534,8 @@ struct WorkbenchView: View {
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { model.nameAlias() }
                         Button("Chiama così") { model.nameAlias() }
-                            .disabled(model.aliasDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(!model.connected
+                                      || model.aliasDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             .help("Dichiara una parola per l'operatore, la reazione o la regola scelta, anche se un altro ha lo stesso nome. L'operatore appena imparato resta nel suo campo. Chiedi la riconosce, anche con la stessa radice. Il nome proprio resta esatto.")
                     }
                 }
@@ -535,6 +566,7 @@ struct WorkbenchView: View {
                                 Image(systemName: "minus.circle")
                             }
                             .buttonStyle(.borderless)
+                            .disabled(!model.connected)
                             .help("Togli questo fatto")
                         }
                     }
@@ -545,48 +577,58 @@ struct WorkbenchView: View {
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { model.addFact() }
                 Button("Aggiungi") { model.addFact() }
-                    .disabled(model.factDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(!model.connected
+                              || model.factDraft.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             HStack {
                 TextField("Percorso di un file", text: $model.pathDraft)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { model.noticePath() }
                 Button("Nota il file") { model.noticePath() }
-                    .disabled(model.pathDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(!model.connected
+                              || model.pathDraft.trimmingCharacters(in: .whitespaces).isEmpty)
                     .help("Solo se una reazione descrive già un file creato. Non scorre una cartella.")
                 Button("Nota la cartella") { model.noticeDirectory() }
-                    .disabled(model.pathDraft.trimmingCharacters(in: .whitespaces).isEmpty || model.watchingDirectory)
+                    .disabled(!model.connected
+                              || model.pathDraft.trimmingCharacters(in: .whitespaces).isEmpty
+                              || model.watchingDirectory)
                     .help("Guarda una volta i file in questa cartella e nelle sottocartelle. Non segue un collegamento a un'altra cartella, non osserva i processi e non esegue il piano.")
                 Button(model.watchingDirectory ? "Ferma" : "Osserva") { model.watchDirectory() }
-                    .disabled(!model.watchingDirectory && model.pathDraft.trimmingCharacters(in: .whitespaces).isEmpty)
+                    .disabled(!model.connected
+                              || (!model.watchingDirectory
+                                  && model.pathDraft.trimmingCharacters(in: .whitespaces).isEmpty))
                     .help("Ripete lo sguardo sulla cartella e sulle sottocartelle finché non lo fermi. Non segue un collegamento a un'altra cartella, non osserva i processi e non esegue il piano.")
                 Button("Nota i processi") { model.noticeProcesses() }
-                    .disabled(model.watchingProcesses)
+                    .disabled(!model.connected || model.watchingProcesses)
                     .help("Guarda una volta i processi che una reazione nomina già. Non elenca tutti i processi, non guarda il terminale e non esegue il piano.")
                 Button(model.watchingProcesses ? "Ferma i processi" : "Osserva i processi") {
                     model.watchProcesses()
                 }
+                .disabled(!model.connected)
                 .help("Ripete lo sguardo sui processi che una reazione nomina già, finché non lo fermi. Non elenca tutti i processi, non guarda il terminale e non esegue il piano.")
                 Button("Nota il terminale") { model.noticeTerminals() }
-                    .disabled(model.watchingTerminals)
+                    .disabled(!model.connected || model.watchingTerminals)
                     .help("Guarda una volta i terminali che una reazione nomina già. Non legge ciò che ci è scritto, non elenca tutti i terminali e non esegue il piano.")
                 Button(model.watchingTerminals ? "Ferma il terminale" : "Osserva il terminale") {
                     model.watchTerminals()
                 }
+                .disabled(!model.connected)
                 .help("Ripete lo sguardo sui terminali che una reazione nomina già, finché non lo fermi. Non legge ciò che ci è scritto, non elenca tutti i terminali e non esegue il piano.")
                 Button("Nota il testo") { model.noticeTerminalText() }
-                    .disabled(model.watchingTerminalText)
+                    .disabled(!model.connected || model.watchingTerminalText)
                     .help("Legge una volta il testo che una reazione nomina già, nel trascritto che quella reazione nomina. Non segue un collegamento, non apre un dispositivo, non resta in ascolto e non esegue il piano.")
                 Button(model.watchingTerminalText ? "Ferma il testo" : "Osserva il testo") {
                     model.watchTerminalText()
                 }
+                .disabled(!model.connected)
                 .help("Ripete la lettura del testo che una reazione nomina già, finché non la fermi. Non segue un collegamento, non apre un dispositivo, non legge lo schermo aperto di Terminale e non esegue il piano.")
                 Button("Nota lo schermo") { model.noticeTerminalScreen() }
-                    .disabled(model.watchingTerminalScreen)
+                    .disabled(!model.connected || model.watchingTerminalScreen)
                     .help("Legge una volta il testo che una reazione nomina già, nella scheda di Terminale che quella reazione nomina. Non scrive nella scheda, non lancia un comando e non resta in ascolto. Se Terminale non risponde, non aggiunge nulla.")
                 Button(model.watchingTerminalScreen ? "Ferma lo schermo" : "Osserva lo schermo") {
                     model.watchTerminalScreen()
                 }
+                .disabled(!model.connected)
                 .help("Ripete la lettura della scheda che una reazione nomina già, finché non la fermi. Non scrive nella scheda e non lancia un comando. Se Terminale non risponde, non aggiunge nulla.")
             }
         }

@@ -83,7 +83,9 @@ reaction already names. The name is the tty `ps` prints, such as
 `ttys000`. An open one is asserted and the reaction's facts and goals
 enter the context. A variable does not name a terminal. It does not
 list the open terminals, read what is written there, stay listening,
-plan, or run adapters.
+plan, or run adapters. Tests may bind
+`*notice-open-terminals-override*` to a list of names when the host
+cannot allocate a PTY.
 `gp-watch-terminals` repeats that look until `gp-stop-terminal-watch`
 or `gp-reset`. A terminal that opens while the watch runs is noticed
 on a later look, when a reaction already names it. The watch still
@@ -191,8 +193,12 @@ action no longer matches or the facts no longer support it, with or
 without adapters when the plan recorded its actions. The loop does not
 take another step. When the action is authorized, the execute or
 simulate still runs. The workbench Passo and Ciclo buttons post `/api/autonomy/step` and
-`/api/autonomy/loop`: simulate authority does not touch facts; execute
-authority asks for confirmation and may enable adapters for that run.
+`/api/autonomy/loop` with the live session authority (`:read`, `:simulate`, or
+`:execute`): read may still react to pending events, then halts without
+planning, simulating, or executing; simulate does not execute; execute
+asks for confirmation and may enable adapters for that run. The picker exposes
+all three, matching the HTML console, instead of collapsing `:read` into
+simulate. Workbench and HTML captions name that react-then-halt for read.
 Ciclo stops at the policy max-steps, when goals hold, or when a step
 halts. The workbench shows that last outcome from `GET /api/autonomy`
 under Passo and Ciclo, including after a refresh. Limite ciclo sets
@@ -206,8 +212,13 @@ and captions open goals, pending events, or the idle state.
 as well, so the HTTP endpoints return 400 and do not overwrite the
 last autonomy summary. A cycle already under way may still halt with
 `:no-goals` after reacting. Status `plan-p` and `plan-success`, plus
-plan `external-matches` and `external-supported`, drive workbench Simula
-and Esegui; without a successful matching plan those controls stay idle.
+`external-matches` and `external-supported` (same helper as `GET /api/plan`),
+drive workbench Simula and Esegui; without a successful matching plan those
+controls stay idle. Mutation controls (Aggiungi, Chiedi, Nota…, Usa questo
+piano, Pianifica, Simula, Esegui, induce, alias) also stay idle when the
+workbench is not connected, and the model methods return immediately.
+The HTML console reads those status fields before the
+plan GET returns, and its gated buttons start disabled.
 `gp-simulate` and `gp-run` refuse an unsuccessful plan before changing mode.
 `gp-ask` reads an Italian phrase. A leading `voglio`, `raggiungi`,
 `obiettivo`, `manca`, `fammi`, `ottieni`, or `rendi` is optional: the
@@ -279,19 +290,48 @@ cd macos/AutomaGPWorkbench && swift run
 
 Optional Hunchentoot console on `127.0.0.1:47391`.
 The page disables Remember until status reports `plan-success`, and
-disables Simulate and Run until that successful plan also reports
-`external-matches` and `external-supported` from `GET /api/plan` — the
-same idle rule as the workbench. Autonomy Step/Loop stay idle when there
-is no open goal and no pending event. Plan stays idle when there is no
+disables Simulate and Run until status also reports `external-matches`
+and `external-supported` (the same values as `GET /api/plan`) — applied
+as soon as status returns, before later GETs. Gated buttons start
+disabled so they cannot fire during the first refresh. Autonomy Step/Loop
+stay idle when there
+is no open goal and no pending event. Authority and loop max-steps follow
+the session policy (`GET /api/autonomy`): the console syncs those controls
+on refresh and posts `/api/autonomy/policy` when they change, instead of
+hard-coding a loop limit. When Authority is `execute`, Step and Loop ask
+for confirmation and then send `adapters` and `auto-confirm` true — the
+same gate as the workbench Passo/Ciclo. Run stays idle until the plan GET
+of that refresh returns (so adapters follow the live external list, not a
+stale prior plan), then asks for confirmation and sets `adapters` true only
+when the current plan names matching, supported external actions — the same
+rule as workbench Esegui. The workbench clears `externalActions` at status
+time for the same reason, and `canSimulate` requires `externalSupported`
+directly. Simula/Esegui help and captions follow that flag even while the
+list is empty. Esegui also stays idle (`planExternalPending`) from status
+until the plan GET of that refresh returns — the same Run window as the
+HTML console. Esegui's confirm names fact updates with adapters off
+honestly (not as a simulation). HTML execute Step/Loop confirm says
+adapters run only if a new plan requires them. When a refresh fails, the HTML console idles the same
+mutation controls the workbench disables while disconnected, until a
+refresh succeeds. `POST /api/simulate` and `/api/run` refuse the same
+plan-success and external gates before calling `gp-simulate`/`gp-run`.
+Plan stays idle when there is no
 open goal unless Goals JSON is typed (empty Goals calls
 `/api/plan-open-goals`). Typed Goals that already hold in the facts
-keep Plan idle; a single fact array is sent as one goal. Use and Score
+keep Plan idle; a single fact array is sent as one goal. Typed Goals that
+are invalid JSON or do not form a non-empty goal list keep Plan idle.
+Use and Score
 stay idle until a named archived procedure exists (Use without a name
 needs a non-empty archive and an open goal). React stays idle when there
 is no pending event. Emit and Add fact stay idle until Event/Fact JSON
 is a non-empty array. Each archived procedure may report `applies`
 against the current facts when requested (`GET /api/archive?applies=1`);
-Use stays idle when that flag is false. Plain archive listing and POST
+Use stays idle when that flag is false. While a refresh is in flight,
+Use and Score stay idle until the archive applies probe returns. The
+workbench does the same: when status shows facts, open goals, or plan
+gates changed, `archiveProbePending` keeps Usa questo piano idle until
+`GET /api/archive?applies=1` returns, so a stale applies flag cannot fire.
+Plain archive listing and POST
 remember/use/score omit `applies` so the list stays cheap. Applies probes
 are cached per fact/operator snapshot and procedure fingerprint so a
 polling client does not replay every procedure when nothing changed.

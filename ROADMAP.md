@@ -238,6 +238,21 @@ after that deepens memory, observation, adapters, and the autonomy policy.
 - [x] Applies cache clear on reset; changelog .agp (v0.177.0)
 - [x] README suite counts and archive applies query (v0.178.0)
 - [x] Operator console Sim/Run match external gates (v0.179.0)
+- [x] Notice PTY/test hygiene and Remember caption (v0.180.0)
+- [x] Status external gates before plan GET (v0.181.0)
+- [x] Plan idle on invalid Goals; archive refresh gate (v0.182.0)
+- [x] Operator console autonomy policy sync (v0.183.0)
+- [x] Operator console execute autonomy confirms adapters (v0.184.0)
+- [x] Operator console Run confirm and adapters parity (v0.185.0)
+- [x] Workbench archive applies refresh gate (v0.186.0)
+- [x] Run/Esegui wait for live plan external list (v0.187.0)
+- [x] Workbench idle when disconnected (v0.188.0)
+- [x] Simulate/run façade gates; workbench externalSupported help (v0.189.0)
+- [x] Workbench Esegui waits for live plan external list (v0.190.0)
+- [x] HTML console idle when unreachable (v0.191.0)
+- [x] Workbench autonomy :read parity (v0.192.0)
+- [x] Leggi react-then-halt honesty; Passo help (v0.193.0)
+- [x] Esegui confirm honesty; HTML autonomy confirm (v0.194.0)
 
 ---
 

@@ -109,6 +109,14 @@ final class WorkbenchModel: ObservableObject {
     @Published var externalWithheld: [ExternalAction] = []
     @Published var externalMatches = true
     @Published var externalSupported = true
+    /// True while status says the world may have changed and archive applies
+    /// has not been refreshed yet — Use stays idle (HTML console parity).
+    @Published var archiveProbePending = false
+    /// True from status until this refresh's plan GET returns — Esegui stays
+    /// idle so adapters cannot follow a stale cleared external list (HTML Run).
+    @Published var planExternalPending = false
+
+    private var archiveGateSnapshot = ""
 
     var externalSummary: String {
         externalActions.map(\.label).joined(separator: " · ")
@@ -120,10 +128,6 @@ final class WorkbenchModel: ObservableObject {
 
     var executeConfirmsComputer: Bool {
         planReady && !externalActions.isEmpty && externalMatches && externalSupported
-    }
-
-    var executeLacksSupport: Bool {
-        planReady && !externalActions.isEmpty && externalMatches && !externalSupported
     }
 
     var executeWithholdsComputer: Bool {
@@ -140,32 +144,36 @@ final class WorkbenchModel: ObservableObject {
         hasPlan && planSuccess
     }
 
-    /// Simula and Esegui only when a successful plan still matches support rules.
+    /// Simula when a successful plan still matches support rules.
     var canSimulate: Bool {
-        planReady && externalMatches && !executeLacksSupport
+        planReady && externalMatches && externalSupported
     }
 
-    var canExecute: Bool { canSimulate }
+    /// Esegui also waits for this refresh's plan GET (live external list).
+    var canExecute: Bool { canSimulate && !planExternalPending }
 
     var executeDialogMessage: String {
         if executeConfirmsComputer {
             return "I fatti del contesto cambiano. Sul computer: \(externalSummary)."
         }
-        if executeLacksSupport {
+        if planReady && !externalSupported {
             return "I fatti del contesto non sostengono più l'azione sul computer. Pianifica di nuovo."
         }
         if executeWithholdsComputer {
             return "I fatti del contesto cambiano. L'azione sul computer non parte: le precondizioni non ci sono più. \(externalWithheldSummary)."
         }
-        if externalMatches {
-            return "I fatti del contesto cambiano. La simulazione li lascia fermi."
+        if !externalMatches {
+            return "I fatti del contesto cambiano. L'azione sul computer non è più quella del piano."
         }
-        return "I fatti del contesto cambiano. L'azione sul computer non è più quella del piano."
+        return "I fatti del contesto cambiano. Non tocca il computer."
     }
 
     var autonomyDialogMessage: String {
         if authority == "execute" {
             return "Un passo autonomo osserva, pianifica e può eseguire. Sul computer solo se il piano nuovo lo richiede, e solo dopo questa conferma."
+        }
+        if authority == "read" {
+            return "Un passo autonomo riconosce gli eventi in attesa, poi si ferma: non pianifica, non simula e non esegue."
         }
         return "Un passo autonomo osserva, pianifica e simula. I fatti del contesto restano fermi."
     }
@@ -174,7 +182,19 @@ final class WorkbenchModel: ObservableObject {
         if authority == "execute" {
             return "Fino a \(autonomyMaxSteps) passi. Ognuno osserva, pianifica e può eseguire. Sul computer solo se un piano lo richiede, e solo dopo questa conferma. Il ciclo si ferma a obiettivo raggiunto o a un rifiuto."
         }
+        if authority == "read" {
+            return "Fino a \(autonomyMaxSteps) passi. Ognuno può riconoscere gli eventi in attesa, poi si ferma sull'autorità di lettura: non pianifica, non simula e non esegue."
+        }
         return "Fino a \(autonomyMaxSteps) passi di osservazione, piano e simulazione. I fatti del contesto restano fermi. Il ciclo si ferma a obiettivo raggiunto o a un rifiuto."
+    }
+
+    /// Session autonomy authority for Passo/Ciclo — preserve :read from the API.
+    var autonomyAuthority: String {
+        switch authority {
+        case "execute": return "execute"
+        case "read": return "read"
+        default: return "simulate"
+        }
     }
 
     init() {
@@ -214,6 +234,19 @@ final class WorkbenchModel: ObservableObject {
                 pendingEvents = int(status["pending-events"])
                 hasPlan = (status["plan-p"] as? Bool) ?? false
                 planSuccess = (status["plan-success"] as? Bool) ?? false
+                // Apply external gates from status before the plan GET so
+                // Simula/Esegui stay idle while later requests are in flight.
+                externalMatches = (status["external-matches"] as? Bool) ?? true
+                externalSupported = (status["external-supported"] as? Bool) ?? true
+                // Drop prior plan's external lists until this refresh's plan GET
+                // returns, so Esegui cannot confirm adapters from a stale plan.
+                externalActions = []
+                externalWithheld = []
+                planExternalPending = true
+                let gateSnap = "\(int(status["facts"]))|\(openGoals)|\(planSuccess)|\(externalMatches)|\(externalSupported)"
+                if gateSnap != archiveGateSnapshot {
+                    archiveProbePending = true
+                }
                 let missing = factLines(from: status["listening-missing"])
                 missingLabel = missing.map(\.label).joined(separator: " · ")
                 if listening && !wasListening && actionName.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -224,8 +257,8 @@ final class WorkbenchModel: ObservableObject {
                 if let plan = planBody["plan"] as? [String: Any] {
                     externalActions = externalActions(from: plan, key: "external")
                     externalWithheld = externalActions(from: plan, key: "external-withheld")
-                    externalMatches = (plan["external-matches"] as? Bool) ?? true
-                    externalSupported = (plan["external-supported"] as? Bool) ?? true
+                    externalMatches = (plan["external-matches"] as? Bool) ?? externalMatches
+                    externalSupported = (plan["external-supported"] as? Bool) ?? externalSupported
                     if status["plan-success"] == nil {
                         planSuccess = (plan["success"] as? Bool) ?? false
                     }
@@ -237,11 +270,14 @@ final class WorkbenchModel: ObservableObject {
                     hasPlan = false
                     planSuccess = false
                 }
+                planExternalPending = false
                 let explain = try await get("/api/explain")
                 narration = string(explain["narration"]) ?? ""
                 nodes = nodes(from: explain["graph"])
                 let archive = try await get("/api/archive?applies=1")
                 cards = cards(from: archive["procedures"])
+                archiveGateSnapshot = gateSnap
+                archiveProbePending = false
                 let factsBody = try await get("/api/facts")
                 factLines = factLines(from: factsBody["facts"])
                 let operators = try await get("/api/operators")
@@ -279,10 +315,13 @@ final class WorkbenchModel: ObservableObject {
                 externalWithheld = []
                 externalMatches = true
                 externalSupported = true
+                planExternalPending = false
                 openGoals = 0
                 pendingEvents = 0
                 hasPlan = false
                 planSuccess = false
+                archiveProbePending = false
+                archiveGateSnapshot = ""
                 autonomyLastLine = ""
                 autonomyLastIsError = false
                 statusLine = "Server non raggiungibile su \(baseURL)"
@@ -293,6 +332,7 @@ final class WorkbenchModel: ObservableObject {
 
     func setAuthority(_ value: String) {
         authority = value
+        guard connected else { return }
         Task {
             _ = try? await post("/api/autonomy/policy", ["authority": value])
             refresh()
@@ -302,6 +342,7 @@ final class WorkbenchModel: ObservableObject {
     func setMaxSteps(_ value: Int) {
         let steps = min(32, max(1, value))
         autonomyMaxSteps = steps
+        guard connected else { return }
         Task {
             _ = try? await post("/api/autonomy/policy", ["max-steps": steps])
             refresh()
@@ -323,7 +364,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     private func postAutonomy(path: String, loop: Bool) async {
-        let auth = authority == "execute" ? "execute" : "simulate"
+        let auth = autonomyAuthority
         let touchesComputer = auth == "execute"
         do {
             var payload: [String: Any] = ["authority": auth]
@@ -393,7 +434,8 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func use(name: String) {
-        guard connected, cards.contains(where: { $0.name == name && $0.applies }) else { return }
+        guard connected, !archiveProbePending,
+              cards.contains(where: { $0.name == name && $0.applies }) else { return }
         Task {
             await run("/api/archive/use", ["name": name], success: "Piano ricostruito da \(name).")
         }
@@ -407,6 +449,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func addFact() {
+        guard connected else { return }
         let parts = factDraft.split(whereSeparator: \.isWhitespace).map(String.init)
         guard !parts.isEmpty else { return }
         factDraft = ""
@@ -416,6 +459,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func ask() {
+        guard connected else { return }
         let phrase = phraseDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !phrase.isEmpty else { return }
         Task {
@@ -437,6 +481,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func choose(_ choice: GoalChoice) {
+        guard connected else { return }
         let goal = choice.goal
         Task {
             do {
@@ -473,6 +518,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func watchDirectory() {
+        guard connected else { return }
         if watchingDirectory {
             Task {
                 await run("/api/watch-directory/stop", [:],
@@ -490,6 +536,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func noticeProcesses() {
+        guard connected else { return }
         Task {
             await run("/api/notice-processes", [:],
                       success: "Processi notati. Il piano non parte.")
@@ -497,6 +544,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func noticeTerminals() {
+        guard connected else { return }
         Task {
             await run("/api/notice-terminals", [:],
                       success: "Terminale notato. Il piano non parte.")
@@ -504,6 +552,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func noticeTerminalText() {
+        guard connected else { return }
         Task {
             await run("/api/notice-terminal-text", [:],
                       success: "Testo notato. Il piano non parte.")
@@ -511,6 +560,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func noticeTerminalScreen() {
+        guard connected else { return }
         Task {
             await run("/api/notice-terminal-screen", [:],
                       success: "Schermo notato. Il piano non parte.")
@@ -518,6 +568,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func watchTerminalScreen() {
+        guard connected else { return }
         if watchingTerminalScreen {
             Task {
                 await run("/api/watch-terminal-screen/stop", [:],
@@ -532,6 +583,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func watchTerminalText() {
+        guard connected else { return }
         if watchingTerminalText {
             Task {
                 await run("/api/watch-terminal-text/stop", [:],
@@ -546,6 +598,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func watchTerminals() {
+        guard connected else { return }
         if watchingTerminals {
             Task {
                 await run("/api/watch-terminals/stop", [:],
@@ -560,6 +613,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func watchProcesses() {
+        guard connected else { return }
         if watchingProcesses {
             Task {
                 await run("/api/watch-processes/stop", [:],
@@ -574,6 +628,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func noticeDirectory() {
+        guard connected else { return }
         let path = pathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else { return }
         pathDraft = ""
@@ -584,6 +639,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func noticePath() {
+        guard connected else { return }
         let path = pathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !path.isEmpty else { return }
         pathDraft = ""
@@ -594,6 +650,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func removeFact(_ fact: FactLine) {
+        guard connected else { return }
         Task {
             await run("/api/remove-fact", ["fact": fact.parts], success: "Fatto tolto.")
         }
@@ -633,7 +690,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func nameOperator() {
-        guard let learned else { return }
+        guard connected, let learned else { return }
         let word = wordDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !word.isEmpty else { return }
         Task {
@@ -657,6 +714,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func nameAlias() {
+        guard connected else { return }
         let word = aliasDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !word.isEmpty,
               let target = aliases.first(where: { $0.id == aliasTarget }) ?? aliases.first

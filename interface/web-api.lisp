@@ -36,39 +36,52 @@
         (list* :effects-only t plist)
         plist)))
 
+(defun %plan-external-gates (plan &optional context)
+  "Return (VALUES MATCHES-P SUPPORTED-P) for PLAN's external-action gates.
+No plan yields (VALUES T T) — callers still require plan-success to enable
+simulate/run. MATCHES and SUPPORTED use the same rules as GET /api/plan."
+  (unless (plan-p plan)
+    (return-from %plan-external-gates (values t t)))
+  (let* ((ctx (or context (ensure-current-context)))
+         (recorded (getf (plan-meta plan) :external-actions-recorded))
+         (live (plan-external-actions plan :context ctx))
+         (actions (if recorded
+                      (getf (plan-meta plan) :external-actions)
+                      live))
+         (matches (if recorded
+                      (and (plan-external-actions-match-p plan :context ctx) t)
+                      (null live)))
+         (supported (or (null actions)
+                        (plan-external-actions-supported-p plan :context ctx))))
+    (values (and matches t) (and supported t))))
+
 (defun %serialize-plan (plan)
   (if (plan-p plan)
       (let* ((ctx (ensure-current-context))
              (recorded (getf (plan-meta plan) :external-actions-recorded))
              (live (plan-external-actions plan :context ctx))
              (withheld (plan-external-actions-withheld plan :context ctx)))
-        (list :success (and (plan-success plan) t)
-              :goals (json-array (plan-goals plan))
-              :steps (json-array (mapcar #'%serialize-step (plan-steps plan)))
-              :remaining (json-array (plan-remaining plan))
-              :operators-used (json-array (plan-operators-used plan))
-              :length (plan-length plan)
-              :cost (plan-cost plan)
-              :from-procedure (or (getf (plan-meta plan) :from-procedure) :null)
-              :external (json-array
-                         (if recorded
-                             (getf (plan-meta plan) :external-actions)
-                             live))
-              :external-matches
-              (if recorded
-                  (and (plan-external-actions-match-p plan :context ctx) t)
-                  (and (null live) t))
-              :external-withheld
-              (json-array
-               (if recorded
-                   (getf (plan-meta plan) :external-actions-withheld)
-                   withheld))
-              :external-supported
-              (and (or (null (if recorded
-                                 (getf (plan-meta plan) :external-actions)
-                                 live))
-                       (plan-external-actions-supported-p plan :context ctx))
-                   t)))
+        (multiple-value-bind (matches supported)
+            (%plan-external-gates plan ctx)
+          (list :success (and (plan-success plan) t)
+                :goals (json-array (plan-goals plan))
+                :steps (json-array (mapcar #'%serialize-step (plan-steps plan)))
+                :remaining (json-array (plan-remaining plan))
+                :operators-used (json-array (plan-operators-used plan))
+                :length (plan-length plan)
+                :cost (plan-cost plan)
+                :from-procedure (or (getf (plan-meta plan) :from-procedure) :null)
+                :external (json-array
+                           (if recorded
+                               (getf (plan-meta plan) :external-actions)
+                               live))
+                :external-matches matches
+                :external-withheld
+                (json-array
+                 (if recorded
+                     (getf (plan-meta plan) :external-actions-withheld)
+                     withheld))
+                :external-supported supported)))
       :null))
 
 (defun %serialize-execution (ex)
@@ -107,42 +120,46 @@
   (let* ((ctx (ensure-current-context))
          (goals (normalize-planning-goals (goals-of ctx)))
          (open (differences (context-all-facts ctx) goals)))
-    (list :ok t
-          :version *version*
-          :api *web-api-version*
-          :context (context-name ctx)
-          :mode (context-mode ctx)
-          :domains (json-array (gp-domains))
-          :plan-p (and (plan-p *current-plan*) t)
-          :plan-success (and (plan-p *current-plan*)
-                             (plan-success *current-plan*)
-                             t)
-          :events (length (gp-events))
-          :pending-events (length (pending-events ctx))
-          :goals (length (gp-goals))
-          :open-goals (length open)
-          :facts (length (gp-facts))
-          :repair-depth *procedure-repair-archive-depth*
-          :listening (and (observation-active-p) t)
-          :directory-watch (or (and (fboundp 'gp-directory-watch)
-                                    (gp-directory-watch))
+    (multiple-value-bind (matches supported)
+        (%plan-external-gates *current-plan* ctx)
+      (list :ok t
+            :version *version*
+            :api *web-api-version*
+            :context (context-name ctx)
+            :mode (context-mode ctx)
+            :domains (json-array (gp-domains))
+            :plan-p (and (plan-p *current-plan*) t)
+            :plan-success (and (plan-p *current-plan*)
+                               (plan-success *current-plan*)
+                               t)
+            :external-matches matches
+            :external-supported supported
+            :events (length (gp-events))
+            :pending-events (length (pending-events ctx))
+            :goals (length (gp-goals))
+            :open-goals (length open)
+            :facts (length (gp-facts))
+            :repair-depth *procedure-repair-archive-depth*
+            :listening (and (observation-active-p) t)
+            :directory-watch (or (and (fboundp 'gp-directory-watch)
+                                      (gp-directory-watch))
+                                 :null)
+            :process-watch (or (and (fboundp 'gp-process-watch)
+                                    (gp-process-watch))
                                :null)
-          :process-watch (or (and (fboundp 'gp-process-watch)
-                                  (gp-process-watch))
-                             :null)
-          :terminal-watch (or (and (fboundp 'gp-terminal-watch)
-                                   (gp-terminal-watch))
-                              :null)
-          :terminal-text-watch (or (and (fboundp 'gp-terminal-text-watch)
-                                        (gp-terminal-text-watch))
-                                   :null)
-          :terminal-screen-watch (or (and (fboundp 'gp-terminal-screen-watch)
-                                          (gp-terminal-screen-watch))
+            :terminal-watch (or (and (fboundp 'gp-terminal-watch)
+                                     (gp-terminal-watch))
+                                :null)
+            :terminal-text-watch (or (and (fboundp 'gp-terminal-text-watch)
+                                          (gp-terminal-text-watch))
                                      :null)
-          :listening-missing
-          (json-array (if (observation-active-p)
-                          (getf *observation* :missing)
-                          nil)))))
+            :terminal-screen-watch (or (and (fboundp 'gp-terminal-screen-watch)
+                                            (gp-terminal-screen-watch))
+                                       :null)
+            :listening-missing
+            (json-array (if (observation-active-p)
+                            (getf *observation* :missing)
+                            nil))))))
 
 (defun %api-context ()
   (let ((ctx (ensure-current-context)))
@@ -741,6 +758,14 @@ PATH may include a query string (e.g. /api/archive?applies=1)."
           ((and (eq m :post) (string= p "/api/simulate"))
            (unless (plan-p *current-plan*)
              (error "No plan to simulate; POST /api/plan first"))
+           (unless (plan-success *current-plan*)
+             (error "The plan did not succeed; plan again before simulating."))
+           (multiple-value-bind (matches supported)
+               (%plan-external-gates *current-plan*)
+             (unless matches
+               (error "The external action no longer matches the plan."))
+             (unless supported
+               (error "The facts no longer support the external action.")))
            (let ((ex (gp-simulate)))
              (values 200 (list :ok t
                                :execution (%serialize-execution ex)))))
@@ -748,6 +773,14 @@ PATH may include a query string (e.g. /api/archive?applies=1)."
           ((and (eq m :post) (string= p "/api/run"))
            (unless (plan-p *current-plan*)
              (error "No plan to run; POST /api/plan first"))
+           (unless (plan-success *current-plan*)
+             (error "The plan did not succeed; plan again before running."))
+           (multiple-value-bind (matches supported)
+               (%plan-external-gates *current-plan*)
+             (unless matches
+               (error "The external action no longer matches the plan."))
+             (unless supported
+               (error "The facts no longer support the external action.")))
            (let* ((confirm (%body-get body :confirm t))
                   (adapters (%body-get body :adapters nil))
                   (ex (gp-run :confirm (and confirm (not (eq confirm :null)))

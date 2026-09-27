@@ -122,6 +122,7 @@
         <button type=\"button\" id=\"btnRefresh\">Refresh</button>
         <button type=\"button\" class=\"secondary\" id=\"btnReset\">Reset</button>
       </div>
+      <p class=\"status\" style=\"margin:0\">Refresh, Reset, and Load stay available when the server is unreachable. Plan, Simulate, Run, Emit, React, Add fact, Step, Loop, Remember, Use, and Score stay idle until a refresh succeeds.</p>
       <label for=\"domain\">Domain</label>
       <div class=\"row\">
         <select id=\"domain\">
@@ -137,21 +138,21 @@
     <section class=\"panel stack\">
       <h2>Deliberate</h2>
       <div class=\"row\">
-        <button type=\"button\" id=\"btnPlan\">Plan</button>
-        <button type=\"button\" class=\"secondary\" id=\"btnSim\">Simulate</button>
-        <button type=\"button\" class=\"secondary\" id=\"btnRun\">Run</button>
+        <button type=\"button\" id=\"btnPlan\" disabled>Plan</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnSim\" disabled>Simulate</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnRun\" disabled>Run</button>
       </div>
       <label for=\"goals\">Goals JSON (optional)</label>
       <input id=\"goals\" placeholder='[[\"tests-ok\",\"myapp\"]]' style=\"width:100%\"/>
-      <p class=\"status\" style=\"margin:0\">Plan with an empty Goals field uses open context goals (same as the workbench). It stays idle when none are open, and when typed Goals JSON already holds in the facts. A single fact array is treated as one goal. Plan reuses an archived procedure whose goals include every requested fact. An exact match comes first. Extra goals of that procedure are applied when its steps still work. Otherwise procedures that each achieve part of the request are combined: no extra goals first, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left. Simulate and Run stay idle until a successful plan still matches its external actions and the facts still support them — the same refuse as the workbench and the REPL.</p>
+      <p class=\"status\" style=\"margin:0\">Plan with an empty Goals field uses open context goals (same as the workbench). It stays idle when none are open, when typed Goals JSON is invalid or empty, and when typed Goals JSON already holds in the facts. A single fact array is treated as one goal. Plan reuses an archived procedure whose goals include every requested fact. An exact match comes first. Extra goals of that procedure are applied when its steps still work. Otherwise procedures that each achieve part of the request are combined: no extra goals first, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left. Simulate stays idle until status reports a successful matching, supported plan. Run stays idle until that refresh's plan GET returns, so adapters follow the live external list. Run always asks for confirmation; when the plan names adapter actions it may run them after that confirm, like the workbench Esegui.</p>
     </section>
     <section class=\"panel stack\">
       <h2>Events</h2>
       <label for=\"event\">Event JSON</label>
       <input id=\"event\" value='[\"file-created\",\"document.pdf\"]' style=\"width:100%\"/>
       <div class=\"row\">
-        <button type=\"button\" id=\"btnEmit\">Emit + react + plan</button>
-        <button type=\"button\" class=\"secondary\" id=\"btnReact\">React</button>
+        <button type=\"button\" id=\"btnEmit\" disabled>Emit + react + plan</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnReact\" disabled>React</button>
       </div>
       <p class=\"status\" style=\"margin:0\">React stays idle when there is no pending event. Emit stays idle until Event JSON is a non-empty array.</p>
     </section>
@@ -159,7 +160,7 @@
       <h2>Assert</h2>
       <label for=\"fact\">Fact JSON</label>
       <input id=\"fact\" placeholder='[\"toolchain\",\"ready\"]' style=\"width:100%\"/>
-      <button type=\"button\" class=\"secondary\" id=\"btnFact\">Add fact</button>
+      <button type=\"button\" class=\"secondary\" id=\"btnFact\" disabled>Add fact</button>
       <p class=\"status\" style=\"margin:0\">Add fact stays idle until Fact JSON is a non-empty array.</p>
     </section>
     <section class=\"panel stack\">
@@ -170,25 +171,27 @@
         <option value=\"read\">read</option>
         <option value=\"execute\">execute</option>
       </select>
+      <label for=\"maxSteps\">Max steps (loop)</label>
+      <input id=\"maxSteps\" type=\"number\" min=\"1\" max=\"32\" value=\"8\" style=\"width:100%\"/>
       <div class=\"row\">
-        <button type=\"button\" id=\"btnAutoStep\">Step</button>
-        <button type=\"button\" class=\"secondary\" id=\"btnAutoLoop\">Loop</button>
+        <button type=\"button\" id=\"btnAutoStep\" disabled>Step</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnAutoLoop\" disabled>Loop</button>
       </div>
-      <p class=\"status\" style=\"margin:0\">Default is simulate — never unattended OS destruction. Step and Loop stay idle when there is no open goal and no pending event.</p>
+      <p class=\"status\" style=\"margin:0\">Default is simulate — never unattended OS destruction. Authority and max steps follow the session policy (same as the workbench). Read still recognizes pending events (facts and goals may change), then halts without planning, simulating, or executing. Execute asks for confirmation, then may run adapters like the workbench Passo/Ciclo. Step and Loop stay idle when there is no open goal and no pending event.</p>
     </section>
     <section class=\"panel stack\">
       <h2>Archive</h2>
       <label for=\"procName\">Procedure name</label>
       <input id=\"procName\" placeholder=\"connect-iface\" style=\"width:100%\"/>
       <div class=\"row\">
-        <button type=\"button\" id=\"btnRemember\">Remember</button>
-        <button type=\"button\" class=\"secondary\" id=\"btnUse\">Use</button>
+        <button type=\"button\" id=\"btnRemember\" disabled>Remember</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnUse\" disabled>Use</button>
       </div>
       <div class=\"row\">
-        <button type=\"button\" class=\"secondary\" id=\"btnScoreOk\">Score success</button>
-        <button type=\"button\" class=\"secondary\" id=\"btnScoreFail\">Score failure</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnScoreOk\" disabled>Score success</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnScoreFail\" disabled>Score failure</button>
       </div>
-      <p class=\"status\" style=\"margin:0\">Remember stays idle until a successful plan exists — same rule as Simulate and Run. Use stays idle until an archived procedure applies to the current facts (a name must match and apply; without a name, any applicable procedure plus an open goal). Score needs a named archived procedure. Use replays stored steps. A missing precondition is restored by stored procedures that achieve some of those facts: a full cover first, then procedures with no extra goals, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left. That repair may itself reuse a stored procedure, sixty-one levels deep. Then the stored steps continue.</p>
+      <p class=\"status\" style=\"margin:0\">Remember stays idle until a successful plan exists. Simulate and Run also need that plan's external actions to still match and stay supported. Use stays idle until an archived procedure applies to the current facts (a name must match and apply; without a name, any applicable procedure plus an open goal). Score needs a named archived procedure. Use replays stored steps. A missing precondition is restored by stored procedures that achieve some of those facts: a full cover first, then procedures with no extra goals, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left. That repair may itself reuse a stored procedure, sixty-one levels deep. Then the stored steps continue.</p>
     </section>
   </aside>
   <section class=\"stack\">
@@ -231,6 +234,28 @@ function setDisabled(id, off) {
 let openGoals = 0;
 let currentFacts = [];
 let currentProcedures = [];
+let planTouchesComputer = false;
+let serverReachable = false;
+function idleMutationControls() {
+  planTouchesComputer = false;
+  openGoals = 0;
+  currentFacts = [];
+  currentProcedures = [];
+  ['btnPlan','btnSim','btnRun','btnEmit','btnReact','btnFact',
+   'btnAutoStep','btnAutoLoop','btnRemember','btnUse','btnScoreOk','btnScoreFail'
+  ].forEach(id => setDisabled(id, true));
+}
+function markDisconnected(message) {
+  serverReachable = false;
+  idleMutationControls();
+  const line = document.getElementById('statusLine');
+  line.textContent = message || 'Server unreachable';
+  line.classList.add('err');
+}
+function markConnected() {
+  serverReachable = true;
+  document.getElementById('statusLine').classList.remove('err');
+}
 function goalsInputFilled() {
   return document.getElementById('goals').value.trim().length > 0;
 }
@@ -261,9 +286,19 @@ function typedGoalsAllHold() {
     return false;
   }
 }
+function typedGoalsReady() {
+  // Filled Goals must parse to a non-empty goal list before Plan enables.
+  try {
+    const list = normalizeGoalsInput(parseInput('goals', null));
+    return !!(list && list.length);
+  } catch (e) {
+    return false;
+  }
+}
 function updatePlanButton() {
+  if (!serverReachable) { setDisabled('btnPlan', true); return; }
   if (goalsInputFilled()) {
-    setDisabled('btnPlan', typedGoalsAllHold());
+    setDisabled('btnPlan', !typedGoalsReady() || typedGoalsAllHold());
   } else {
     setDisabled('btnPlan', openGoals <= 0);
   }
@@ -282,6 +317,12 @@ function namedProcedureApplies() {
   return !!(found && found.applies);
 }
 function updateArchiveButtons() {
+  if (!serverReachable) {
+    setDisabled('btnUse', true);
+    setDisabled('btnScoreOk', true);
+    setDisabled('btnScoreFail', true);
+    return;
+  }
   const applies = namedProcedureApplies();
   const named = namedProcedureExists();
   const hasApplicable = currentProcedures.some(p => p.applies);
@@ -300,43 +341,84 @@ function validJsonArray(id) {
   }
 }
 function updateEmitFactButtons() {
+  if (!serverReachable) {
+    setDisabled('btnEmit', true);
+    setDisabled('btnFact', true);
+    return;
+  }
   setDisabled('btnEmit', !validJsonArray('event'));
   setDisabled('btnFact', !validJsonArray('fact'));
 }
 async function refresh() {
-  const st = await api('GET', '/api/status');
-  document.getElementById('statusLine').textContent =
-    'v' + st.version + ' · ' + st.context + ' · ' + st.mode +
-    ' · domains ' + JSON.stringify(st.domains);
-  const planOk = !!st['plan-success'];
-  openGoals = st['open-goals'] || 0;
-  const pendingEvents = st['pending-events'] || 0;
-  const autonomyWork = openGoals > 0 || pendingEvents > 0;
-  setDisabled('btnRemember', !planOk);
-  setDisabled('btnReact', pendingEvents <= 0);
-  setDisabled('btnAutoStep', !autonomyWork);
-  setDisabled('btnAutoLoop', !autonomyWork);
-  currentFacts = (await api('GET', '/api/facts')).facts || [];
-  show('facts', currentFacts);
-  updatePlanButton();
-  updateEmitFactButtons();
-  show('goalsOut', (await api('GET', '/api/goals')).goals);
-  show('events', (await api('GET', '/api/events')).events);
-  const plan = (await api('GET', '/api/plan')).plan;
-  show('plan', plan);
-  // Same gate as workbench canSimulate / canExecute: refuse when the
-  // recorded external action changed or the facts no longer support it.
-  const matches = !plan || !!plan['external-matches'];
-  const supported = !plan || !!plan['external-supported'];
-  const canSimRun = planOk && matches && supported;
-  setDisabled('btnSim', !canSimRun);
-  setDisabled('btnRun', !canSimRun);
-  currentProcedures = (await api('GET', '/api/archive?applies=1')).procedures || [];
-  show('archive', currentProcedures);
-  updateArchiveButtons();
-  show('autonomy', (await api('GET', '/api/autonomy')));
-  const ex = await api('GET', '/api/explain');
-  show('explain', ex.text || '(no trace)');
+  try {
+    const st = await api('GET', '/api/status');
+    markConnected();
+    document.getElementById('statusLine').textContent =
+      'v' + st.version + ' · ' + st.context + ' · ' + st.mode +
+      ' · domains ' + JSON.stringify(st.domains);
+    const planOk = !!st['plan-success'];
+    openGoals = st['open-goals'] || 0;
+    const pendingEvents = st['pending-events'] || 0;
+    const autonomyWork = openGoals > 0 || pendingEvents > 0;
+    // Gate from status immediately (includes external-matches / supported)
+    // so Sim/Run stay idle before the later plan GET returns.
+    const matches = st['external-matches'] !== false;
+    const supported = st['external-supported'] !== false;
+    const canSimRun = planOk && matches && supported;
+    setDisabled('btnSim', !canSimRun);
+    // Run waits for this refresh's plan GET so adapters follow the live
+    // external list, not a stale planTouchesComputer from the prior plan.
+    planTouchesComputer = false;
+    setDisabled('btnRun', true);
+    setDisabled('btnRemember', !planOk);
+    setDisabled('btnReact', pendingEvents <= 0);
+    setDisabled('btnAutoStep', !autonomyWork);
+    setDisabled('btnAutoLoop', !autonomyWork);
+    currentProcedures = [];
+    updateArchiveButtons();
+    currentFacts = (await api('GET', '/api/facts')).facts || [];
+    show('facts', currentFacts);
+    updatePlanButton();
+    updateEmitFactButtons();
+    show('goalsOut', (await api('GET', '/api/goals')).goals);
+    show('events', (await api('GET', '/api/events')).events);
+    const plan = (await api('GET', '/api/plan')).plan;
+    show('plan', plan);
+    planTouchesComputer = !!(plan && Array.isArray(plan.external) && plan.external.length
+                             && plan['external-matches'] !== false
+                             && plan['external-supported'] !== false);
+    setDisabled('btnRun', !canSimRun);
+    currentProcedures = (await api('GET', '/api/archive?applies=1')).procedures || [];
+    show('archive', currentProcedures);
+    updateArchiveButtons();
+    const auto = await api('GET', '/api/autonomy');
+    show('autonomy', auto);
+    syncAutonomyControls(auto);
+    const ex = await api('GET', '/api/explain');
+    show('explain', ex.text || '(no trace)');
+  } catch (e) {
+    markDisconnected(e.message);
+    throw e;
+  }
+}
+function syncAutonomyControls(auto) {
+  const policy = (auto && auto.policy) || {};
+  const auth = String(policy.authority || 'simulate').replace(/^:/, '').toLowerCase();
+  const sel = document.getElementById('authority');
+  if ([...sel.options].some(o => o.value === auth)) sel.value = auth;
+  const steps = Number(policy['max-steps']);
+  if (Number.isFinite(steps) && steps >= 1) {
+    document.getElementById('maxSteps').value = String(Math.min(32, Math.max(1, Math.round(steps))));
+  }
+}
+function autonomyMaxSteps() {
+  const n = Number(document.getElementById('maxSteps').value);
+  if (!Number.isFinite(n)) return 8;
+  return Math.min(32, Math.max(1, Math.round(n)));
+}
+function pushAutonomyPolicy(patch) {
+  if (!serverReachable) return Promise.resolve();
+  return api('POST', '/api/autonomy/policy', patch).then(refresh);
 }
 function parseInput(id, fallback) {
   const raw = document.getElementById(id).value.trim();
@@ -362,8 +444,15 @@ document.getElementById('btnPlan').onclick = () => {
 };
 document.getElementById('goals').addEventListener('input', updatePlanButton);
 document.getElementById('btnSim').onclick = () => api('POST', '/api/simulate', {}).then(refresh).catch(e => alert(e.message));
-document.getElementById('btnRun').onclick = () =>
-  api('POST', '/api/run', { confirm: true, adapters: false }).then(refresh).catch(e => alert(e.message));
+document.getElementById('btnRun').onclick = () => {
+  const adapters = planTouchesComputer;
+  const msg = adapters
+    ? 'Run will update the context facts and may run adapter actions on this computer. Continue?'
+    : 'Run will update the context facts. Adapter actions stay off. Continue?';
+  if (!confirm(msg)) return;
+  api('POST', '/api/run', { confirm: true, adapters })
+    .then(refresh).catch(e => alert(e.message));
+};
 document.getElementById('btnEmit').onclick = () => {
   let ev;
   try { ev = parseInput('event'); } catch (e) { alert(e.message); return; }
@@ -378,19 +467,43 @@ document.getElementById('btnFact').onclick = () => {
 };
 document.getElementById('event').addEventListener('input', updateEmitFactButtons);
 document.getElementById('fact').addEventListener('input', updateEmitFactButtons);
-document.getElementById('btnAutoStep').onclick = () =>
-  api('POST', '/api/autonomy/step', {
-    authority: document.getElementById('authority').value,
+function autonomyPayload(loop) {
+  const authority = document.getElementById('authority').value;
+  const payload = {
+    authority,
     auto_confirm: false,
     adapters: false
-  }).then(refresh).catch(e => alert(e.message));
-document.getElementById('btnAutoLoop').onclick = () =>
-  api('POST', '/api/autonomy/loop', {
-    authority: document.getElementById('authority').value,
-    max_steps: 4,
-    auto_confirm: false,
-    adapters: false
-  }).then(refresh).catch(e => alert(e.message));
+  };
+  if (loop) payload.max_steps = autonomyMaxSteps();
+  if (authority === 'execute') {
+    const msg = loop
+      ? ('Up to ' + autonomyMaxSteps()
+         + ' autonomous steps may update facts. Adapter actions run only if a new plan requires them. Continue?')
+      : 'One autonomous step may update facts. Adapter actions run only if a new plan requires them. Continue?';
+    if (!confirm(msg)) return null;
+    payload.adapters = true;
+    payload.auto_confirm = true;
+  }
+  return payload;
+}
+document.getElementById('btnAutoStep').onclick = () => {
+  const payload = autonomyPayload(false);
+  if (!payload) return;
+  api('POST', '/api/autonomy/step', payload).then(refresh).catch(e => alert(e.message));
+};
+document.getElementById('btnAutoLoop').onclick = () => {
+  const payload = autonomyPayload(true);
+  if (!payload) return;
+  api('POST', '/api/autonomy/loop', payload).then(refresh).catch(e => alert(e.message));
+};
+document.getElementById('authority').addEventListener('change', () => {
+  pushAutonomyPolicy({ authority: document.getElementById('authority').value })
+    .catch(e => alert(e.message));
+});
+document.getElementById('maxSteps').addEventListener('change', () => {
+  pushAutonomyPolicy({ 'max-steps': autonomyMaxSteps() })
+    .catch(e => alert(e.message));
+});
 function procedureName() {
   const raw = document.getElementById('procName').value.trim();
   return raw ? raw : null;
@@ -418,10 +531,7 @@ document.getElementById('btnScoreFail').onclick = () => {
   api('POST', '/api/archive/score', { name, success: false })
     .then(refresh).catch(e => alert(e.message));
 };
-refresh().catch(e => {
-  document.getElementById('statusLine').textContent = e.message;
-  document.getElementById('statusLine').classList.add('err');
-});
+refresh().catch(() => {});
 updateEmitFactButtons();
 </script>
 </body>

@@ -9,6 +9,149 @@ versions are the increments listed in `ROADMAP.md`.
 
 ## [Unreleased]
 
+## [0.194.0] — 2026-09-27
+
+### Changed
+
+- Workbench Esegui confirm no longer calls the run a simulation when
+  adapters stay off — facts still update. HTML execute Step/Loop confirm
+  says adapters run only if a new plan requires them (Passo/Ciclo parity).
+
+## [0.193.0] — 2026-09-27
+
+### Changed
+
+- Workbench Leggi captions and HTML Authority help name react-then-halt:
+  pending events may still update facts and goals, then autonomy stops
+  without plan/simulate/execute. Passo help says “passo”, not “ciclo”.
+
+## [0.192.0] — 2026-09-27
+
+### Changed
+
+- The workbench autonomy picker exposes Leggi / Simula / Esegui and Passo
+  and Ciclo send the live session authority — including `:read` — instead
+  of collapsing non-execute into simulate (HTML and API parity).
+
+## [0.191.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console idles Plan, Simulate, Run, Emit, React, Add
+  fact, Step, Loop, Remember, Use, and Score when a refresh fails
+  (`markDisconnected`), and keeps those controls idle until a refresh
+  succeeds — the same unreachable-server guard as the workbench.
+
+## [0.190.0] — 2026-09-27
+
+### Changed
+
+- The workbench keeps Esegui idle from status until that refresh's plan
+  GET returns (`planExternalPending`), so adapters cannot follow a
+  cleared external list — the same Run gate as the HTML console.
+  Deliberate help names the supported gate alongside matching.
+
+## [0.189.0] — 2026-09-27
+
+### Changed
+
+- `POST /api/simulate` and `/api/run` refuse when the plan did not
+  succeed or the live external gates fail — the same readiness as
+  status/plan and `gp-simulate`/`gp-run`. Workbench Simula/Esegui help
+  and captions follow `externalSupported` even when the external list
+  was cleared at status time.
+
+## [0.188.0] — 2026-09-27
+
+### Changed
+
+- The workbench keeps mutation controls idle when disconnected
+  (Aggiungi, Chiedi, Nota…, Usa questo piano, Pianifica, Simula, Esegui,
+  induce, alias, and the matching model guards), so a dead server cannot
+  be poked from a stale UI.
+
+## [0.187.0] — 2026-09-27
+
+### Changed
+
+- The HTML console keeps Run idle until that refresh's plan GET returns,
+  so `adapters` cannot follow a stale prior `planTouchesComputer`. The
+  workbench clears `externalActions` at status time for the same reason,
+  and `canSimulate` requires `externalSupported` directly.
+
+## [0.186.0] — 2026-09-27
+
+### Changed
+
+- The workbench keeps Usa questo piano idle while status shows that
+  facts, open goals, or plan gates changed and `GET /api/archive?applies=1`
+  has not returned yet — the same stale-applies guard as the HTML console
+  Use button, without clearing archive cards on every poll.
+
+## [0.185.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console Run asks for confirmation and sets
+  `adapters` true only when the current plan names matching, supported
+  external actions — the same rule as workbench Esegui. Otherwise Run
+  still confirms, updates facts, and leaves adapters off.
+
+## [0.184.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console Step and Loop, when Authority is `execute`,
+  ask for confirmation and then send `adapters` and `auto-confirm` true —
+  the same workbench Passo/Ciclo rule. Simulate authority still keeps
+  adapters off.
+
+## [0.183.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console syncs Authority and Max steps from
+  `GET /api/autonomy` on refresh, posts `/api/autonomy/policy` when they
+  change, and sends that max-steps on Loop — the same session policy as
+  the workbench, instead of a hard-coded loop limit of 4.
+
+## [0.182.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console keeps Plan idle when the Goals field is
+  filled with invalid JSON or an empty list — the same readiness rule
+  as Emit/Fact. Use and Score stay idle for the rest of a refresh until
+  the archive applies probe returns, so a stale `applies` flag cannot
+  fire Use mid-poll.
+
+## [0.181.0] — 2026-09-27
+
+### Added
+
+- `GET /api/status` reports `external-matches` and `external-supported`
+  beside `plan-success`, using the same helper as `GET /api/plan`.
+
+### Changed
+
+- The HTML operator console and workbench apply those status gates
+  before the plan GET returns, and gated console buttons start disabled
+  so they cannot fire during the first refresh.
+
+## [0.180.0] — 2026-09-27
+
+### Fixed
+
+- Record the notice/PTY and compile-warning work that landed after
+  0.179 without a version bump: Ubuntu/FreeBSD notice helpers accept
+  `pts/*` and util-linux `script -c`, process notice falls back to a
+  `ps` scan when `pgrep` misses, and force-load compiles without
+  WARNING or STYLE-WARNING.
+- Tests may bind `*notice-open-terminals-override*` so
+  `gp-notice-terminals` still runs on hosts that cannot allocate a PTY.
+- The HTML archive caption no longer claims Remember shares Simulate
+  and Run's external-match gate.
+
 ## [0.179.0] — 2026-09-27
 
 ### Changed
