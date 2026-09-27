@@ -58,7 +58,14 @@
       (is (plan-p reused))
       (is (equal '(connection interface-01 computer)
                  (first (plan-goals reused))))
-      (is (= 2 (plan-length reused))))))
+      (is (= 2 (plan-length reused)))))
+  (gp-reset)
+  (signals error (gp-remember-procedure))
+  (%mem-studio)
+  (let ((failed (gp-plan :goals '((ready interface-01)) :archive nil)))
+    (is (not (plan-success failed)))
+    (signals error (gp-remember-procedure :name 'nope))
+    (is (null (gp-find-procedure 'nope)))))
 
 (test persistence-snapshot-roundtrip
   (let* ((path (merge-pathnames

@@ -14,6 +14,8 @@ struct ArchiveCard: Identifiable {
     let failures: Int
     let steps: Int
     let operators: String
+    /// True when stored steps still rebuild a plan on the current facts.
+    let applies: Bool
 }
 
 struct FactLine: Identifiable, Equatable {
@@ -100,6 +102,9 @@ final class WorkbenchModel: ObservableObject {
     @Published var watchingTerminalText = false
     @Published var watchingTerminalScreen = false
     @Published var openGoals = 0
+    @Published var pendingEvents = 0
+    @Published var hasPlan = false
+    @Published var planSuccess = false
     @Published var externalActions: [ExternalAction] = []
     @Published var externalWithheld: [ExternalAction] = []
     @Published var externalMatches = true
@@ -114,16 +119,33 @@ final class WorkbenchModel: ObservableObject {
     }
 
     var executeConfirmsComputer: Bool {
-        !externalActions.isEmpty && externalMatches && externalSupported
+        planReady && !externalActions.isEmpty && externalMatches && externalSupported
     }
 
     var executeLacksSupport: Bool {
-        !externalActions.isEmpty && externalMatches && !externalSupported
+        planReady && !externalActions.isEmpty && externalMatches && !externalSupported
     }
 
     var executeWithholdsComputer: Bool {
-        externalActions.isEmpty && !externalWithheld.isEmpty && externalMatches
+        planReady && externalActions.isEmpty && !externalWithheld.isEmpty && externalMatches
     }
+
+    /// Passo and Ciclo only when something remains to observe or achieve.
+    var autonomyHasWork: Bool {
+        openGoals > 0 || pendingEvents > 0
+    }
+
+    /// A plan object exists and Means-Ends Analysis succeeded.
+    var planReady: Bool {
+        hasPlan && planSuccess
+    }
+
+    /// Simula and Esegui only when a successful plan still matches support rules.
+    var canSimulate: Bool {
+        planReady && externalMatches && !executeLacksSupport
+    }
+
+    var canExecute: Bool { canSimulate }
 
     var executeDialogMessage: String {
         if executeConfirmsComputer {
@@ -185,7 +207,13 @@ final class WorkbenchModel: ObservableObject {
                 watchingTerminals = (status["terminal-watch"] as? Bool) ?? false
                 watchingTerminalText = (status["terminal-text-watch"] as? Bool) ?? false
                 watchingTerminalScreen = (status["terminal-screen-watch"] as? Bool) ?? false
-                openGoals = int(status["goals"])
+                openGoals = int(status["open-goals"])
+                if openGoals == 0, status["open-goals"] == nil {
+                    openGoals = int(status["goals"])
+                }
+                pendingEvents = int(status["pending-events"])
+                hasPlan = (status["plan-p"] as? Bool) ?? false
+                planSuccess = (status["plan-success"] as? Bool) ?? false
                 let missing = factLines(from: status["listening-missing"])
                 missingLabel = missing.map(\.label).joined(separator: " · ")
                 if listening && !wasListening && actionName.trimmingCharacters(in: .whitespaces).isEmpty,
@@ -198,16 +226,21 @@ final class WorkbenchModel: ObservableObject {
                     externalWithheld = externalActions(from: plan, key: "external-withheld")
                     externalMatches = (plan["external-matches"] as? Bool) ?? true
                     externalSupported = (plan["external-supported"] as? Bool) ?? true
+                    if status["plan-success"] == nil {
+                        planSuccess = (plan["success"] as? Bool) ?? false
+                    }
                 } else {
                     externalActions = []
                     externalWithheld = []
                     externalMatches = true
                     externalSupported = true
+                    hasPlan = false
+                    planSuccess = false
                 }
                 let explain = try await get("/api/explain")
                 narration = string(explain["narration"]) ?? ""
                 nodes = nodes(from: explain["graph"])
-                let archive = try await get("/api/archive")
+                let archive = try await get("/api/archive?applies=1")
                 cards = cards(from: archive["procedures"])
                 let factsBody = try await get("/api/facts")
                 factLines = factLines(from: factsBody["facts"])
@@ -246,6 +279,10 @@ final class WorkbenchModel: ObservableObject {
                 externalWithheld = []
                 externalMatches = true
                 externalSupported = true
+                openGoals = 0
+                pendingEvents = 0
+                hasPlan = false
+                planSuccess = false
                 autonomyLastLine = ""
                 autonomyLastIsError = false
                 statusLine = "Server non raggiungibile su \(baseURL)"
@@ -272,12 +309,14 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func autonomyStep() {
+        guard connected, autonomyHasWork else { return }
         Task {
             await postAutonomy(path: "/api/autonomy/step", loop: false)
         }
     }
 
     func autonomyLoop() {
+        guard connected, autonomyHasWork else { return }
         Task {
             await postAutonomy(path: "/api/autonomy/loop", loop: true)
         }
@@ -310,6 +349,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func planOpenGoals() {
+        guard connected, openGoals > 0 else { return }
         Task {
             await run("/api/plan-open-goals", [:],
                       success: "Piano aggiornato. Non è stato eseguito.")
@@ -317,12 +357,14 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func simulate() {
+        guard connected, canSimulate else { return }
         Task {
             await run("/api/simulate", [:], success: "Simulazione conclusa. I fatti non sono cambiati.")
         }
     }
 
     func execute() {
+        guard connected, canExecute else { return }
         let touchesComputer = executeConfirmsComputer
         Task {
             do {
@@ -351,12 +393,14 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func use(name: String) {
+        guard connected, cards.contains(where: { $0.name == name && $0.applies }) else { return }
         Task {
             await run("/api/archive/use", ["name": name], success: "Piano ricostruito da \(name).")
         }
     }
 
     func noteState() {
+        guard connected, listening else { return }
         Task {
             await run("/api/induce/note", [:], success: "Stato annotato. Modifica i fatti, poi induci la regola.")
         }
@@ -407,13 +451,14 @@ final class WorkbenchModel: ObservableObject {
                         return
                     }
                 }
-                let added = try await post("/api/add-goal", ["goal": goal.parts])
-                if let error = string(added["error"]), added["ok"] as? Bool == false {
-                    report(error, error: true)
-                    return
-                }
                 let planned = try await post("/api/plan", ["goals": [goal.parts]])
                 if let error = string(planned["error"]), planned["ok"] as? Bool == false {
+                    report(error, error: true)
+                    refresh()
+                    return
+                }
+                let added = try await post("/api/add-goal", ["goal": goal.parts])
+                if let error = string(added["error"]), added["ok"] as? Bool == false {
                     report(error, error: true)
                 } else {
                     choices = []
@@ -555,6 +600,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func learnRule() {
+        guard connected, listening else { return }
         let name = actionName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             report("Scrivi il nome della regola da indurre.", error: true)
@@ -636,6 +682,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func learn() {
+        guard connected, listening else { return }
         let name = actionName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else {
             report("Scrivi il nome dell'azione da imparare.", error: true)
@@ -952,7 +999,8 @@ final class WorkbenchModel: ObservableObject {
                 successes: int(item["success-count"]),
                 failures: int(item["failure-count"]),
                 steps: int(item["step-count"]),
-                operators: ops.joined(separator: " · ")
+                operators: ops.joined(separator: " · "),
+                applies: (item["applies"] as? Bool) ?? false
             )
         }
     }

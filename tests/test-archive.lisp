@@ -114,6 +114,27 @@
     (is (search "Reused procedure" text))
     (is (search "POWER-ON" text))))
 
+(test archive-use-ends-plan-failed-listening
+  (gp-clear-memory)
+  (%archive-studio)
+  (gp-remember-procedure :name 'once)
+  (let ((failed (gp-plan :goals '((ready interface-01)) :archive nil)))
+    (is (not (plan-success failed)))
+    (is (observation-active-p))
+    (is (eq :plan-failed (getf (gp-observation) :reason))))
+  (let ((plan (gp-use-procedure :name 'once)))
+    (is (plan-success plan))
+    (is (eq 'once (getf (plan-meta plan) :from-procedure)))
+    (is (not (observation-active-p)))
+    (is (null *observed-before*))
+    (signals error (gp-induce-rule 'stale))
+    (signals error (gp-learn-action 'stale)))
+  (gp-listen :reason :manual)
+  (is (observation-active-p))
+  (gp-use-procedure :name 'once)
+  (is (observation-active-p))
+  (is (eq :manual (getf (gp-observation) :reason))))
+
 (test archive-plan-reuses-procedure-whose-goals-include-the-request
   (gp-clear-memory)
   (gp-reset)

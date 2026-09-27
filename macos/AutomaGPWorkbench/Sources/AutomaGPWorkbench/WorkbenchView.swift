@@ -199,7 +199,10 @@ struct WorkbenchView: View {
                             }
                             Button("Usa questo piano") { model.use(name: card.name) }
                                 .controlSize(.small)
-                                .help("Ricostruisce il piano da \(card.name)")
+                                .disabled(!card.applies)
+                                .help(card.applies
+                                      ? "Ricostruisce il piano da \(card.name)"
+                                      : "Non applica allo stato attuale. Ripristina i fatti o scegli un'altra procedura.")
                         }
                         .padding(12)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -297,17 +300,25 @@ struct WorkbenchView: View {
                     Button("Simula") { model.simulate() }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
-                        .disabled(!model.externalMatches || model.executeLacksSupport)
+                        .disabled(!model.canSimulate)
                         .keyboardShortcut(.return, modifiers: .command)
-                        .help(!model.externalMatches
+                        .help(!model.hasPlan
+                              ? "Serve un piano. Pianifica o formula un obiettivo."
+                              : !model.planSuccess
+                              ? "Il piano non è riuscito. Completa i fatti o pianifica di nuovo."
+                              : !model.externalMatches
                               ? "L'azione sul computer non è più quella del piano. Pianifica di nuovo."
                               : model.executeLacksSupport
                                 ? "I fatti non sostengono più l'azione sul computer. Pianifica di nuovo."
                                 : "Applica il piano su una copia. I fatti del contesto restano fermi.")
                     Button("Esegui…") { confirmExecute = true }
-                        .disabled(model.executeLacksSupport || !model.externalMatches)
+                        .disabled(!model.canExecute)
                         .tint(.red)
-                        .help(model.executeConfirmsComputer
+                        .help(!model.hasPlan
+                              ? "Serve un piano. Pianifica o formula un obiettivo."
+                              : !model.planSuccess
+                              ? "Il piano non è riuscito. Completa i fatti o pianifica di nuovo."
+                              : model.executeConfirmsComputer
                               ? "Chiede conferma, poi aggiorna i fatti e compie l'azione sul computer."
                               : model.executeLacksSupport
                                 ? "I fatti non sostengono più l'azione sul computer. Pianifica di nuovo."
@@ -317,7 +328,17 @@ struct WorkbenchView: View {
                                     ? "Chiede conferma, poi aggiorna i fatti. L'azione sul computer non parte: le precondizioni non ci sono più."
                                     : "Chiede conferma, poi aggiorna i fatti. Non tocca il computer.")
                 }
-                if model.executeConfirmsComputer {
+                if model.connected && !model.hasPlan {
+                    Text("Nessun piano. Simula ed Esegui restano fermi finché non pianifichi.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if model.connected && model.hasPlan && !model.planSuccess {
+                    Text("Il piano non è riuscito. Simula ed Esegui restano fermi. Completa i fatti o pianifica di nuovo.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if model.executeConfirmsComputer {
                     Text("Sul computer, solo dopo conferma: \(model.externalSummary)")
                         .font(.caption)
                         .foregroundStyle(.orange)
@@ -356,9 +377,11 @@ struct WorkbenchView: View {
                             model.autonomyStep()
                         }
                     }
-                    .disabled(!model.connected)
+                    .disabled(!model.connected || !model.autonomyHasWork)
                     .tint(model.authority == "execute" ? .red : .accentColor)
-                    .help(model.authority == "execute"
+                    .help(!model.autonomyHasWork
+                          ? "Nessun obiettivo aperto né evento in attesa."
+                          : model.authority == "execute"
                           ? "Chiede conferma, poi un ciclo: osserva, pianifica ed esegue. Sul computer solo se il piano nuovo lo richiede."
                           : "Un ciclo: osserva, pianifica e simula. I fatti del contesto restano fermi.")
                     Button(model.authority == "execute" ? "Ciclo…" : "Ciclo") {
@@ -368,9 +391,11 @@ struct WorkbenchView: View {
                             model.autonomyLoop()
                         }
                     }
-                    .disabled(!model.connected)
+                    .disabled(!model.connected || !model.autonomyHasWork)
                     .tint(model.authority == "execute" ? .red : .accentColor)
-                    .help(model.authority == "execute"
+                    .help(!model.autonomyHasWork
+                          ? "Nessun obiettivo aperto né evento in attesa."
+                          : model.authority == "execute"
                           ? "Chiede conferma, poi fino a \(model.autonomyMaxSteps) passi con esecuzione. Si ferma a obiettivo o a un rifiuto."
                           : "Fino a \(model.autonomyMaxSteps) passi di simulazione. I fatti restano fermi. Si ferma a obiettivo o a un rifiuto.")
                 }
@@ -395,6 +420,28 @@ struct WorkbenchView: View {
                      : "L'autonomia si ferma alla simulazione. Fino a \(model.autonomyMaxSteps) passi per ciclo.")
                     .font(.caption)
                     .foregroundStyle(model.authority == "execute" ? Color.red : Color.secondary)
+                if model.connected && !model.autonomyHasWork {
+                    Text("Nessun obiettivo aperto né evento in attesa. Passo e Ciclo restano fermi.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if model.openGoals > 0 {
+                    Text(model.openGoals == 1
+                         ? "1 obiettivo ancora aperto. Pianifica, Passo o Ciclo."
+                         : "\(model.openGoals) obiettivi ancora aperti. Pianifica, Passo o Ciclo.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if model.pendingEvents > 0 {
+                    Text(model.pendingEvents == 1
+                         ? "1 evento in attesa. Passo lo riconosce prima di pianificare."
+                         : "\(model.pendingEvents) eventi in attesa. Passo li riconosce prima di pianificare.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 if !model.autonomyLastLine.isEmpty {
                     Text(model.autonomyLastLine)
                         .font(.caption)

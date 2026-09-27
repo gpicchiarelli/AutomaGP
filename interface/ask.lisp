@@ -648,7 +648,11 @@ an error."
 (defun gp-ask (phrase)
   "Interpret PHRASE as a goal, record it, and plan for it.
 Planning does not change facts and does not execute. Returns
- (VALUES GOAL PLAN)."
+ (VALUES GOAL PLAN). When the interpreted goal already holds, signals
+and does not record the goal or replace the previous plan."
   (let ((goal (gp-interpret phrase)))
+    (when (or (goal-holds-p goal (gp-facts))
+              (and (consp goal) (find-fact-by-names goal (gp-facts))))
+      (error "That goal already holds."))
     (gp-add-goal goal)
     (values goal (gp-plan :goals (list goal)))))

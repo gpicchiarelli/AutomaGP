@@ -30,6 +30,8 @@
   (when knowledge (clear-knowledge-memory))
   (when episodic (clear-episodic-memory))
   (when procedural (clear-procedural-memory))
+  (when (fboundp '%clear-applies-result-cache)
+    (funcall '%clear-applies-result-cache))
   t)
 
 (defun gp-reset ()
@@ -49,6 +51,8 @@ Knowledge and procedural memory are kept (use GP-CLEAR-MEMORY to drop them)."
   (clear-episodic-memory)
   (setf *observed-before* nil)
   (setf *observation* nil)
+  (when (fboundp '%clear-applies-result-cache)
+    (funcall '%clear-applies-result-cache))
   (when (fboundp '%stop-notice-watches)
     (funcall '%stop-notice-watches))
   *current-context*)
@@ -109,7 +113,16 @@ With :NAME (and optional keys): create/select a new current context."
     (context-facts ctx)))
 
 (defun gp-add-goal (goal)
-  "Add GOAL to the current context."
+  "Add GOAL to the current context.
+When GOAL is fact-like (a list) and already holds in the current facts,
+signals and does not record it. Names match across packages, so a goal
+from JSON meets a fact recorded at the REPL. Symbol goals are labels
+and are always accepted. Re-adding an already recorded open goal remains
+idempotent."
+  (when (and (consp goal)
+             (or (goal-holds-p goal (gp-facts))
+                 (find-fact-by-names goal (gp-facts))))
+    (error "That goal already holds."))
   (let ((g (add-goal! (ensure-current-context) goal)))
     (refresh-working-memory)
     g))
@@ -164,32 +177,39 @@ also achieves something else is used after that, and those extra goals
 are applied. When those extra goals cannot be restored, the steps that
 serve the request are kept and the others are left aside. If none apply,
 the plan is built by Means-Ends Analysis.
+When every fact-like goal already holds, signals instead of returning an
+empty successful plan. Core MEA still treats an already-held goal as a
+zero-length success for internal search.
 When REMEMBER is true (default), records a plan episode in episodic memory."
-  (let ((ctx (ensure-current-context)))
+  (let* ((ctx (ensure-current-context))
+         (g (normalize-planning-goals (or goals (goals-of ctx))))
+         (facts (context-all-facts ctx)))
+    (when (and g (null (differences facts g)))
+      (error "There is no open goal to plan."))
     (setf (context-mode ctx) :plan)
     (setf *current-plan*
-          (plan-consulting-archive ctx :goals goals :operators operators
+          (plan-consulting-archive ctx :goals g :operators operators
                                    :archive archive))
     (refresh-working-memory ctx)
     (when remember
       (record-plan-episode! *current-plan* :context-name (context-name ctx)))
     (cond
       ((plan-success *current-plan*)
-       (when (eq (getf *observation* :reason) :plan-failed)
-         (setf *observation* nil)))
+       (%end-plan-failed-listening))
       (*listen-on-plan-failure*
        (gp-listen :missing (plan-remaining *current-plan*)
                   :reason :plan-failed)))
     *current-plan*))
 
 (defun gp-plan-open-goals ()
-  "Plan the goals already in the context.
+  "Plan the unsatisfied fact-like goals already in the context.
 Does not change facts, does not simulate, and does not execute.
-No fact-like goal is an error."
-  (let ((goals (normalize-planning-goals (gp-goals))))
-    (unless goals
-      (error "There is no goal to plan."))
-    (gp-plan :goals goals)))
+No open goal (none recorded, or all already hold) is an error."
+  (ensure-current-context)
+  (let ((open (autonomy-open-goals)))
+    (unless open
+      (error "There is no open goal to plan."))
+    (gp-plan :goals open)))
 
 (defun gp-last-plan ()
   "Return the last plan produced by GP-PLAN, or NIL."
@@ -203,12 +223,15 @@ auto-invoke SKIP/RETRY/ABORT/ASK. Symbolic effects only — no adapters.
 When the plan recorded an external action that no longer matches, this
 signals before any simulated step and leaves the context mode as it was.
 When the facts no longer support an action that would be handed to an
-adapter, this signals the same way. When REMEMBER is true (default),
+adapter, this signals the same way. An unsuccessful plan is refused
+before any simulated step. When REMEMBER is true (default),
 records an episode."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
     (unless (plan-p p)
       (error "GP-SIMULATE requires a plan; call GP-PLAN first or pass :PLAN."))
+    (unless (plan-success p)
+      (error "The plan did not succeed; plan again before simulating."))
     (setf *last-execution*
           (call-with-execution-mode
            ctx :simulate
@@ -232,11 +255,13 @@ When REMEMBER is true (default), records an episode.
 A plan reused from the archive (:FROM-PROCEDURE) updates that procedure's
 score from this live result. GP-SIMULATE does not.
 A refusal signals before any fact changes and leaves the context mode
-as it was."
+as it was. An unsuccessful plan is refused the same way."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
     (unless (plan-p p)
       (error "GP-RUN requires a plan; call GP-PLAN first or pass :PLAN."))
+    (unless (plan-success p)
+      (error "The plan did not succeed; plan again before running."))
     (setf *last-execution*
           (call-with-execution-mode
            ctx :execute
@@ -288,6 +313,14 @@ With POLICY (:SIGNAL :SKIP :RETRY :ABORT :ASK): install a fresh strategy."
 
 ;;; Phase 6 — explanation from recorded deliberative traces
 
+(defun %end-plan-failed-listening ()
+  "Close a listening session opened after a failed plan.
+Drops both the observation and the before-state so induce cannot
+reuse a stale snapshot."
+  (when (eq (getf *observation* :reason) :plan-failed)
+    (setf *observation* nil)
+    (setf *observed-before* nil)))
+
 (defun gp-listen (&key missing (reason :manual))
   "Open a listening session on the current facts.
 MISSING records the goals still open, usually PLAN-REMAINING after a
@@ -308,11 +341,16 @@ failed plan. A later GP-INDUCE-RULE consumes this before-state."
                                (register t))
   "Induce a ground operator named NAME and, by default, register it.
 BEFORE defaults to the list from GP-NOTE-STATE. AFTER defaults to the
-current facts. Patterns stay ground. A later call with the same name
+current facts. Without an explicit BEFORE, a listening session must be
+active — a stale before-state left after a successful plan is refused.
+Patterns stay ground. A later call with the same name
 merges when every constant is already the same; a different symbol or
 number is refused and does not become a variable. An operator that
 already uses variables is left unchanged. Clears the session only after
 a successful induction."
+  (unless before-p
+    (unless (observation-active-p)
+      (error "No listening session. Call gp-note-state before the manual change.")))
   (let* ((before (if before-p
                      before
                      (or *observed-before*
@@ -349,11 +387,16 @@ a successful induction."
                              (register t))
   "Induce a generalized operator from the listening session and register it.
 The object symbol shared by one change becomes ?X0. Numbers stay ground.
+Without an explicit BEFORE, a listening session must be active — a stale
+before-state left after a successful plan is refused.
 A later call with the same name merges the new example when it fits: an
 existing variable stays, a repeated symbol that is renamed becomes the
 next variable, and a differing number or a one-off value is refused.
 The operator already registered is left unchanged when the example does
 not fit. Clears the session only after a successful induction."
+  (unless before-p
+    (unless (observation-active-p)
+      (error "No listening session. Call gp-listen before the manual change.")))
   (let* ((before (if before-p
                      before
                      (or *observed-before*
@@ -445,10 +488,13 @@ With keys: replace/create knowledge memory and return it."
 (defun gp-remember-procedure (&key plan name)
   "Store a reusable procedure from PLAN (default: last successful plan).
 Same name accumulates successes. Autosaves the procedure archive when
-*PROCEDURE-ARCHIVE-AUTOSAVE* is true (default)."
+*PROCEDURE-ARCHIVE-AUTOSAVE* is true (default).
+An unsuccessful plan is refused before the archive is touched."
   (let ((p (or plan *current-plan*)))
     (unless (plan-p p)
-      (error "GP-REMEMBER-PROCEDURE requires a plan"))
+      (error "GP-REMEMBER-PROCEDURE requires a plan; call GP-PLAN first or pass :PLAN."))
+    (unless (plan-success p)
+      (error "The plan did not succeed; plan again before remembering."))
     (remember-procedure-from-plan! p :name name)))
 
 (defun gp-procedures (&optional goals)
@@ -490,7 +536,8 @@ The plan is a replay on the current facts and carries a deliberative trace.
 When the stored steps do not apply, no plan is built.
 UNCHECKED T rebuilds the named procedure anyway, without that check.
 Records the external actions that replay would run. Does not invoke them.
-Sets *CURRENT-PLAN*."
+Sets *CURRENT-PLAN*. When the rebuilt plan succeeds, ends a listening
+session that was opened for a failed plan — the same rule as GP-PLAN."
   (let* ((ctx (ensure-current-context))
          (goal-set (or goals (goals-of ctx)))
          (proc (cond
@@ -522,6 +569,8 @@ Sets *CURRENT-PLAN*."
     (remember-plan-external-actions plan :context ctx)
     (setf (context-mode ctx) :plan)
     (setf *current-plan* plan)
+    (when (plan-success plan)
+      (%end-plan-failed-listening))
     plan))
 
 (defun gp-score-procedure (name &key (success t))
@@ -660,14 +709,24 @@ With keys: build a policy; when SET is true (default), install it."
 
 (defun gp-autonomous-step (&key policy (remember t))
   "One controlled autonomy cycle (PROMPT §28). Respects policy authority
-(:READ | :SIMULATE | :EXECUTE). Default policy authority is :SIMULATE."
+(:READ | :SIMULATE | :EXECUTE). Default policy authority is :SIMULATE.
+Signals when there is no open goal and no pending event — the same
+gate as the workbench Passo button. Does not overwrite the last
+autonomy summary in that case."
   (ensure-current-context)
+  (unless (autonomy-has-work-p)
+    (error "There is no open goal and no pending event."))
   (autonomous-step :policy (or policy (ensure-autonomy-policy))
                    :remember remember))
 
 (defun gp-autonomous-loop (&key policy max-steps (remember t))
-  "Repeat GP-AUTONOMOUS-STEP until done, halted, or max steps."
+  "Repeat GP-AUTONOMOUS-STEP until done, halted, or max steps.
+Signals when there is no open goal and no pending event — the same
+gate as the workbench Ciclo button. Does not overwrite the last
+autonomy summary in that case."
   (ensure-current-context)
+  (unless (autonomy-has-work-p)
+    (error "There is no open goal and no pending event."))
   (autonomous-loop :policy (or policy (ensure-autonomy-policy))
                    :max-steps max-steps
                    :remember remember))

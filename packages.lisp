@@ -30,6 +30,8 @@
    #:fact-equal
    #:fact-matches-p
    #:fact-p
+   #:fact-same-names-p
+   #:find-fact-by-names
    #:find-facts
    #:add-fact!
    #:remove-fact!
@@ -572,6 +574,8 @@
    #:plan-requires-confirmation-p
    #:plan-risky-operators
    #:goals-satisfied-p
+   #:autonomy-open-goals
+   #:autonomy-has-work-p
    #:autonomous-step
    #:autonomous-loop
    #:gp-policy

@@ -9,12 +9,230 @@ versions are the increments listed in `ROADMAP.md`.
 
 ## [Unreleased]
 
+## [0.179.0] — 2026-09-27
+
 ### Changed
 
-- Durable archive and snapshot files use the `.agp` extension
-  (`~/.automa-gp/procedure-archive.agp`; `gp-save` / `gp-load` default
-  type). A missing `.agp` archive still loads a sibling `.sexp` once;
-  an explicit `.sexp` path still opens.
+- The HTML operator console disables Simulate and Run when
+  `GET /api/plan` reports that external actions no longer match or the
+  facts no longer support them — the same idle rule as the workbench
+  and the REPL refuse.
+
+### Fixed
+
+- `CITATION.cff` tracks the package version again (it was left at
+  0.153.0).
+
+## [0.178.0] — 2026-09-27
+
+### Fixed
+
+- README suite badge and run-tests comment match the live FiveAM
+  count (358 tests, 5104 checks). The GET API table lists
+  `/api/archive?applies=1` beside plain `/api/archive`.
+
+## [0.177.0] — 2026-09-27
+
+### Fixed
+
+- Changelog records the `.agp` archive/snapshot extension under
+  [0.155.0] (it was left in Unreleased after that release).
+
+### Changed
+
+- `gp-reset` and `gp-clear-memory` clear the archive `applies` probe
+  cache. Workbench `canExecute` shares the same gate as `canSimulate`.
+
+## [0.176.0] — 2026-09-27
+
+### Changed
+
+- `applies` probes are cached per fact/operator snapshot and procedure
+  fingerprint, so repeated `GET /api/archive?applies=1` (workbench poll)
+  does not replay every procedure when nothing changed. Scoring or
+  remembering updates the fingerprint and refreshes the probe.
+
+## [0.175.0] — 2026-09-27
+
+### Changed
+
+- `applies` on archived procedures is opt-in: `GET /api/archive?applies=1`
+  (or body `:applies t`). Plain `GET /api/archive` and POST remember/use/score
+  responses omit it so listing stays cheap. The console and workbench
+  request applies when gating Use.
+
+## [0.174.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console disables Emit and Add fact until Event/Fact
+  JSON is a non-empty array — the same empty-field idle rule as the
+  workbench fact field.
+
+## [0.173.0] — 2026-09-27
+
+### Changed
+
+- `GET /api/archive` reports `applies` per procedure against the current
+  facts. The HTML console and workbench keep Use idle when the named
+  procedure (or any nameless candidate) does not apply.
+
+## [0.172.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console disables React when there is no pending
+  event. Nameless Use also stays idle unless an open goal remains, so
+  the archive has something to match.
+
+## [0.171.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console disables Use and Score until a named
+  archived procedure exists (Use without a name needs a non-empty
+  archive) — the same idle rule as workbench archive cards.
+
+## [0.170.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console Plan button stays idle when typed Goals JSON
+  already holds in the current facts (same refuse as `gp-plan`). A single
+  fact array is normalized to one goal before POST.
+
+## [0.169.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console Plan button calls `/api/plan-open-goals`
+  when the Goals field is empty, stays idle when no goal is open, and
+  re-enables when Goals JSON is typed — the same idle rule as the
+  workbench Pianifica control.
+
+## [0.168.0] — 2026-09-27
+
+### Changed
+
+- The HTML operator console disables Simulate, Run, and Remember until
+  `plan-success` is true, and disables autonomy Step/Loop when there is
+  no open goal and no pending event — the same idle rule as the
+  workbench.
+
+## [0.167.0] — 2026-09-27
+
+### Changed
+
+- `gp-remember-procedure` and `POST /api/archive/remember` refuse when
+  there is no plan or the plan did not succeed, before the archive is
+  touched. The message matches the Simula/Esegui style.
+
+## [0.166.0] — 2026-09-27
+
+### Changed
+
+- Ending a `:plan-failed` listening session (successful `gp-plan` or
+  `gp-use-procedure`) clears the before-state as well as the
+  observation. `gp-induce-rule` and `gp-learn-action` refuse without an
+  active listening session unless an explicit `:before` is passed.
+  `POST /api/induce` and `/induce/rule` return 400. The workbench
+  Induci/Annota calls no-op when not listening.
+
+## [0.165.0] — 2026-09-27
+
+### Changed
+
+- `gp-add-goal` and `POST /api/add-goal` refuse a fact-like goal that
+  already holds, matching names across packages. Symbol goals remain
+  labels and stay accepted. Re-adding an open goal stays idempotent.
+  `POST /api/add-goal` adopts the goal onto the context vocabulary like
+  add-fact. Core `add-goal!` is unchanged for reactions.
+
+## [0.164.0] — 2026-09-27
+
+### Changed
+
+- `gp-ask` and `POST /api/ask` refuse when the interpreted goal already
+  holds. The goal is not recorded and the previous plan stays. The
+  workbench Chiedi path inherits that refuse; choosing a candidate
+  plans before adding the goal so a held fact is not registered first.
+
+## [0.163.0] — 2026-09-27
+
+### Changed
+
+- A successful `gp-use-procedure` / `POST /api/archive/use` ends a
+  listening session opened for a failed plan — the same rule as
+  `gp-plan`. Manual listening (`:manual`) is left unchanged. The
+  workbench can leave Induci and offer Simula again after Usa questo
+  piano rebuilds a successful plan.
+
+## [0.162.0] — 2026-09-27
+
+### Added
+
+- `GET /api/status` reports `plan-success`. The workbench enables Simula
+  and Esegui only when the plan both exists and succeeded. A failed
+  plan keeps `plan-p` true for listening, but those buttons stay idle.
+
+### Changed
+
+- `gp-simulate` and `gp-run` refuse an unsuccessful plan before changing
+  mode or applying steps. `POST /api/simulate` and `/api/run` return 400.
+
+## [0.161.0] — 2026-09-27
+
+### Added
+
+- The workbench enables Simula and Esegui only when status `plan-p` is
+  true. Without a plan the buttons stay disabled, a caption says so,
+  and the client calls return immediately. Existing external-match and
+  support gates still apply when a plan exists.
+
+## [0.160.0] — 2026-09-27
+
+### Changed
+
+- `gp-plan` and `POST /api/plan` refuse when every fact-like goal
+  already holds, instead of returning an empty successful plan. The
+  previous plan stays. Core MEA `plan-for` still treats an already-held
+  goal as a zero-length success for internal search.
+
+## [0.159.0] — 2026-09-27
+
+### Changed
+
+- `gp-plan-open-goals` plans only unsatisfied fact-like goals. When
+  every goal already holds, or none are recorded, it signals and
+  `POST /api/plan-open-goals` returns 400 — the same gate as workbench
+  Pianifica.
+
+## [0.158.0] — 2026-09-27
+
+### Added
+
+- `gp-autonomous-step` and `gp-autonomous-loop` refuse when there is no
+  open goal and no pending event — the same gate as workbench Passo and
+  Ciclo. `POST /api/autonomy/step` and `/loop` return 400 and leave the
+  last autonomy summary unchanged. The core cycle still reports
+  `:no-goals` when a mid-loop step finds nothing left.
+
+## [0.157.0] — 2026-09-27
+
+### Added
+
+- The workbench enables Passo and Ciclo only when status reports open
+  goals or pending events. With neither, the buttons stay disabled and
+  a caption says so. Confirmation still applies under execute authority.
+
+## [0.156.0] — 2026-09-27
+
+### Added
+
+- `GET /api/status` reports `open-goals` (unsatisfied fact-like goals)
+  and `pending-events`. The workbench uses `open-goals` for Pianifica
+  and shows captions for open goals and pending events. Legacy
+  `goals` and `events` counts stay unchanged.
 
 ## [0.155.0] — 2026-09-27
 
@@ -24,6 +242,13 @@ versions are the increments listed in `ROADMAP.md`.
   `max-steps` to the session policy (1–32). Ciclo and a loop request
   that omits `max-steps` use that policy value instead of a hard-coded
   eight.
+
+### Changed
+
+- Durable archive and snapshot files use the `.agp` extension
+  (`~/.automa-gp/procedure-archive.agp`; `gp-save` / `gp-load` default
+  type). A missing `.agp` archive still loads a sibling `.sexp` once;
+  an explicit `.sexp` path still opens.
 
 ## [0.154.0] — 2026-09-27
 

@@ -331,7 +331,15 @@
   (multiple-value-bind (code body)
       (web-api-handle :post "/api/plan-open-goals")
     (is (= 400 code))
-    (is (search "no goal" (getf body :error))))
+    (is (search "no open goal" (getf body :error))))
+  (gp-add-goal '(power-state interface-01 on))
+  (gp-add-fact '(power-state interface-01 on))
+  (signals error (gp-plan-open-goals))
+  (multiple-value-bind (code body)
+      (web-api-handle :post "/api/plan-open-goals")
+    (is (= 400 code))
+    (is (search "no open goal" (getf body :error))))
+  (gp-reset)
   (let* ((dir (uiop:ensure-directory-pathname
                (merge-pathnames
                 (format nil "automa-gp-plan-open-~A/" (get-universal-time))
@@ -1970,7 +1978,20 @@
       (is (plan-success plan))
       (is (equal facts (gp-facts)))
       (is (not (observation-active-p)))
-      (is (find goal (gp-goals) :test #'equal)))))
+      (is (find goal (gp-goals) :test #'equal))))
+  (gp-add-fact '(power-state interface-01 on))
+  (let ((goals (copy-tree (gp-goals)))
+        (plan (gp-last-plan)))
+    (signals error (gp-ask "voglio power-state interface-01 on"))
+    (is (equal goals (gp-goals)))
+    (is (eq plan (gp-last-plan)))
+    (multiple-value-bind (code body)
+        (web-api-handle :post "/api/ask"
+                        '(:phrase "voglio power-state interface-01 on"))
+      (is (= 400 code))
+      (is (search "already holds" (getf body :error))))
+    (is (equal goals (gp-goals)))
+    (is (eq plan (gp-last-plan)))))
 
 (test ask-accepts-a-goal-shape-without-a-leading-verb
   (gp-clear-memory)

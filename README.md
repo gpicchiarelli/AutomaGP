@@ -24,7 +24,7 @@
   <a href="version.lisp"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgpicchiarelli%2FAutomaGP%2Fmain%2Fversion.lisp-expr&search=%22(%5B0-9.%5D%2B)%22&replace=%241&label=version&color=214237" alt="Version, read from version.lisp-expr on main"></a>
   <a href="automa-gp.asd"><img src="https://img.shields.io/badge/Common%20Lisp-SBCL-3f5f72.svg" alt="Common Lisp on SBCL"></a>
   <a href="adapters"><img src="https://img.shields.io/badge/target-macOS-111412.svg" alt="Target: macOS"></a>
-  <a href="tests"><img src="https://img.shields.io/badge/tests-372%20passing-63735f.svg" alt="372 tests passing"></a>
+  <a href="tests"><img src="https://img.shields.io/badge/tests-358%20passing-63735f.svg" alt="358 tests passing"></a>
   <a href="https://github.com/gpicchiarelli/AutomaGP/commits/main"><img src="https://img.shields.io/github/last-commit/gpicchiarelli/AutomaGP?color=3f5f72" alt="Last commit"></a>
 </p>
 
@@ -90,7 +90,7 @@ Three surfaces reach the same session. The REPL is primary. The JSON façade in 
 
 Four memory layers sit beside the context. Working memory is a snapshot of the current facts, goals, and mode. Knowledge memory holds durable facts and rules that can be merged into a context. Episodic memory records plans and executions with their outcome. Procedural memory stores successful plans as named procedures with a success and failure count. `gp-save` and `gp-load` write and read the whole bundle as readable s-expressions in `.agp` files (the default type when a path has no extension).
 
-The procedure archive is the part that learns. `gp-remember-procedure` stores the last successful plan under a name and writes the archive to `~/.automa-gp/procedure-archive.agp`. `gp-plan` consults that archive before searching: an exact goal match comes first, then a procedure whose goals include the request, then a combination of procedures that each cover a part of it. Steps whose extra goals cannot be restored are left aside and a search fills the gap. When a stored step meets a missing precondition, the planner repairs it with other archived procedures, up to sixty-one levels deep, and falls back to plain Means-Ends Analysis past that. A live `gp-run` of a reused procedure updates its score. Simulation leaves the score alone.
+The procedure archive is the part that learns. `gp-remember-procedure` stores the last successful plan under a name and writes the archive to `~/.automa-gp/procedure-archive.agp`. An unsuccessful plan is refused before the archive is touched. `gp-plan` consults that archive before searching: an exact goal match comes first, then a procedure whose goals include the request, then a combination of procedures that each cover a part of it. Steps whose extra goals cannot be restored are left aside and a search fills the gap. When a stored step meets a missing precondition, the planner repairs it with other archived procedures, up to sixty-one levels deep, and falls back to plain Means-Ends Analysis past that. A live `gp-run` of a reused procedure updates its score. Simulation leaves the score alone.
 
 ```lisp
 (gp-remember-procedure :name 'configure-interface)   ; store and autosave
@@ -114,14 +114,17 @@ Autonomy is one controlled cycle: react to pending events, plan for open goals, 
 (gp-autonomous-step)                        ; react → plan → simulate
 (gp-last-autonomy)
 
+;; Idle context (no open goal, no pending event) is refused:
+;; (gp-autonomous-step) → error; last autonomy stays as it was.
+
 ;; Live mutation needs an explicit policy:
 (gp-policy :authority :execute :auto-confirm t :adapters nil)
 (gp-autonomous-loop :max-steps 4)
 ```
 
-A family of *notice* functions brings observations from the machine into the context without running anything. `gp-notice-path` asserts one existing file as `(file-created path)` when a reaction already models that event. `gp-notice-directory` does the same for the files under a directory. `gp-notice-processes`, `gp-notice-terminals`, `gp-notice-terminal-text`, and `gp-notice-terminal-screen` look for processes, open ttys, text in a transcript file, and text on a Terminal.app tab that a reaction already names. Each has a `gp-watch-…` form that repeats the look on an interval until its `gp-stop-…` or `gp-reset`. `gp-plan-open-goals` then plans for whatever those reactions recorded.
+A family of *notice* functions brings observations from the machine into the context without running anything. `gp-notice-path` asserts one existing file as `(file-created path)` when a reaction already models that event. `gp-notice-directory` does the same for the files under a directory. `gp-notice-processes`, `gp-notice-terminals`, `gp-notice-terminal-text`, and `gp-notice-terminal-screen` look for processes, open ttys, text in a transcript file, and text on a Terminal.app tab that a reaction already names. Each has a `gp-watch-…` form that repeats the look on an interval until its `gp-stop-…` or `gp-reset`. `gp-plan-open-goals` then plans for the unsatisfied goals those reactions recorded; goals that already hold are not planned.
 
-`gp-ask` reads a short Italian phrase such as `voglio power-state interface-01 on` and turns it into a goal when the shape already exists in the context, an operator, a reaction, or a rule. An operator can declare words it answers to (`accendi` on `power-on-device`), and `gp-name-operator` adds more. Anything the context does not already model is refused with the candidates named.
+`gp-ask` reads a short Italian phrase such as `voglio power-state interface-01 on` and turns it into a goal when the shape already exists in the context, an operator, a reaction, or a rule. An operator can declare words it answers to (`accendi` on `power-on-device`), and `gp-name-operator` adds more. Anything the context does not already model is refused with the candidates named. A phrase whose goal already holds is refused without recording it or replacing the plan.
 
 ## Adapters and what stays out of reach
 
@@ -156,12 +159,12 @@ Each domain pack installs operators, rules, and sometimes reactions into the cur
 
 | Method | Routes |
 | --- | --- |
-| `GET` | `/api/status` · `/api/context` · `/api/facts` · `/api/goals` · `/api/operators` · `/api/rules` · `/api/events` · `/api/reactions` · `/api/plan` · `/api/execution` · `/api/explain` · `/api/reaction` · `/api/autonomy` · `/api/archive` |
+| `GET` | `/api/status` · `/api/context` · `/api/facts` · `/api/goals` · `/api/operators` · `/api/rules` · `/api/events` · `/api/reactions` · `/api/plan` · `/api/execution` · `/api/explain` · `/api/reaction` · `/api/autonomy` · `/api/archive` · `/api/archive?applies=1` |
 | `POST` | `/api/reset` · `/api/add-fact` · `/api/remove-fact` · `/api/add-goal` · `/api/load-domain` · `/api/plan` · `/api/plan-open-goals` · `/api/simulate` · `/api/run` · `/api/emit` · `/api/react` · `/api/ask` · `/api/listen` · `/api/induce` · `/api/induce/rule` · `/api/induce/note` · `/api/operator/name` |
 | `POST` | `/api/notice-path` · `/api/notice-directory` · `/api/notice-processes` · `/api/notice-terminals` · `/api/notice-terminal-text` · `/api/notice-terminal-screen` · `/api/watch-*` · `/api/watch-*/stop` |
 | `POST` | `/api/archive/remember` · `/api/archive/use` · `/api/archive/score` · `/api/autonomy/policy` · `/api/autonomy/step` · `/api/autonomy/loop` |
 
-The Workbench in [`macos/AutomaGPWorkbench`](macos/AutomaGPWorkbench) is a SwiftPM app for macOS 13 and later. It leads with one next step: while a plan is incomplete, edit the facts and induce an operator from the before and after; otherwise simulate, and confirm before execute. It can also take one autonomous step or a bounded autonomous loop: with authority simulate, Passo and Ciclo only simulate; with authority execute, Passo… and Ciclo… ask for confirmation before adapters may run. Limite ciclo sets how many steps Ciclo may take. The last autonomous outcome stays under those controls after a refresh. The narrated trace stays folded under the plan. It shows the external actions a confirmed execute would run, and says which were withheld.
+The Workbench in [`macos/AutomaGPWorkbench`](macos/AutomaGPWorkbench) is a SwiftPM app for macOS 13 and later. It leads with one next step: while a plan is incomplete, edit the facts and induce an operator from the before and after; otherwise simulate, and confirm before execute. Simula and Esegui stay disabled until status reports a successful plan. It can also take one autonomous step or a bounded autonomous loop: with authority simulate, Passo and Ciclo only simulate; with authority execute, Passo… and Ciclo… ask for confirmation before adapters may run. Limite ciclo sets how many steps Ciclo may take. Passo and Ciclo stay disabled when status shows neither open goals nor pending events. The last autonomous outcome stays under those controls after a refresh. Pianifica follows open goals from status, not the raw goal count, and captions pending events when any wait. The narrated trace stays folded under the plan. It shows the external actions a confirmed execute would run, and says which were withheld.
 
 ```bash
 ./scripts/run-web.sh
@@ -175,7 +178,7 @@ You need SBCL and Quicklisp. On macOS, `brew install sbcl` and the [Quicklisp in
 ```bash
 git clone https://github.com/gpicchiarelli/AutomaGP.git
 cd AutomaGP
-./scripts/run-tests.sh      # FiveAM suite: 372 tests, 4806 checks
+./scripts/run-tests.sh      # FiveAM suite: 358 tests, 5107 checks
 ./scripts/run-web.sh        # operator console on http://127.0.0.1:47391/
 ```
 
@@ -208,7 +211,7 @@ Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The 
 
 ## Roadmap and status
 
-The twelve phases in [`ROADMAP.md`](ROADMAP.md) are delivered: context, matching, Means-Ends Analysis, execution, conditions, explanation, memory, adapters, domains, events, web, and policy-gated autonomy. Everything after that is deepening, one small tested increment per version. The most recent series is about external actions and the workbench gate around them: a plan names the adapter actions it would run, execute and simulate refuse when those actions changed or the facts no longer support them, and the workbench can take one autonomous step or a bounded loop, set that bound, and keep showing the last outcome. `version.lisp` holds the current number and [`CHANGELOG.md`](CHANGELOG.md) has one entry per version.
+The twelve phases in [`ROADMAP.md`](ROADMAP.md) are delivered: context, matching, Means-Ends Analysis, execution, conditions, explanation, memory, adapters, domains, events, web, and policy-gated autonomy. Everything after that is deepening, one small tested increment per version. The most recent series is about external actions and the workbench gate around them: a plan names the adapter actions it would run, execute and simulate refuse when those actions changed or the facts no longer support them, and the workbench can take one autonomous step or a bounded loop, set that bound, keep showing the last outcome, read open goals and pending events from status, keep Passo and Ciclo idle when neither remains, refuse the same idle call from the REPL and HTTP API, refuse Pianifica and `gp-plan` when no goal is still open, keep Simula and Esegui idle until a successful plan exists, end plan-failed listening when archive use rebuilds a successful plan, refuse Ask or add-goal when the goal already holds, refuse induce without an active listening session, refuse remember without a successful plan, keep the HTML operator console’s Simulate and Run idle under the same external-match and support rules as the workbench, keep Remember, Step, and Loop idle under the same readiness rules, keep Plan idle until an open goal exists or Goals JSON is typed, keep Plan idle when that typed JSON already holds, keep Use/Score idle without a matching archived procedure, keep React idle without a pending event, keep Use idle when an archived procedure does not apply to the current facts, keep Emit and Add fact idle until Event/Fact JSON is a non-empty array, and request archive `applies` only when gating Use so listing stays cheap, with applies probes cached across identical fact snapshots and cleared on reset. `version.lisp` holds the current number and [`CHANGELOG.md`](CHANGELOG.md) has one entry per version.
 
 Priority is correctness, then clarity, then testability, then performance.
 

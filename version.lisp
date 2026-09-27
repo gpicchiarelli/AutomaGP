@@ -2,5 +2,5 @@
 
 (in-package #:automa-gp)
 
-(defparameter *version* "0.155.0"
-  "AUTOMA GP version (the workbench can set the autonomous loop bound).")
+(defparameter *version* "0.179.0"
+  "AUTOMA GP version (HTML Sim/Run external gates; CITATION).")

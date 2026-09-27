@@ -93,6 +93,9 @@
     border-color: #095a41;
   }
   button.secondary { background: #fff; color: var(--ink); border-color: var(--line); }
+  button:disabled {
+    cursor: not-allowed; opacity: .45;
+  }
   pre {
     margin: 0; padding: .75rem; background: #1c1a17; color: #e7e2d6;
     font-family: var(--mono); font-size: .78rem; line-height: 1.45;
@@ -140,7 +143,7 @@
       </div>
       <label for=\"goals\">Goals JSON (optional)</label>
       <input id=\"goals\" placeholder='[[\"tests-ok\",\"myapp\"]]' style=\"width:100%\"/>
-      <p class=\"status\" style=\"margin:0\">Plan reuses an archived procedure whose goals include every requested fact. An exact match comes first. Extra goals of that procedure are applied when its steps still work. Otherwise procedures that each achieve part of the request are combined: no extra goals first, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left.</p>
+      <p class=\"status\" style=\"margin:0\">Plan with an empty Goals field uses open context goals (same as the workbench). It stays idle when none are open, and when typed Goals JSON already holds in the facts. A single fact array is treated as one goal. Plan reuses an archived procedure whose goals include every requested fact. An exact match comes first. Extra goals of that procedure are applied when its steps still work. Otherwise procedures that each achieve part of the request are combined: no extra goals first, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left. Simulate and Run stay idle until a successful plan still matches its external actions and the facts still support them — the same refuse as the workbench and the REPL.</p>
     </section>
     <section class=\"panel stack\">
       <h2>Events</h2>
@@ -150,12 +153,14 @@
         <button type=\"button\" id=\"btnEmit\">Emit + react + plan</button>
         <button type=\"button\" class=\"secondary\" id=\"btnReact\">React</button>
       </div>
+      <p class=\"status\" style=\"margin:0\">React stays idle when there is no pending event. Emit stays idle until Event JSON is a non-empty array.</p>
     </section>
     <section class=\"panel stack\">
       <h2>Assert</h2>
       <label for=\"fact\">Fact JSON</label>
       <input id=\"fact\" placeholder='[\"toolchain\",\"ready\"]' style=\"width:100%\"/>
       <button type=\"button\" class=\"secondary\" id=\"btnFact\">Add fact</button>
+      <p class=\"status\" style=\"margin:0\">Add fact stays idle until Fact JSON is a non-empty array.</p>
     </section>
     <section class=\"panel stack\">
       <h2>Autonomy</h2>
@@ -169,7 +174,7 @@
         <button type=\"button\" id=\"btnAutoStep\">Step</button>
         <button type=\"button\" class=\"secondary\" id=\"btnAutoLoop\">Loop</button>
       </div>
-      <p class=\"status\" style=\"margin:0\">Default is simulate — never unattended OS destruction.</p>
+      <p class=\"status\" style=\"margin:0\">Default is simulate — never unattended OS destruction. Step and Loop stay idle when there is no open goal and no pending event.</p>
     </section>
     <section class=\"panel stack\">
       <h2>Archive</h2>
@@ -183,7 +188,7 @@
         <button type=\"button\" class=\"secondary\" id=\"btnScoreOk\">Score success</button>
         <button type=\"button\" class=\"secondary\" id=\"btnScoreFail\">Score failure</button>
       </div>
-      <p class=\"status\" style=\"margin:0\">Use replays stored steps. A missing precondition is restored by stored procedures that achieve some of those facts: a full cover first, then procedures with no extra goals, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left. That repair may itself reuse a stored procedure, sixty-one levels deep. Then the stored steps continue.</p>
+      <p class=\"status\" style=\"margin:0\">Remember stays idle until a successful plan exists — same rule as Simulate and Run. Use stays idle until an archived procedure applies to the current facts (a name must match and apply; without a name, any applicable procedure plus an open goal). Score needs a named archived procedure. Use replays stored steps. A missing precondition is restored by stored procedures that achieve some of those facts: a full cover first, then procedures with no extra goals, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left. That repair may itself reuse a stored procedure, sixty-one levels deep. Then the stored steps continue.</p>
     </section>
   </aside>
   <section class=\"stack\">
@@ -220,16 +225,115 @@ function show(id, value) {
   document.getElementById(id).textContent =
     typeof value === 'string' ? value : JSON.stringify(value, null, 2);
 }
+function setDisabled(id, off) {
+  document.getElementById(id).disabled = !!off;
+}
+let openGoals = 0;
+let currentFacts = [];
+let currentProcedures = [];
+function goalsInputFilled() {
+  return document.getElementById('goals').value.trim().length > 0;
+}
+function termKey(t) {
+  if (typeof t === 'string') return t.toUpperCase();
+  if (typeof t === 'number' || typeof t === 'boolean') return String(t);
+  return JSON.stringify(t);
+}
+function factKey(f) {
+  if (!Array.isArray(f)) return null;
+  return JSON.stringify(f.map(termKey));
+}
+function factHolds(goal) {
+  const k = factKey(goal);
+  return !!k && currentFacts.some(f => factKey(f) === k);
+}
+function normalizeGoalsInput(g) {
+  if (g == null) return null;
+  if (!Array.isArray(g) || g.length === 0) return null;
+  if (!Array.isArray(g[0])) return [g];
+  return g.filter(Array.isArray);
+}
+function typedGoalsAllHold() {
+  try {
+    const list = normalizeGoalsInput(parseInput('goals', null));
+    return !!(list && list.length && list.every(factHolds));
+  } catch (e) {
+    return false;
+  }
+}
+function updatePlanButton() {
+  if (goalsInputFilled()) {
+    setDisabled('btnPlan', typedGoalsAllHold());
+  } else {
+    setDisabled('btnPlan', openGoals <= 0);
+  }
+}
+function namedProcedureExists() {
+  const name = procedureName();
+  if (!name) return false;
+  const want = name.toUpperCase();
+  return currentProcedures.some(p => String(p.name || '').toUpperCase() === want);
+}
+function namedProcedureApplies() {
+  const name = procedureName();
+  if (!name) return false;
+  const want = name.toUpperCase();
+  const found = currentProcedures.find(p => String(p.name || '').toUpperCase() === want);
+  return !!(found && found.applies);
+}
+function updateArchiveButtons() {
+  const applies = namedProcedureApplies();
+  const named = namedProcedureExists();
+  const hasApplicable = currentProcedures.some(p => p.applies);
+  // Named Use needs a procedure that applies now; nameless Use needs any
+  // applicable procedure plus an open goal to match.
+  setDisabled('btnUse', !(procedureName() ? applies : (hasApplicable && openGoals > 0)));
+  setDisabled('btnScoreOk', !named);
+  setDisabled('btnScoreFail', !named);
+}
+function validJsonArray(id) {
+  try {
+    const v = parseInput(id, null);
+    return Array.isArray(v) && v.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+function updateEmitFactButtons() {
+  setDisabled('btnEmit', !validJsonArray('event'));
+  setDisabled('btnFact', !validJsonArray('fact'));
+}
 async function refresh() {
   const st = await api('GET', '/api/status');
   document.getElementById('statusLine').textContent =
     'v' + st.version + ' · ' + st.context + ' · ' + st.mode +
     ' · domains ' + JSON.stringify(st.domains);
-  show('facts', (await api('GET', '/api/facts')).facts);
+  const planOk = !!st['plan-success'];
+  openGoals = st['open-goals'] || 0;
+  const pendingEvents = st['pending-events'] || 0;
+  const autonomyWork = openGoals > 0 || pendingEvents > 0;
+  setDisabled('btnRemember', !planOk);
+  setDisabled('btnReact', pendingEvents <= 0);
+  setDisabled('btnAutoStep', !autonomyWork);
+  setDisabled('btnAutoLoop', !autonomyWork);
+  currentFacts = (await api('GET', '/api/facts')).facts || [];
+  show('facts', currentFacts);
+  updatePlanButton();
+  updateEmitFactButtons();
   show('goalsOut', (await api('GET', '/api/goals')).goals);
   show('events', (await api('GET', '/api/events')).events);
-  show('plan', (await api('GET', '/api/plan')).plan);
-  show('archive', (await api('GET', '/api/archive')).procedures);
+  const plan = (await api('GET', '/api/plan')).plan;
+  show('plan', plan);
+  // Same gate as workbench canSimulate / canExecute: refuse when the
+  // recorded external action changed or the facts no longer support it.
+  const matches = !plan || !!plan['external-matches'];
+  const supported = !plan || !!plan['external-supported'];
+  const canSimRun = planOk && matches && supported;
+  setDisabled('btnSim', !canSimRun);
+  setDisabled('btnRun', !canSimRun);
+  currentProcedures = (await api('GET', '/api/archive?applies=1')).procedures || [];
+  show('archive', currentProcedures);
+  updateArchiveButtons();
   show('autonomy', (await api('GET', '/api/autonomy')));
   const ex = await api('GET', '/api/explain');
   show('explain', ex.text || '(no trace)');
@@ -246,12 +350,17 @@ document.getElementById('btnDomain').onclick = () =>
     .then(refresh).catch(e => alert(e.message));
 document.getElementById('btnPlan').onclick = () => {
   let body = {};
+  let path = '/api/plan-open-goals';
   try {
-    const g = parseInput('goals', null);
-    if (g) body.goals = g;
+    const list = normalizeGoalsInput(parseInput('goals', null));
+    if (list) {
+      body.goals = list;
+      path = '/api/plan';
+    }
   } catch (e) { alert('Goals JSON: ' + e.message); return; }
-  api('POST', '/api/plan', body).then(refresh).catch(e => alert(e.message));
+  api('POST', path, body).then(refresh).catch(e => alert(e.message));
 };
+document.getElementById('goals').addEventListener('input', updatePlanButton);
 document.getElementById('btnSim').onclick = () => api('POST', '/api/simulate', {}).then(refresh).catch(e => alert(e.message));
 document.getElementById('btnRun').onclick = () =>
   api('POST', '/api/run', { confirm: true, adapters: false }).then(refresh).catch(e => alert(e.message));
@@ -267,6 +376,8 @@ document.getElementById('btnFact').onclick = () => {
   try { fact = parseInput('fact'); } catch (e) { alert(e.message); return; }
   api('POST', '/api/add-fact', { fact }).then(refresh).catch(e => alert(e.message));
 };
+document.getElementById('event').addEventListener('input', updateEmitFactButtons);
+document.getElementById('fact').addEventListener('input', updateEmitFactButtons);
 document.getElementById('btnAutoStep').onclick = () =>
   api('POST', '/api/autonomy/step', {
     authority: document.getElementById('authority').value,
@@ -284,6 +395,7 @@ function procedureName() {
   const raw = document.getElementById('procName').value.trim();
   return raw ? raw : null;
 }
+document.getElementById('procName').addEventListener('input', updateArchiveButtons);
 document.getElementById('btnRemember').onclick = () => {
   const name = procedureName();
   api('POST', '/api/archive/remember', name ? { name } : {})
@@ -310,6 +422,7 @@ refresh().catch(e => {
   document.getElementById('statusLine').textContent = e.message;
   document.getElementById('statusLine').classList.add('err');
 });
+updateEmitFactButtons();
 </script>
 </body>
 </html>")
@@ -325,7 +438,11 @@ refresh().catch(e => {
 
 (defmethod hunchentoot:acceptor-dispatch-request ((acceptor gp-acceptor) request)
   (let* ((method (hunchentoot:request-method* request))
-         (uri (hunchentoot:script-name* request)))
+         (uri (hunchentoot:script-name* request))
+         (qs (hunchentoot:query-string* request))
+         (path (if (and qs (plusp (length qs)))
+                   (format nil "~A?~A" uri qs)
+                   uri)))
     (cond
       ((and (eq method :get) (or (string= uri "/") (string= uri "/index.html")))
        (setf (hunchentoot:content-type*) "text/html; charset=utf-8")
@@ -333,7 +450,7 @@ refresh().catch(e => {
       ((and (>= (length uri) 5) (string= uri "/api/" :end1 5))
        (multiple-value-bind (code ctype body)
            (web-api-handle-json
-            method uri
+            method path
             (when (member method '(:post :put :patch))
               (or (hunchentoot:raw-post-data :force-text t :request request)
                   "")))

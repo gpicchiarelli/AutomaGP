@@ -67,7 +67,22 @@
     (is (eq plan (gp-last-plan)))
     (is (>= (plan-length plan) 2))
     (is (fact-p '(power-state interface-01 off) (gp-facts)))
-    (is (not (fact-p '(connection interface-01 computer) (gp-facts))))))
+    (is (not (fact-p '(connection interface-01 computer) (gp-facts))))
+    (gp-add-fact '(power-state interface-01 on))
+    (gp-add-fact '(connection interface-01 computer))
+    (signals error (gp-plan :goals '((connection interface-01 computer))))
+    (is (eq plan (gp-last-plan)))))
+
+(test repl-refuses-simulate-and-run-on-a-failed-plan
+  (gp-reset)
+  (gp-add-fact '(device interface-01))
+  (gp-add-fact '(power-state interface-01 off))
+  (let ((failed (gp-plan :goals '((power-state interface-01 on)) :archive nil)))
+    (is (not (plan-success failed)))
+    (signals error (gp-simulate))
+    (signals error (gp-run :confirm t))
+    (is (null (gp-last-execution)))
+    (is (eq failed (gp-last-plan)))))
 
 (test repl-phase4-simulate-and-run
   (gp-reset)

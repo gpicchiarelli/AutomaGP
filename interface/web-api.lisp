@@ -104,7 +104,9 @@
         :ask (json-array (getf (operator-meta op) :ask))))
 
 (defun %api-status ()
-  (let ((ctx (ensure-current-context)))
+  (let* ((ctx (ensure-current-context))
+         (goals (normalize-planning-goals (goals-of ctx)))
+         (open (differences (context-all-facts ctx) goals)))
     (list :ok t
           :version *version*
           :api *web-api-version*
@@ -112,8 +114,13 @@
           :mode (context-mode ctx)
           :domains (json-array (gp-domains))
           :plan-p (and (plan-p *current-plan*) t)
+          :plan-success (and (plan-p *current-plan*)
+                             (plan-success *current-plan*)
+                             t)
           :events (length (gp-events))
+          :pending-events (length (pending-events ctx))
           :goals (length (gp-goals))
+          :open-goals (length open)
           :facts (length (gp-facts))
           :repair-depth *procedure-repair-archive-depth*
           :listening (and (observation-active-p) t)
@@ -248,22 +255,116 @@ send back the string LISP->JSON produced."
                               (if (symbolp n) (symbol-name n) "")))
                      :test #'string-equal))))))
 
-(defun %serialize-procedure (procedure)
-  (list :name (procedure-name procedure)
-        :goals (json-array (procedure-goals procedure))
-        :success-count (procedure-success-count procedure)
-        :failure-count (procedure-failure-count procedure)
-        :score (procedure-score procedure)
-        :operators-used (json-array (procedure-operators-used procedure))
-        :step-count (length (procedure-steps procedure))))
+(defvar *applies-result-cache* nil
+  "Cache for %PROCEDURE-APPLIES-P across identical fact/operator snapshots.
+Plist :FACTS :OP-NAMES :BY-NAME (hash name-string → (fingerprint . applies)).
+Fingerprint changes when a procedure is remembered or scored.")
 
-(defun %archive-body (&optional procedure)
+(defun %clear-applies-result-cache ()
+  "Drop the applies probe cache (reset / memory clear)."
+  (setf *applies-result-cache* nil))
+
+(defun %procedure-fingerprint (procedure)
+  (list (procedure-name procedure)
+        (procedure-success-count procedure)
+        (procedure-failure-count procedure)
+        (procedure-score procedure)
+        (length (procedure-steps procedure))))
+
+(defun %procedure-applies-uncached (procedure facts operators)
+  "Probe PROCEDURE on FACTS without touching the session deliberative trace."
+  (let ((saved-last *last-trace*)
+        (saved-history *trace-history*)
+        (saved-current *current-trace*))
+    (unwind-protect
+        (let ((*current-trace* nil)
+              (*trace-enabled* nil))
+          (and (nth-value 0 (replay-procedure procedure facts operators))
+               t))
+      (setf *last-trace* saved-last
+            *trace-history* saved-history
+            *current-trace* saved-current))))
+
+(defun %procedure-applies-p (procedure)
+  "True when PROCEDURE would rebuild a plan on the current facts.
+Caches per fact/operator snapshot and procedure fingerprint so a workbench
+poll with applies=1 does not replay every procedure twice a second when
+nothing changed. Does not disturb the session deliberative trace."
+  (let* ((ctx (ensure-current-context))
+         (facts (context-all-facts ctx))
+         (ops (context-planning-operators ctx))
+         (op-names (mapcar #'operator-name ops))
+         (cache *applies-result-cache*)
+         (by-name (when (and (equal facts (getf cache :facts))
+                             (equal op-names (getf cache :op-names)))
+                    (getf cache :by-name)))
+         (pname (procedure-name procedure))
+         (key (if (symbolp pname)
+                  (symbol-name pname)
+                  (princ-to-string pname)))
+         (fp (%procedure-fingerprint procedure)))
+    (unless by-name
+      (setf by-name (make-hash-table :test #'equal)
+            *applies-result-cache* (list :facts (copy-list facts)
+                                         :op-names (copy-list op-names)
+                                         :by-name by-name)))
+    (multiple-value-bind (entry present) (gethash key by-name)
+      (if (and present (equal (car entry) fp))
+          (cdr entry)
+          (let ((applies (%procedure-applies-uncached procedure facts ops)))
+            (setf (gethash key by-name) (cons fp applies))
+            applies)))))
+
+(defun %serialize-procedure (procedure &key include-applies)
+  (let ((base (list :name (procedure-name procedure)
+                    :goals (json-array (procedure-goals procedure))
+                    :success-count (procedure-success-count procedure)
+                    :failure-count (procedure-failure-count procedure)
+                    :score (procedure-score procedure)
+                    :operators-used (json-array (procedure-operators-used procedure))
+                    :step-count (length (procedure-steps procedure)))))
+    (if include-applies
+        (append base (list :applies (and (%procedure-applies-p procedure) t)))
+        base)))
+
+(defun %archive-body (&key procedure include-applies)
   (list :ok t
         :procedure (if (procedure-p procedure)
-                       (%serialize-procedure procedure)
+                       (%serialize-procedure procedure
+                                             :include-applies include-applies)
                        :null)
         :procedures (json-array
-                     (mapcar #'%serialize-procedure (gp-archive)))))
+                     (mapcar (lambda (p)
+                               (%serialize-procedure p
+                                                     :include-applies include-applies))
+                             (gp-archive)))))
+
+(defun %split-path-query (path)
+  "Return (VALUES PATH-WITHOUT-QUERY QUERY-STRING-OR-NIL)."
+  (let ((qpos (position #\? path)))
+    (if qpos
+        (values (subseq path 0 qpos)
+                (subseq path (1+ qpos)))
+        (values path nil))))
+
+(defun %query-has-flag (query flag)
+  "True when QUERY contains FLAG=1|true|yes|t (case-insensitive)."
+  (when (and query (plusp (length query)))
+    (let* ((q (string-downcase (concatenate 'string "&" query "&")))
+           (f (string-downcase (string flag))))
+      (some (lambda (val)
+              (search (format nil "&~A=~A&" f val) q))
+            '("1" "true" "yes" "t")))))
+
+(defun %api-flag (value)
+  "Interpret a JSON/body flag: non-null true-ish values."
+  (cond
+    ((or (eq value :missing) (eq value :null) (null value)) nil)
+    ((eq value t) t)
+    ((and (numberp value) (not (zerop value))) t)
+    ((stringp value)
+     (member (string-downcase value) '("1" "true" "yes" "t") :test #'string=))
+    (t nil)))
 
 (defun %body-get (body key &optional default)
   (let ((v (getf body key :missing)))
@@ -321,30 +422,25 @@ user is looking at, so a later edit matches them."
 
 (defun %fact-same-names-p (a b)
   "True when two facts use the same names, whatever their packages."
-  (and (consp a) (consp b)
-       (= (length a) (length b))
-       (every (lambda (x y)
-                (cond
-                  ((and (symbolp x) (symbolp y))
-                   (string= (symbol-name x) (symbol-name y)))
-                  (t (equal x y))))
-              a b)))
+  (fact-same-names-p a b))
 
 (defun %live-fact (fact)
   "The stored fact whose names match FACT, or NIL."
-  (find-if (lambda (live) (%fact-same-names-p live fact)) (gp-facts)))
+  (find-fact-by-names fact (gp-facts)))
 
 (defun web-api-handle (method path &optional body)
   "Dispatch METHOD (:GET/:POST) and PATH (string) with optional BODY plist
 (from JSON). Returns (VALUES STATUS-CODE RESPONSE-PLIST).
-STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
+STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer.
+PATH may include a query string (e.g. /api/archive?applies=1)."
   (let* ((m (if (stringp method)
                 (intern (string-upcase method) :keyword)
                 method))
-         (p (string path))
          (body (or body nil)))
-    (handler-case
-        (cond
+    (multiple-value-bind (p query)
+        (%split-path-query (string path))
+      (handler-case
+          (cond
           ((and (eq m :get) (string= p "/api/status"))
            (values 200 (%api-status)))
           ((and (eq m :get) (string= p "/api/context"))
@@ -390,7 +486,10 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
           ((and (eq m :get) (string= p "/api/autonomy"))
            (values 200 (%api-autonomy-status)))
           ((and (eq m :get) (string= p "/api/archive"))
-           (values 200 (%archive-body)))
+           (let ((include-applies
+                  (or (%query-has-flag query "applies")
+                      (%api-flag (%body-get body :applies :missing)))))
+             (values 200 (%archive-body :include-applies include-applies))))
 
           ((and (eq m :post) (string= p "/api/reset"))
            (gp-reset)
@@ -604,7 +703,7 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                                         (undeclared-word-choices c)))))))))
 
           ((and (eq m :post) (string= p "/api/add-goal"))
-           (let ((goal (json->sexp (%body-get body :goal))))
+           (let ((goal (%adopt-fact (json->sexp (%body-get body :goal)))))
              (unless goal
                (error "add-goal requires :goal"))
              (gp-add-goal goal)
@@ -778,7 +877,7 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                   (proc (if name
                             (gp-remember-procedure :name name)
                             (gp-remember-procedure))))
-             (values 200 (%archive-body proc))))
+             (values 200 (%archive-body :procedure proc))))
 
           ((and (eq m :post) (string= p "/api/archive/use"))
            (let* ((raw-name (%body-get body :name :missing))
@@ -797,7 +896,7 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                                                    :unchecked unchecked))
                           (t (gp-use-procedure :unchecked unchecked)))))
              (values 200 (list* :plan (%serialize-plan plan)
-                                (%archive-body found)))))
+                                (%archive-body :procedure found)))))
 
           ((and (eq m :post) (string= p "/api/archive/score"))
            (let* ((raw (%body-get body :name :missing))
@@ -809,7 +908,7 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
              (gp-score-procedure (procedure-name found)
                                  :success (and success (not (eq success :null))))
              (values 200 (%archive-body
-                          (find-procedure (procedure-name found))))))
+                          :procedure (find-procedure (procedure-name found))))))
 
           ((and (eq m :post) (string= p "/api/autonomy/policy"))
            (let* ((auth (%body-get body :authority :missing))
@@ -854,9 +953,9 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                                :error "not-found"
                                :method m
                                :path p))))
-      (error (e)
-        (values 400 (list :ok nil
-                          :error (princ-to-string e)))))))
+        (error (e)
+          (values 400 (list :ok nil
+                            :error (princ-to-string e))))))))
 
 (defun web-api-handle-json (method path &optional json-body)
   "Like WEB-API-HANDLE but BODY is a JSON string; returns JSON string body."

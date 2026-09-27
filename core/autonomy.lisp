@@ -143,6 +143,19 @@
         (facts (context-all-facts context)))
     (and g (null (differences facts g)))))
 
+(defun autonomy-open-goals (&optional context)
+  "Fact-like goals of CONTEXT that do not yet hold."
+  (let ((ctx (%session-context context)))
+    (differences (context-all-facts ctx)
+                 (normalize-planning-goals (goals-of ctx)))))
+
+(defun autonomy-has-work-p (&optional context)
+  "True when CONTEXT has unsatisfied fact-like goals or pending events.
+Matches workbench Passo/Ciclo enablement."
+  (let ((ctx (%session-context context)))
+    (or (autonomy-open-goals ctx)
+        (pending-events ctx))))
+
 (defun %authorize-execution (policy plan context)
   "Return (VALUES OK REASON). OK means policy allows running the plan
 at the configured authority (simulate or execute).

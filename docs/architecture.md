@@ -27,8 +27,10 @@ core/          events · mea · planner · executor
 ## Autonomy (Phase 12 / PROMPT §28)
 
 - `make-autonomy-policy` — `:authority` `:read` | `:simulate` | `:execute`
-- `autonomous-step` / `gp-autonomous-step` — one controlled cycle
-- `autonomous-loop` / `gp-autonomous-loop` — repeat until done/halt/max-steps
+- `autonomous-step` / `gp-autonomous-step` — one controlled cycle;
+  the REPL entry refuses when there is no open work
+- `autonomous-loop` / `gp-autonomous-loop` — repeat until done/halt/max-steps;
+  the REPL entry refuses the same idle state
 - High-risk / irreversible operators require `auto-confirm` or `confirm-fn`
 - Default authority `:simulate`; adapters still opt-in
 - `prefer-archive` (default true): reuse a scored procedure when its steps
@@ -45,9 +47,12 @@ Each sentence corresponds to a tested behaviour.
 `gp-narrate` speaks the recorded trace in Italian. A failed `gp-plan` opens
 a listening session. `gp-induce-rule` turns the manual before/after change
 into an operator: the object symbol shared by that change becomes `?X0`,
-and numbers stay ground. A second example with the same name merges when
-it fits; a differing number or a one-off value is refused.
-`gp-learn-action` stays ground. A second example with the same constants
+and numbers stay ground. Without an explicit before-state, induce refuses
+when listening is not active. A successful plan or archive use that ends
+`:plan-failed` listening also drops the before-state. A second example
+with the same name merges when it fits; a differing number or a one-off
+value is refused. `gp-learn-action` stays ground and uses the same
+listening gate. A second example with the same constants
 merges. A different symbol or number is refused and does not become a
 variable. An operator that already uses variables is left unchanged.
 `POST /api/remove-fact` retracts one fact by symbol name, so the shell can
@@ -128,9 +133,13 @@ same wait. A stop drops the check or the read still open, and that
 target is not recorded. A match split across two reads of a transcript
 is still found when the look is not stopped. `process-running-p`
 outside a notice look is unchanged.
-`gp-plan-open-goals` plans those goals. It does not change facts,
-simulate, or execute. No fact-like goal is an error.
-`POST /api/plan-open-goals` returns that plan.
+`gp-plan-open-goals` plans the unsatisfied fact-like goals. It does not
+change facts, simulate, or execute. No open goal — none recorded, or
+all already hold — is an error. `POST /api/plan-open-goals` returns
+that plan. `gp-plan` and `POST /api/plan` refuse the same way when
+every requested fact-like goal already holds; the previous plan stays.
+Core MEA still treats an already-held goal as a zero-length success
+inside search.
 `plan-external-actions` names the adapter action that plan would run,
 with arguments grounded from the step. It does not invoke the adapter.
 An operator removed after the plan contributes nothing.
@@ -158,6 +167,10 @@ The workbench does not offer it as an action that will run.
 Changing the operator of that step does not refuse the execute and
 does not run the command. The withheld action shown is the one
 recorded when the plan was built.
+When the rebuilt plan succeeds, a listening session opened for a
+failed plan ends — the same rule as `gp-plan` — and the before-state
+is cleared so induce cannot reuse it. A manual listening session is
+left alone.
 `plan-external-actions-supported-p` is false when the current facts,
 including the effects of earlier steps, no longer reach an action the
 plan would hand to an adapter. `GET /api/plan` returns that as
@@ -184,11 +197,26 @@ Ciclo stops at the policy max-steps, when goals hold, or when a step
 halts. The workbench shows that last outcome from `GET /api/autonomy`
 under Passo and Ciclo, including after a refresh. Limite ciclo sets
 that max-steps on the session policy; a loop request without
-`max-steps` inherits it.
+`max-steps` inherits it. `GET /api/status` reports `open-goals`
+(unsatisfied fact-like goals) and `pending-events` beside the total
+`goals` and `events` counts. The workbench enables Pianifica from
+`open-goals`, enables Passo and Ciclo when either count is positive,
+and captions open goals, pending events, or the idle state.
+`gp-autonomous-step` and `gp-autonomous-loop` refuse that idle state
+as well, so the HTTP endpoints return 400 and do not overwrite the
+last autonomy summary. A cycle already under way may still halt with
+`:no-goals` after reacting. Status `plan-p` and `plan-success`, plus
+plan `external-matches` and `external-supported`, drive workbench Simula
+and Esegui; without a successful matching plan those controls stay idle.
+`gp-simulate` and `gp-run` refuse an unsuccessful plan before changing mode.
 `gp-ask` reads an Italian phrase. A leading `voglio`, `raggiungi`,
 `obiettivo`, `manca`, `fammi`, `ottieni`, or `rendi` is optional: the
 words that remain are the goal. It is recorded only when an operator add,
-a reaction goal, a rule consequent, or a current goal has that shape. The
+a reaction goal, a rule consequent, or a current goal has that shape.
+When that goal already holds, the phrase is refused: the goal is not
+recorded and the previous plan stays. `gp-add-goal` refuses the same
+way for a fact-like goal that already holds, matching names across
+packages; symbol goals are still accepted as labels. The
 predicate is required, unless the first word is an operator name, a
 reaction name, a rule name, or a word in that operator's, reaction's, or
 rule's `:ask` meta.
@@ -204,7 +232,9 @@ declares the word on that one. Without a kind, a shared name is refused.
 The operator learned in the session keeps its own field.
 A phrase that fits two goals records neither and names both. The
 workbench can record the one you choose and plan for it. The plan does
-not execute. An unknown first word records nothing as well. When the
+not execute. Choosing a candidate plans before recording the goal, so a
+fact that already holds is refused without adding it. An unknown first
+word records nothing as well. When the
 other words fit a goal, the refusal names that goal and the workbench
 can declare the word on it before planning. A word with nothing after
 it is offered only when the word is a fixed term of that goal, or the
@@ -232,9 +262,13 @@ execute or delete is refused. The plan does not change facts.
 
 The native shell is `macos/AutomaGPWorkbench`. While listening it offers the
 rule name and the fact list; otherwise it offers simulate, confirm before
-execute, and Passo or Ciclo for one autonomous step or a bounded loop. The
-last autonomous outcome stays visible under those controls. Start the Lisp
-server, then:
+execute, and Passo or Ciclo for one autonomous step or a bounded loop when
+status shows open goals or pending events. Idle work leaves those buttons
+disabled. Simula and Esegui stay disabled until status `plan-p` is true and
+`plan-success` is true. A failed plan still opens listening, but those
+controls stay idle. `gp-simulate` and `gp-run` refuse an unsuccessful
+plan the same way. The last autonomous outcome stays visible under
+those controls. Start the Lisp server, then:
 
 ```bash
 ./scripts/run-web.sh
@@ -244,8 +278,26 @@ cd macos/AutomaGPWorkbench && swift run
 ## Web (Phase 11)
 
 Optional Hunchentoot console on `127.0.0.1:47391`.
-`GET /api/archive` and `POST /api/archive/remember|use|score` are a thin
-façade over the same procedural memory the REPL uses. `use` replays stored
+The page disables Remember until status reports `plan-success`, and
+disables Simulate and Run until that successful plan also reports
+`external-matches` and `external-supported` from `GET /api/plan` — the
+same idle rule as the workbench. Autonomy Step/Loop stay idle when there
+is no open goal and no pending event. Plan stays idle when there is no
+open goal unless Goals JSON is typed (empty Goals calls
+`/api/plan-open-goals`). Typed Goals that already hold in the facts
+keep Plan idle; a single fact array is sent as one goal. Use and Score
+stay idle until a named archived procedure exists (Use without a name
+needs a non-empty archive and an open goal). React stays idle when there
+is no pending event. Emit and Add fact stay idle until Event/Fact JSON
+is a non-empty array. Each archived procedure may report `applies`
+against the current facts when requested (`GET /api/archive?applies=1`);
+Use stays idle when that flag is false. Plain archive listing and POST
+remember/use/score omit `applies` so the list stays cheap. Applies probes
+are cached per fact/operator snapshot and procedure fingerprint so a
+polling client does not replay every procedure when nothing changed.
+`gp-reset` and `gp-clear-memory` drop that cache. `GET /api/archive` and `POST /api/archive/remember|use|score` are a thin
+façade over the same procedural memory the REPL uses. `remember` refuses
+when there is no plan or the plan did not succeed. `use` replays stored
 steps on the current facts. A step whose goal already holds is skipped when
 its recorded effects are already in the state. Otherwise those effects are
 applied. When the operator is no longer registered, a step whose goal is

@@ -19,6 +19,21 @@ as Phase 1: (VALUES T BINDINGS) or (VALUES NIL NIL)."
   "True if FACT occurs in FACTS (exact EQUAL)."
   (find fact facts :test #'fact-equal))
 
+(defun fact-same-names-p (a b)
+  "True when two facts use the same names, whatever their packages."
+  (and (consp a) (consp b)
+       (= (length a) (length b))
+       (every (lambda (x y)
+                (cond
+                  ((and (symbolp x) (symbolp y))
+                   (string= (symbol-name x) (symbol-name y)))
+                  (t (equal x y))))
+              a b)))
+
+(defun find-fact-by-names (fact facts)
+  "The stored fact whose names match FACT, or NIL."
+  (find-if (lambda (live) (fact-same-names-p live fact)) facts))
+
 (defun find-facts (pattern facts)
   "Return all facts in FACTS that match PATTERN.
 Each result is (FACT . BINDINGS) where BINDINGS is an alist (possibly NIL)."

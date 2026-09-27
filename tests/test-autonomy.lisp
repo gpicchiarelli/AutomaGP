@@ -92,7 +92,13 @@
 (test autonomy-no-goals-and-impossible-plan-halt
   (gp-clear-memory)
   (gp-reset)
-  (let ((summary (gp-autonomous-step
+  (signals error (gp-autonomous-step
+                  :policy (make-autonomy-policy :authority :simulate)))
+  (signals error (gp-autonomous-loop
+                  :policy (make-autonomy-policy :authority :simulate
+                                                :max-steps 2)
+                  :max-steps 2))
+  (let ((summary (autonomous-step
                   :policy (make-autonomy-policy :authority :simulate))))
     (is (eq :halted (getf summary :status)))
     (is (eq :no-goals (getf summary :halt))))
@@ -104,6 +110,26 @@
     (is (eq :halted (getf summary :status)))
     (is (eq :plan-failed (getf summary :halt)))
     (is (= 1 (getf summary :iterations)))))
+
+(test autonomy-refuses-when-goals-already-hold
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-goal '(power-state interface-01 on))
+  (gp-add-fact '(power-state interface-01 on))
+  (is-false (autonomy-has-work-p))
+  (is (null (autonomy-open-goals)))
+  (setf *last-autonomy* '(:status :done :halt :completed :marker t))
+  (signals error (gp-autonomous-step
+                  :policy (make-autonomy-policy :authority :simulate)))
+  (is (eq :completed (getf *last-autonomy* :halt)))
+  (is (eq t (getf *last-autonomy* :marker)))
+  (multiple-value-bind (code body)
+      (web-api-handle :post "/api/autonomy/step"
+                      '(:authority "simulate"))
+    (is (= 400 code))
+    (is (search "no open goal" (getf body :error))))
+  (is (eq :completed (getf *last-autonomy* :halt)))
+  (is (eq t (getf *last-autonomy* :marker))))
 
 (test autonomy-reacts-to-pending-document-event
   (gp-clear-memory)
