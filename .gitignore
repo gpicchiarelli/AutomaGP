@@ -51,6 +51,9 @@ local-projects/
 .lispworks
 *fasl*
 
+# Swift
+.build/
+
 # macOS
 .DS_Store
 .AppleDouble

@@ -4,7 +4,9 @@
 ;;;; Coexists with goal-directed planning: emit/react may add goals; gp-plan
 ;;;; still works without any events.
 ;;;;
-;;;; Honest limits: no OS file watchers; events are posted by the REPL/API.
+;;;; Honest limits: no directory watcher and no terminal watcher.
+;;;; GP-NOTICE-PATH posts one existing file only when a reaction already
+;;;; matches FILE-CREATED. Other events are still posted by the REPL/API.
 ;;;; Reactions are pattern matches over event type+data, not a separate MEA.
 
 (in-package #:automa-gp)

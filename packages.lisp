@@ -131,6 +131,16 @@
    #:operator-risk
    #:operator-meta
    #:make-operator
+   #:*observed-before*
+   #:*observation*
+   #:*listen-on-plan-failure*
+   #:observation-active-p
+   #:gp-observation
+   #:induce-operator
+   #:gp-listen
+   #:gp-note-state
+   #:gp-learn-action
+   #:gp-induce-rule
    #:action->operator
    #:register-operator!
    #:remove-operator!
@@ -249,6 +259,8 @@
    #:resolve-explain-topic
    #:format-explanation
    #:explain-trace
+   #:narrate-trace
+   #:gp-narrate
    #:gp-explain
    #:gp-last-trace
    #:gp-trace-history
@@ -490,6 +502,11 @@
    #:emit-event!
    #:react-to-event!
    #:process-pending-events!
+   #:gp-notice-path
+   #:gp-notice-directory
+   #:gp-interpret
+   #:gp-ask
+   #:gp-name-operator
    #:gp-emit
    #:gp-events
    #:gp-react

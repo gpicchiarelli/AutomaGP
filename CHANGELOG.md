@@ -5,6 +5,293 @@ All notable changes to AUTOMA GP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows the incremental phases in `docs/PROMPT.md` §25.
 
+## [0.123.0] — 2026-09-27
+
+### Added
+
+- `gp-notice-directory` looks once at the files in one directory. Each
+  file a `file-created` reaction already models is asserted, and that
+  reaction's facts and goals enter the context. Subdirectories are not
+  entered. The call does not plan and does not run adapters. `gp-run`
+  with adapters still performs an operator's external action afterward.
+  `POST /api/notice-directory` is the same gate.
+
+## [0.122.0] — 2026-09-27
+
+### Changed
+
+- An unknown first word is not declared when the other words already
+  fit a goal and that word is not a term of the goal. Those goals are
+  named and none is recorded. `spegni interface-01` does not name
+  `power-off`. A word that is a term, such as `pronti system` for
+  `(system pronto)`, can still be declared.
+
+## [0.121.0] — 2026-09-27
+
+### Changed
+
+- A word whose stem is exactly the name of an operator, a reaction, or
+  a rule is not offered as a new word. `power-one` is not `power-on`,
+  and nothing is recorded. A new word such as `spegni` is still offered
+  when the other words fit a goal.
+
+## [0.120.0] — 2026-09-27
+
+### Changed
+
+- A noun in `-mento` shares the verb stem, so `accendimento` shares
+  the stem of `accendi`. The name itself is not stemmed.
+
+## [0.119.0] — 2026-09-27
+
+### Changed
+
+- A noun in `-sione` from a verb in `-ere` restores the final D, so
+  `accensione` shares the stem of `accendi`. A regular `-zione` noun
+  shares the verb stem, so `classificazione` shares `classifica`.
+  `power-one` does not match `power-on`. The name itself is not stemmed.
+
+## [0.118.0] — 2026-09-27
+
+### Changed
+
+- A stem drops one `-ezza` ending, so `prontezza` and `prontezze` share
+  the stem of `pronto`. A different ending, such as `accensione`, still
+  does not match. The name itself is not stemmed.
+
+## [0.117.0] — 2026-09-27
+
+### Changed
+
+- A stem drops one `-mente` ending before the superlative, so
+  `prontamente` shares the stem of `pronto`. A different ending, such
+  as `accensione`, still does not match. The name itself is not stemmed.
+
+## [0.116.0] — 2026-09-27
+
+### Changed
+
+- A stem drops one superlative ending before the usual ending, so
+  `prontissimo` and `pronta` share the stem of `pronto`. A different
+  stem, such as `accensione`, still does not match. The name itself is
+  not stemmed.
+
+## [0.115.0] — 2026-09-27
+
+### Changed
+
+- A word alone matches the same stem of a fixed term, so `pronti` and
+  `pronta` name a goal whose term is `pronto`. The operator, reaction,
+  or rule name stays exact, so `pronti` does not match `segnala-pronto`.
+
+## [0.114.0] — 2026-09-27
+
+### Changed
+
+- A word alone names a goal with no variables only when that word is a
+  fixed term of the goal, or one hyphenated piece of its name. A word
+  that does not occur there is not a candidate. `power-one` does not
+  match `power-on`.
+
+## [0.113.0] — 2026-09-27
+
+### Changed
+
+- A word alone, when more than one goal has no variables, names those
+  goals and records none. The word is not declared. One of those goals
+  can still be recorded afterwards.
+
+## [0.112.0] — 2026-09-27
+
+### Changed
+
+- A word alone is offered only when the context has exactly one goal
+  with no variables. Several such goals are not listed, and nothing is
+  recorded. The other words of a phrase can still fit more than one goal.
+
+## [0.111.0] — 2026-09-27
+
+### Changed
+
+- A word alone can name a goal that has no variables left. The refusal
+  lists those goals and records none of them. A goal that still has a
+  variable is not offered until the other words are said. A word that
+  someone already answers is not offered again.
+
+## [0.110.0] — 2026-09-27
+
+### Changed
+
+- An unknown first word still records nothing. When the other words fit
+  one or more goals, the refusal names those goals and who would receive
+  the word. The workbench can declare it on the one you choose, then
+  record that goal and plan. A word alone, or a word already in use,
+  stays a refusal with no candidates.
+
+## [0.109.0] — 2026-09-27
+
+### Changed
+
+- A phrase that fits two goals still records neither. The refusal names
+  both goals. The workbench lists them, and **Usa questo** records the
+  one you choose and plans for it. The plan does not execute.
+
+## [0.108.0] — 2026-09-27
+
+### Changed
+
+- `gp-name-operator` accepts a kind. When an operator and a reaction share
+  a name, the word is declared on the one you name. Without a kind, that
+  shared name is still refused and nothing changes. The workbench sends
+  the kind of the row you chose.
+
+## [0.107.0] — 2026-09-27
+
+### Changed
+
+- The workbench lists every operator already in the context, together with
+  the reactions and rules. **Chiama così** declares a word on the one you
+  choose. The operator learned in this session keeps its own field.
+
+## [0.106.0] — 2026-09-27
+
+### Changed
+
+- The workbench lists each reaction and rule already in the context.
+  **Chiama così** declares a word on the one you choose. The list shows
+  the words already declared. The operator learned in this session keeps
+  its own field.
+
+## [0.105.0] — 2026-09-27
+
+### Changed
+
+- `gp-name-operator` declares a word on a reaction or a rule when that
+  name belongs to only one of them. `classifica` then asks for the
+  reaction's goal, and the same stem counts. If an operator and a
+  reaction share the name, the declaration is refused and nothing changes.
+
+## [0.104.0] — 2026-09-27
+
+### Changed
+
+- `gp-ask` accepts a reaction name or a rule name the way it accepts an
+  operator name. `classify note.txt` is the reaction's goal. The name
+  stays exact. If an operator and a reaction share that name and their
+  goals differ, the phrase is refused.
+
+## [0.103.0] — 2026-09-27
+
+### Added
+
+- `gp-name-operator` declares one word on an existing operator. `spegnere`
+  then names that operator in `gp-ask`, and so does the same stem. A
+  command word is refused. If another operator already answers to the
+  word, nothing changes.
+
+## [0.102.0] — 2026-09-27
+
+### Changed
+
+- A word in an operator's `:ask` meta also matches the same stem.
+  `accendere` names the operator that declares `accendi`. A different
+  stem, such as `accensione`, does not. The operator's own name stays
+  exact.
+
+## [0.101.0] — 2026-09-27
+
+### Changed
+
+- `gp-ask` accepts the operator's name in place of the predicate.
+  `power-on interface-01` is `(power-state interface-01 on)` when that
+  operator adds it. A word listed in the operator's `:ask` meta names it
+  the same way: the hardware operator `power-on-device` answers to
+  `accendi`. Two operators that share the word are refused.
+
+## [0.100.0] — 2026-09-27
+
+### Changed
+
+- `gp-ask` accepts a phrase that leaves a fixed term unsaid at the end of
+  a shape the context already achieves. `power-state interface-01` is
+  `(power-state interface-01 on)` when that is the only match. If two
+  goals fit, the phrase is refused and nothing is recorded.
+
+## [0.99.0] — 2026-09-27
+
+### Changed
+
+- `gp-learn-action` merges a second example when every constant is already
+  the same. A different symbol or number is refused, the registered
+  operator stays, and no variable is introduced. An operator that already
+  uses variables is left unchanged.
+
+## [0.98.0] — 2026-09-27
+
+### Changed
+
+- `gp-ask` no longer requires a leading verb. The remaining words are a
+  goal when they match a shape the context already achieves. `fammi`,
+  `ottieni`, and `rendi` are optional openings. A request to execute or
+  delete is still refused.
+
+## [0.97.0] — 2026-09-27
+
+### Added
+
+- A second `gp-induce-rule` with the same name merges when the example
+  fits. An existing variable stays. A symbol that occurs at least twice
+  and is renamed becomes the next variable. A differing number or a
+  one-off value is refused, and the operator already registered stays.
+
+## [0.96.0] — 2026-09-27
+
+### Added
+
+- `gp-ask` turns an Italian phrase into a goal when an operator add, a
+  reaction goal, a rule consequent, or a current goal already has that
+  shape. A phrase that asks to execute or delete is refused. The plan
+  that follows does not change facts.
+
+## [0.95.0] — 2026-09-27
+
+### Added
+
+- `gp-notice-path` asserts `(file-created path)` only when that file
+  exists and a reaction already matches it. A directory, a missing path,
+  and an unmodeled file are refused. An open listening session keeps its
+  before-state. `POST /api/notice-path` is the same gate.
+
+## [0.94.0] — 2026-09-27
+
+### Changed
+
+- The macOS workbench leads with one next step. Facts are a list you can
+  edit. A failed plan suggests a rule name. Execute asks before it runs.
+  `POST /api/remove-fact` retracts one fact by symbol name, so an edit
+  from the window matches a fact asserted in another package.
+
+## [0.93.0] — 2026-09-27
+
+### Added
+
+- A failed `gp-plan` opens a listening session on the current facts.
+  `gp-induce-rule` turns the later manual change into an operator and lifts
+  the shared object symbol to `?X0`. Numeric constants stay ground.
+
+## [0.92.0] — 2026-09-27
+
+### Added
+
+- The macOS workbench (`macos/AutomaGPWorkbench`) shows the recorded
+  deliberation, the procedure archive, and the simulate/execute gate.
+  It speaks to the Lisp server on `127.0.0.1:47391`.
+- `gp-narrate` turns a deliberative trace into Italian sentences and a
+  node list. The sentences name only recorded entries.
+- `gp-note-state` and `gp-learn-action` induce one ground operator from
+  a before/after observation. Facts that do not share a term with the
+  change are not preconditions.
+
 ## [0.91.0] — 2026-09-27
 
 ### Changed

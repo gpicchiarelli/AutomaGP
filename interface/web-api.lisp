@@ -68,7 +68,8 @@
   (list :name (event-reaction-name r)
         :when (event-reaction-when r)
         :assert (json-array (event-reaction-assert r))
-        :goals (json-array (event-reaction-goals r))))
+        :goals (json-array (event-reaction-goals r))
+        :ask (json-array (getf (event-reaction-meta r) :ask))))
 
 (defun %serialize-operator (op)
   (list :name (operator-name op)
@@ -76,7 +77,8 @@
         :add-list (operator-add-list op)
         :delete-list (operator-delete-list op)
         :cost (operator-cost op)
-        :meta (operator-meta op)))
+        :meta (operator-meta op)
+        :ask (json-array (getf (operator-meta op) :ask))))
 
 (defun %api-status ()
   (let ((ctx (ensure-current-context)))
@@ -89,7 +91,13 @@
           :plan-p (and (plan-p *current-plan*) t)
           :events (length (gp-events))
           :goals (length (gp-goals))
-          :facts (length (gp-facts)))))
+          :facts (length (gp-facts))
+          :repair-depth *procedure-repair-archive-depth*
+          :listening (and (observation-active-p) t)
+          :listening-missing
+          (json-array (if (observation-active-p)
+                          (getf *observation* :missing)
+                          nil)))))
 
 (defun %api-context ()
   (let ((ctx (ensure-current-context)))
@@ -117,8 +125,12 @@
 (defun %api-explain ()
   (multiple-value-bind (text trace)
       (explain-trace :last :stream nil)
-    (list :text (or text "")
-          :has-trace (and (deliberative-trace-p trace) t))))
+    (multiple-value-bind (narration nodes)
+        (narrate-trace trace)
+      (list :text (or text "")
+            :narration (or narration "")
+            :graph (json-array nodes)
+            :has-trace (and (deliberative-trace-p trace) t)))))
 
 (defun %serialize-autonomy (summary)
   (cond
@@ -197,6 +209,63 @@ send back the string LISP->JSON produced."
     ((listp value) value)
     (t (list value))))
 
+(defun %context-symbols ()
+  "Symbols already used in the current facts and goals."
+  (let ((bag nil))
+    (dolist (fact (append (gp-facts) (gp-goals)))
+      (when (consp fact)
+        (dolist (term fact)
+          (when (and (symbolp term) (not (keywordp term)))
+            (push term bag)))))
+    bag))
+
+(defun %adopt-term (term)
+  "Reuse a context symbol with the same name. Numbers and strings stay."
+  (if (and (symbolp term) (not (keywordp term)))
+      (or (find (symbol-name term) (%context-symbols)
+                :key #'symbol-name :test #'string=)
+          term)
+      term))
+
+(defun %adopt-fact (fact)
+  "Rewrite FACT onto the vocabulary already in the context.
+JSON has no packages. A new word joins the package of the facts the
+user is looking at, so a later edit matches them."
+  (unless (consp fact)
+    (return-from %adopt-fact fact))
+  (let* ((adopted (mapcar #'%adopt-term fact))
+         (home (some (lambda (term)
+                       (and (symbolp term)
+                            (not (keywordp term))
+                            (not (eq (symbol-package term)
+                                     (find-package :automa-gp)))
+                            (symbol-package term)))
+                     adopted)))
+    (if (null home)
+        adopted
+        (mapcar (lambda (term)
+                  (if (and (symbolp term)
+                           (not (keywordp term))
+                           (eq (symbol-package term) (find-package :automa-gp)))
+                      (intern (symbol-name term) home)
+                      term))
+                adopted))))
+
+(defun %fact-same-names-p (a b)
+  "True when two facts use the same names, whatever their packages."
+  (and (consp a) (consp b)
+       (= (length a) (length b))
+       (every (lambda (x y)
+                (cond
+                  ((and (symbolp x) (symbolp y))
+                   (string= (symbol-name x) (symbol-name y)))
+                  (t (equal x y))))
+              a b)))
+
+(defun %live-fact (fact)
+  "The stored fact whose names match FACT, or NIL."
+  (find-if (lambda (live) (%fact-same-names-p live fact)) (gp-facts)))
+
 (defun web-api-handle (method path &optional body)
   "Dispatch METHOD (:GET/:POST) and PATH (string) with optional BODY plist
 (from JSON). Returns (VALUES STATUS-CODE RESPONSE-PLIST).
@@ -227,7 +296,8 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                           (mapcar (lambda (r)
                                     (list :name (rule-name r)
                                           :if (json-array (rule-if r))
-                                          :then (json-array (rule-then r))))
+                                          :then (json-array (rule-then r))
+                                          :ask (json-array (getf (rule-meta r) :ask))))
                                   (gp-rules))))))
           ((and (eq m :get) (string= p "/api/events"))
            (values 200 (list :events
@@ -259,12 +329,86 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
            (values 200 (list :ok t :context (%api-context))))
 
           ((and (eq m :post) (string= p "/api/add-fact"))
-           (let ((fact (json->sexp (%body-get body :fact))))
+           (let ((fact (%adopt-fact (json->sexp (%body-get body :fact)))))
              (unless (consp fact)
                (error "add-fact requires :fact array"))
              (gp-add-fact fact)
              (values 200 (list :ok t :fact fact
                                :facts (json-array (gp-facts))))))
+
+          ((and (eq m :post) (string= p "/api/remove-fact"))
+           (let* ((raw (json->sexp (%body-get body :fact)))
+                  (fact (%live-fact raw)))
+             (unless (consp raw)
+               (error "remove-fact requires :fact array"))
+             (unless fact
+               (error "No fact with those names is in the context."))
+             (gp-remove-fact fact)
+             (values 200 (list :ok t :fact fact
+                               :facts (json-array (gp-facts))))))
+
+          ((and (eq m :post) (string= p "/api/notice-directory"))
+           (let ((path (%body-get body :path)))
+             (unless (stringp path)
+               (error "notice-directory requires :path string"))
+             (let ((noticed (gp-notice-directory path)))
+               (values 200 (list :ok t
+                                 :noticed (json-array noticed)
+                                 :listening (and (observation-active-p) t)
+                                 :facts (json-array (gp-facts))
+                                 :goals (json-array (gp-goals)))))))
+
+          ((and (eq m :post) (string= p "/api/notice-path"))
+           (let ((path (%body-get body :path)))
+             (unless (stringp path)
+               (error "notice-path requires :path string"))
+             (let ((fact (gp-notice-path path)))
+               (values 200 (list :ok t
+                                 :fact fact
+                                 :listening (and (observation-active-p) t)
+                                 :facts (json-array (gp-facts)))))))
+
+          ((and (eq m :post) (string= p "/api/ask"))
+           (let ((phrase (%body-get body :phrase)))
+             (unless (stringp phrase)
+               (error "ask requires :phrase string"))
+             (handler-case
+                 (multiple-value-bind (goal plan) (gp-ask phrase)
+                   (values 200 (list :ok t
+                                     :goal goal
+                                     :plan (%serialize-plan plan)
+                                     :listening (and (observation-active-p) t)
+                                     :goals (json-array (gp-goals)))))
+               (ambiguous-goal (c)
+                 (values 400 (list :ok nil
+                                   :error (princ-to-string c)
+                                   :goals (json-array (ambiguous-goal-goals c)))))
+               (unspecific-word (c)
+                 (values 400 (list :ok nil
+                                   :error (princ-to-string c)
+                                   :goals (json-array (unspecific-word-goals c)))))
+               (unrelated-word (c)
+                 (values 400 (list :ok nil
+                                   :error (princ-to-string c)
+                                   :goals (json-array (unrelated-word-goals c)))))
+               (not-that-name (c)
+                 (values 400 (list :ok nil
+                                   :error (princ-to-string c)
+                                   :word (not-that-name-word c)
+                                   :name (not-that-name-name c))))
+               (undeclared-word (c)
+                 (values 400
+                         (list :ok nil
+                               :error (princ-to-string c)
+                               :word (undeclared-word-word c)
+                               :choices
+                               (json-array
+                                (mapcar (lambda (choice)
+                                          (list :kind (string-downcase
+                                                       (%kind-label (first choice)))
+                                                :name (second choice)
+                                                :goal (third choice)))
+                                        (undeclared-word-choices c)))))))))
 
           ((and (eq m :post) (string= p "/api/add-goal"))
            (let ((goal (json->sexp (%body-get body :goal))))
@@ -338,6 +482,95 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                            :reaction (%serialize-last-reaction summary)
                            :plan (%serialize-plan *current-plan*)
                            :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/listen"))
+           (let ((missing (mapcar #'json->sexp
+                                  (%json-sequence (%body-get body :missing nil)))))
+             (gp-listen :missing missing :reason :manual)
+             (values 200 (list :ok t
+                               :listening t
+                               :facts (json-array (gp-facts))))))
+
+          ((and (eq m :post) (string= p "/api/induce/rule"))
+           (let* ((raw-name (%body-get body :name :missing))
+                  (name (cond
+                          ((eq raw-name :missing)
+                           (error "induce requires :name"))
+                          ((stringp raw-name) (json->sexp raw-name))
+                          (t raw-name)))
+                  (before-raw (%body-get body :before :missing))
+                  (after-raw (%body-get body :after :missing))
+                  (kwargs nil))
+             (unless (eq before-raw :missing)
+               (setf kwargs (list* :before
+                                   (mapcar #'json->sexp (%json-sequence before-raw))
+                                   kwargs)))
+             (unless (eq after-raw :missing)
+               (setf kwargs (list* :after
+                                   (mapcar #'json->sexp (%json-sequence after-raw))
+                                   kwargs)))
+             (let ((op (apply #'gp-induce-rule name kwargs)))
+               (values 200 (list :ok t
+                                 :listening (and (observation-active-p) t)
+                                 :operator (%serialize-operator op))))))
+
+          ((and (eq m :post) (string= p "/api/induce/note"))
+           (gp-note-state)
+           (values 200 (list :ok t
+                             :facts (json-array (gp-facts)))))
+
+          ((and (eq m :post) (string= p "/api/induce"))
+           (let* ((raw-name (%body-get body :name :missing))
+                  (name (cond
+                          ((eq raw-name :missing)
+                           (error "induce requires :name"))
+                          ((stringp raw-name) (json->sexp raw-name))
+                          (t raw-name)))
+                  (before-raw (%body-get body :before :missing))
+                  (after-raw (%body-get body :after :missing))
+                  (kwargs nil))
+             (unless (eq before-raw :missing)
+               (setf kwargs (list* :before
+                                   (mapcar #'json->sexp (%json-sequence before-raw))
+                                   kwargs)))
+             (unless (eq after-raw :missing)
+               (setf kwargs (list* :after
+                                   (mapcar #'json->sexp (%json-sequence after-raw))
+                                   kwargs)))
+             (let ((op (apply #'gp-learn-action name kwargs)))
+               (values 200 (list :ok t
+                                 :operator (%serialize-operator op))))))
+
+          ((and (eq m :post) (string= p "/api/operator/name"))
+           (let* ((raw-name (%body-get body :name :missing))
+                  (raw-word (%body-get body :word :missing))
+                  (raw-kind (%body-get body :kind :missing))
+                  (name (cond
+                          ((eq raw-name :missing)
+                           (error "The operator needs a name."))
+                          (t raw-name)))
+                  (word (cond
+                          ((eq raw-word :missing)
+                           (error "The operator needs one word."))
+                          ((stringp raw-word) raw-word)
+                          (t (string raw-word))))
+                  (kind (if (eq raw-kind :missing) nil raw-kind))
+                  (named (gp-name-operator name word :kind kind)))
+             (values 200
+                     (cond
+                       ((operator-p named)
+                        (list :ok t :operator (%serialize-operator named)))
+                       ((event-reaction-p named)
+                        (list :ok t
+                              :reaction (event-reaction-name named)
+                              :ask (json-array
+                                    (getf (event-reaction-meta named) :ask))))
+                       ((rule-p named)
+                        (list :ok t
+                              :rule (rule-name named)
+                              :ask (json-array
+                                    (getf (rule-meta named) :ask))))
+                       (t (list :ok t))))))
 
           ((and (eq m :post) (string= p "/api/archive/remember"))
            (let* ((raw (%body-get body :name :missing))

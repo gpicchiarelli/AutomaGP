@@ -47,6 +47,8 @@ Knowledge and procedural memory are kept (use GP-CLEAR-MEMORY to drop them)."
   (clear-trace-session)
   (clear-working-memory)
   (clear-episodic-memory)
+  (setf *observed-before* nil)
+  (setf *observation* nil)
   *current-context*)
 
 (defun gp-context (&key name parent facts mode rules operators)
@@ -169,6 +171,13 @@ When REMEMBER is true (default), records a plan episode in episodic memory."
     (refresh-working-memory ctx)
     (when remember
       (record-plan-episode! *current-plan* :context-name (context-name ctx)))
+    (cond
+      ((plan-success *current-plan*)
+       (when (eq (getf *observation* :reason) :plan-failed)
+         (setf *observation* nil)))
+      (*listen-on-plan-failure*
+       (gp-listen :missing (plan-remaining *current-plan*)
+                  :reason :plan-failed)))
     *current-plan*))
 
 (defun gp-last-plan ()
@@ -257,6 +266,102 @@ With POLICY (:SIGNAL :SKIP :RETRY :ABORT :ASK): install a fresh strategy."
   (register-action! (ensure-current-context) action))
 
 ;;; Phase 6 — explanation from recorded deliberative traces
+
+(defun gp-listen (&key missing (reason :manual))
+  "Open a listening session on the current facts.
+MISSING records the goals still open, usually PLAN-REMAINING after a
+failed plan. A later GP-INDUCE-RULE consumes this before-state."
+  (setf *observed-before* (copy-list (gp-facts)))
+  (setf *observation*
+        (list :active t
+              :before *observed-before*
+              :missing (copy-list missing)
+              :reason reason))
+  *observation*)
+
+(defun gp-note-state ()
+  "Remember the current facts as the before-state of a manual action."
+  (gp-listen :reason :manual))
+
+(defun gp-learn-action (name &key (before nil before-p) (after nil after-p)
+                               (register t))
+  "Induce a ground operator named NAME and, by default, register it.
+BEFORE defaults to the list from GP-NOTE-STATE. AFTER defaults to the
+current facts. Patterns stay ground. A later call with the same name
+merges when every constant is already the same; a different symbol or
+number is refused and does not become a variable. An operator that
+already uses variables is left unchanged. Clears the session only after
+a successful induction."
+  (let* ((before (if before-p
+                     before
+                     (or *observed-before*
+                         (error "No state noted. Call gp-note-state before the manual change."))))
+         (after (if after-p after (gp-facts)))
+         (fresh (induce-operator name before after))
+         (operator
+           (if (not register)
+               fresh
+               (let ((existing (find-operator (ensure-current-context) name)))
+                 (cond
+                   ((null existing)
+                    (gp-add-operator
+                     (make-operator :name (operator-name fresh)
+                                    :preconditions (operator-preconditions fresh)
+                                    :add-list (operator-add-list fresh)
+                                    :delete-list (operator-delete-list fresh)
+                                    :cost (operator-cost fresh)
+                                    :meta (list* :examples 1 (operator-meta fresh)))))
+                   ((not (getf (operator-meta existing) :induced))
+                    (error "Operator ~A already exists and was not induced." name))
+                   ((%operator-uses-variables-p existing)
+                    (error "Operator ~A already uses variables." name))
+                   (t
+                    (let ((merged (merge-induced-operators existing fresh :lift nil)))
+                      (unless merged
+                        (error "The new example does not fit operator ~A." name))
+                      (gp-add-operator merged))))))))
+    (setf *observed-before* nil)
+    (setf *observation* nil)
+    operator))
+
+(defun gp-induce-rule (name &key (before nil before-p) (after nil after-p)
+                             (register t))
+  "Induce a generalized operator from the listening session and register it.
+The object symbol shared by one change becomes ?X0. Numbers stay ground.
+A later call with the same name merges the new example when it fits: an
+existing variable stays, a repeated symbol that is renamed becomes the
+next variable, and a differing number or a one-off value is refused.
+The operator already registered is left unchanged when the example does
+not fit. Clears the session only after a successful induction."
+  (let* ((before (if before-p
+                     before
+                     (or *observed-before*
+                         (error "No state noted. Call gp-listen before the manual change."))))
+         (after (if after-p after (gp-facts)))
+         (fresh (induce-operator name before after :generalize t))
+         (operator
+           (if (not register)
+               fresh
+               (let ((existing (find-operator (ensure-current-context) name)))
+                 (cond
+                   ((null existing)
+                    (gp-add-operator
+                     (make-operator :name (operator-name fresh)
+                                    :preconditions (operator-preconditions fresh)
+                                    :add-list (operator-add-list fresh)
+                                    :delete-list (operator-delete-list fresh)
+                                    :cost (operator-cost fresh)
+                                    :meta (list* :examples 1 (operator-meta fresh)))))
+                   ((not (getf (operator-meta existing) :induced))
+                    (error "Operator ~A already exists and was not induced." name))
+                   (t
+                    (let ((merged (merge-induced-operators existing fresh)))
+                      (unless merged
+                        (error "The new example does not fit operator ~A." name))
+                      (gp-add-operator merged))))))))
+    (setf *observed-before* nil)
+    (setf *observation* nil)
+    operator))
 
 (defun gp-explain (&optional (topic :last) &key (stream t))
   "Print (and return) an explanation derived from a recorded deliberative trace.

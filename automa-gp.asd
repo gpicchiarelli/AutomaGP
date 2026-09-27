@@ -24,6 +24,7 @@
                              (:file "rules")
                              (:file "queries")
                              (:file "operators")
+                             (:file "induction")
                              (:file "explanation")
                              (:file "mea")
                              (:file "planner")
@@ -70,6 +71,9 @@
                (:module "interface"
                 :serial t
                 :components ((:file "repl")
+                             (:file "notice")
+                             (:file "ask")
+                             (:file "narration")
                              (:file "json")
                              (:file "web-api"))))
   :in-order-to ((test-op (test-op "automa-gp/tests"))))
@@ -109,6 +113,7 @@
                              (:file "test-executor")
                              (:file "test-conditions")
                              (:file "test-explanation")
+                             (:file "test-workbench")
                              (:file "test-tavolo")
                              (:file "test-framework-pipeline")
                              (:file "test-memory")
