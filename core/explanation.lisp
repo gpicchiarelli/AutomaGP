@@ -204,7 +204,26 @@ Only uses recorded entries — never invents decisions."
            (format out "    ~S~%" d))
          (format out "~%"))
         (:goal-already-satisfied
-         (format out "Goal already satisfied:~%    ~S~%~%" (getf e :goal)))
+         (format out "Goal already satisfied:~%    ~S~@[~%    operator ~A~]~%~%"
+                 (getf e :goal) (getf e :operator)))
+        (:projected-effects
+         (format out "Projected effects:~%    ~A~%    ~S~%~%"
+                 (getf e :operator) (getf e :goal)))
+        (:recorded-effects
+         (format out "Recorded effects:~%    ~A~%    ~S~%~%"
+                 (getf e :operator) (getf e :goal)))
+        (:missing-precondition
+         (format out "Missing precondition:~%")
+         (dolist (g (getf e :goals))
+           (format out "    ~S~%" g))
+         (format out "    for ~A~@[~%    reused procedure ~A~]~%~%"
+                 (getf e :operator) (getf e :from-procedure)))
+        (:repair-step
+         (format out "Repair step:~%    ~A~%    ~S~%~%"
+                 (getf e :operator) (getf e :goal)))
+        (:step-set-aside
+         (format out "Left aside:~%    ~A~%    ~S~%~%"
+                 (getf e :operator) (getf e :goal)))
         (:selected-operator
          (format out "Selected operator:~%    ~A~A~%~%"
                  (getf e :operator)
@@ -228,6 +247,9 @@ Only uses recorded entries — never invents decisions."
                  (getf e :mode)
                  (getf e :operator)
                  (getf e :status)))
+        (:reused-procedure
+         (format out "Reused procedure:~%    ~A (score ~,3F)~%~%"
+                 (getf e :name) (or (getf e :score) 0)))
         (:plan-complete
          (format out "Plan complete:~%    success=~A steps=~A~%~%"
                  (getf e :success) (getf e :steps)))

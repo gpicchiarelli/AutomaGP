@@ -140,6 +140,7 @@
       </div>
       <label for=\"goals\">Goals JSON (optional)</label>
       <input id=\"goals\" placeholder='[[\"tests-ok\",\"myapp\"]]' style=\"width:100%\"/>
+      <p class=\"status\" style=\"margin:0\">Plan reuses an archived procedure whose goals include every requested fact. An exact match comes first. Extra goals of that procedure are applied when its steps still work. Otherwise procedures that each achieve part of the request are combined: no extra goals first, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left.</p>
     </section>
     <section class=\"panel stack\">
       <h2>Events</h2>
@@ -170,6 +171,20 @@
       </div>
       <p class=\"status\" style=\"margin:0\">Default is simulate — never unattended OS destruction.</p>
     </section>
+    <section class=\"panel stack\">
+      <h2>Archive</h2>
+      <label for=\"procName\">Procedure name</label>
+      <input id=\"procName\" placeholder=\"connect-iface\" style=\"width:100%\"/>
+      <div class=\"row\">
+        <button type=\"button\" id=\"btnRemember\">Remember</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnUse\">Use</button>
+      </div>
+      <div class=\"row\">
+        <button type=\"button\" class=\"secondary\" id=\"btnScoreOk\">Score success</button>
+        <button type=\"button\" class=\"secondary\" id=\"btnScoreFail\">Score failure</button>
+      </div>
+      <p class=\"status\" style=\"margin:0\">Use replays stored steps. A missing precondition is restored by stored procedures that achieve some of those facts: a full cover first, then procedures with no extra goals, then procedures that also achieve something else. Steps whose extra goals cannot be restored are left aside. A search fills anything left. That repair may itself reuse a stored procedure, sixty-one levels deep. Then the stored steps continue.</p>
+    </section>
   </aside>
   <section class=\"stack\">
     <div class=\"grid2\">
@@ -180,6 +195,7 @@
       <div class=\"panel\"><h2>Events</h2><pre id=\"events\">[]</pre></div>
       <div class=\"panel\"><h2>Plan</h2><pre id=\"plan\">null</pre></div>
     </div>
+    <div class=\"panel\"><h2>Archive</h2><pre id=\"archive\">[]</pre></div>
     <div class=\"panel\"><h2>Autonomy</h2><pre id=\"autonomy\">null</pre></div>
     <div class=\"panel\"><h2>Explain</h2><pre id=\"explain\">(no trace)</pre></div>
   </section>
@@ -213,6 +229,7 @@ async function refresh() {
   show('goalsOut', (await api('GET', '/api/goals')).goals);
   show('events', (await api('GET', '/api/events')).events);
   show('plan', (await api('GET', '/api/plan')).plan);
+  show('archive', (await api('GET', '/api/archive')).procedures);
   show('autonomy', (await api('GET', '/api/autonomy')));
   const ex = await api('GET', '/api/explain');
   show('explain', ex.text || '(no trace)');
@@ -263,6 +280,32 @@ document.getElementById('btnAutoLoop').onclick = () =>
     auto_confirm: false,
     adapters: false
   }).then(refresh).catch(e => alert(e.message));
+function procedureName() {
+  const raw = document.getElementById('procName').value.trim();
+  return raw ? raw : null;
+}
+document.getElementById('btnRemember').onclick = () => {
+  const name = procedureName();
+  api('POST', '/api/archive/remember', name ? { name } : {})
+    .then(refresh).catch(e => alert(e.message));
+};
+document.getElementById('btnUse').onclick = () => {
+  const name = procedureName();
+  api('POST', '/api/archive/use', name ? { name } : {})
+    .then(refresh).catch(e => alert(e.message));
+};
+document.getElementById('btnScoreOk').onclick = () => {
+  const name = procedureName();
+  if (!name) { alert('Procedure name required'); return; }
+  api('POST', '/api/archive/score', { name, success: true })
+    .then(refresh).catch(e => alert(e.message));
+};
+document.getElementById('btnScoreFail').onclick = () => {
+  const name = procedureName();
+  if (!name) { alert('Procedure name required'); return; }
+  api('POST', '/api/archive/score', { name, success: false })
+    .then(refresh).catch(e => alert(e.message));
+};
 refresh().catch(e => {
   document.getElementById('statusLine').textContent = e.message;
   document.getElementById('statusLine').classList.add('err');

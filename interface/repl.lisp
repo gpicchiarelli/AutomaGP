@@ -149,13 +149,23 @@ With :NAME (and optional keys): create/select a new current context."
         (refresh-working-memory ctx))
       (values all new))))
 
-(defun gp-plan (&key goals operators (remember t))
-  "Build a symbolic plan via Means-Ends Analysis. Does not mutate facts.
+(defun gp-plan (&key goals operators (remember t) (archive t))
+  "Build a symbolic plan. Does not mutate facts.
+When ARCHIVE is true (default), a scored procedure is reused if its
+stored steps still apply. An exact goal match comes first. A procedure
+whose goals also include other facts is used after that, and those extra
+goals are applied. Otherwise procedures that each achieve part of the
+request are combined, those with no extra goals first. A procedure that
+also achieves something else is used after that, and those extra goals
+are applied. When those extra goals cannot be restored, the steps that
+serve the request are kept and the others are left aside. If none apply,
+the plan is built by Means-Ends Analysis.
 When REMEMBER is true (default), records a plan episode in episodic memory."
   (let ((ctx (ensure-current-context)))
     (setf (context-mode ctx) :plan)
     (setf *current-plan*
-          (plan-from-context ctx :goals goals :operators operators))
+          (plan-consulting-archive ctx :goals goals :operators operators
+                                   :archive archive))
     (refresh-working-memory ctx)
     (when remember
       (record-plan-episode! *current-plan* :context-name (context-name ctx)))
@@ -192,7 +202,9 @@ Step failures signal GP-ERROR with restarts (RETRY SKIP ABORT-EXECUTION
 USE-VALUE USE-ALTERNATIVE ASK-USER). Irreversible ops also offer CONFIRM.
 Symbolic effects always apply. When ADAPTERS is true, operators with
 :EXTERNAL meta may invoke OS adapters (Phase 8). Default: adapters off.
-When REMEMBER is true (default), records an episode."
+When REMEMBER is true (default), records an episode.
+A plan reused from the archive (:FROM-PROCEDURE) updates that procedure's
+score from this live result. GP-SIMULATE does not."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
     (unless (plan-p p)
@@ -205,6 +217,10 @@ When REMEMBER is true (default), records an episode."
     (refresh-working-memory ctx)
     (when remember
       (record-execution-episode! *last-execution*))
+    (record-procedure-outcome!
+     p
+     :success (and (execution-success *last-execution*)
+                   (null (differences (context-all-facts ctx) (plan-goals p)))))
     *last-execution*))
 
 (defun gp-adapters (&optional (enabled nil enabled-p))
@@ -301,7 +317,9 @@ With keys: replace/create knowledge memory and return it."
     (last-episode *episodic-memory*)))
 
 (defun gp-remember-procedure (&key plan name)
-  "Store a reusable procedure from PLAN (default: last successful plan)."
+  "Store a reusable procedure from PLAN (default: last successful plan).
+Same name accumulates successes. Autosaves the procedure archive when
+*PROCEDURE-ARCHIVE-AUTOSAVE* is true (default)."
   (let ((p (or plan *current-plan*)))
     (unless (plan-p p)
       (error "GP-REMEMBER-PROCEDURE requires a plan"))
@@ -316,6 +334,71 @@ With keys: replace/create knowledge memory and return it."
 (defun gp-find-procedure (name)
   "Find a stored procedure by NAME."
   (find-procedure name))
+
+(defun gp-archive (&optional goals)
+  "Archived procedures, highest score first. GOALS filters to an exact goal set."
+  (rank-procedures (if goals
+                       (procedures-for-goals goals)
+                       (procedural-memory-procedures (ensure-procedural-memory)))))
+
+(defun gp-archive-best (goals)
+  "Highest-scoring archived procedure for GOALS, or NIL."
+  (archive-best goals))
+
+(defun gp-archive-save (&optional (path *procedure-archive-path*))
+  "Write the procedure archive to PATH (default ~/.automa-gp/procedure-archive.sexp)."
+  (save-procedure-archive path))
+
+(defun gp-archive-load (&optional (path *procedure-archive-path*))
+  "Load the procedure archive from PATH into session procedural memory."
+  (load-procedure-archive path))
+
+(defun gp-use-procedure (&key name goals (unchecked nil))
+  "Build a PLAN from the archive without Means-Ends Analysis.
+NAME selects one procedure. Without NAME, use an archived procedure for
+GOALS (default: goals on the current context) whose steps still apply.
+An exact goal match comes first; a procedure that also achieves other
+goals is used after that. Otherwise procedures that each achieve part of
+the request are combined, those with no extra goals first.
+The plan is a replay on the current facts and carries a deliberative trace.
+When the stored steps do not apply, no plan is built.
+UNCHECKED T rebuilds the named procedure anyway, without that check.
+Sets *CURRENT-PLAN*."
+  (let* ((ctx (ensure-current-context))
+         (goal-set (or goals (goals-of ctx)))
+         (proc (cond
+                 (name (or (find-procedure name)
+                           (error "No archived procedure named ~S." name)))
+                 (unchecked (or (archive-best goal-set)
+                                (error "No archived procedure matches goals ~S."
+                                       goal-set)))
+                 (t nil)))
+         (plan (if unchecked
+                   (procedure->plan proc)
+                   (or (if name
+                           (plan-from-procedure
+                            proc
+                            (context-all-facts ctx)
+                            (context-planning-operators ctx)
+                            :context-name (context-name ctx))
+                           (progn
+                             (unless (%procedures-for-planning
+                                      (normalize-planning-goals goal-set))
+                               (error "No archived procedure matches goals ~S."
+                                      goal-set))
+                             (plan-from-ranked-procedures
+                              ctx
+                              (normalize-planning-goals goal-set)
+                              (context-planning-operators ctx))))
+                       (error "Procedure ~A does not apply to the current state; no plan was built."
+                              (if name (procedure-name proc) goal-set))))))
+    (setf (context-mode ctx) :plan)
+    (setf *current-plan* plan)
+    plan))
+
+(defun gp-score-procedure (name &key (success t))
+  "Score a replay of the archived procedure NAME. :SUCCESS NIL records a failure."
+  (score-procedure! name :success success))
 
 (defun gp-save (path &key (context t) (knowledge t) (episodic t)
                        (procedural t) meta)
@@ -413,12 +496,14 @@ GP-PLAN still works independently of events."
                     (learn t learn-p)
                     (replan-on-discrepancy t replan-p)
                     (remember-procedure nil remember-p)
+                    (prefer-archive t prefer-archive-p)
                     (set t))
   "Get or install the session *AUTONOMY-POLICY*.
 With no policy keys: return current policy (or a fresh default).
 With keys: build a policy; when SET is true (default), install it."
   (if (or authority-p max-steps-p adapters-p auto-confirm-p confirm-fn-p
-          react-events-p infer-p learn-p replan-p remember-p)
+          react-events-p infer-p learn-p replan-p remember-p
+          prefer-archive-p)
       (let* ((base (ensure-autonomy-policy))
              (p (make-autonomy-policy
                  :authority (if authority-p authority (policy-authority base))
@@ -437,7 +522,10 @@ With keys: build a policy; when SET is true (default), install it."
                      (policy-replan-on-discrepancy base))
                  :remember-procedure
                  (if remember-p remember-procedure
-                     (policy-remember-procedure base)))))
+                     (policy-remember-procedure base))
+                 :prefer-archive
+                 (if prefer-archive-p prefer-archive
+                     (policy-prefer-archive base)))))
         (when set (setf *autonomy-policy* p))
         p)
       (ensure-autonomy-policy)))

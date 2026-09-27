@@ -111,11 +111,15 @@ If NIL, irreversible/high-risk steps require :CONFIRM T on GP-RUN.")
   "Return missing precondition facts, or NIL if all hold."
   (precondition-subgoals operator bindings facts))
 
-(defun resolve-operator (name &key context operators)
-  "Find OPERATOR by NAME from CONTEXT or OPERATORS list."
+(defun lookup-operator (name &key context operators)
+  "Find OPERATOR by NAME from CONTEXT or OPERATORS, or NIL."
   (or (when context (find-operator context name))
       (when operators
-        (find name operators :key #'operator-name :test #'equal))
+        (find name operators :key #'operator-name :test #'equal))))
+
+(defun resolve-operator (name &key context operators)
+  "Find OPERATOR by NAME from CONTEXT or OPERATORS list."
+  (or (lookup-operator name :context context :operators operators)
       (error 'unknown-operator :name name)))
 
 (defun bindings-from-step (step)
@@ -142,6 +146,59 @@ If NIL, irreversible/high-risk steps require :CONFIRM T on GP-RUN.")
              :context context))
     (let ((new (transition-facts facts operator b)))
       (values new b))))
+
+(defun project-stored-effects (facts step &key (status :projected))
+  "Apply the :ADDS and :DELETES recorded on STEP. No adapters.
+Returns (VALUES NEW-FACTS STEP-RESULT)."
+  (let ((new (apply-stored-effects facts (getf step :adds) (getf step :deletes))))
+    (values new
+            (make-step-result (getf step :operator)
+                              (bindings-from-step step)
+                              facts new
+                              :status status))))
+
+(defun apply-recorded-step (facts step &key mode context)
+  "Apply STEP's recorded effects after its recorded preconditions hold.
+Signals PRECONDITION-FAILURE when one is missing. Does not invoke adapters.
+Returns (VALUES NEW-FACTS STEP-RESULT) with status :RECORDED."
+  (let ((missing (missing-stored-preconditions step facts)))
+    (when missing
+      (error 'precondition-failure
+             :operator (getf step :operator)
+             :missing missing
+             :bindings (bindings-from-step step)
+             :mode mode
+             :context context))
+    (project-stored-effects facts step :status :recorded)))
+
+(defun %recorded-step-without-operator-p (step operator)
+  "True when STEP can run from its recorded effects because OPERATOR is absent."
+  (and (not (operator-p operator))
+       (getf step :effects-stored)
+       (or (getf step :effects-only)
+           (and (getf step :stored-apply)
+                (getf step :preconditions-stored)))))
+
+(defun %operator-for-stored-step (step)
+  "Temporary operator carrying the risk recorded on STEP, for confirmation."
+  (make-operator :name (or (getf step :operator) 'stored-effects)
+                 :risk (or (getf step :risk) :low)
+                 :reversible (if (find :reversible step)
+                                 (and (getf step :reversible) t)
+                                 t)))
+
+(defun project-operator-effects (facts operator bindings)
+  "Apply OPERATOR's symbolic add and delete lists without checking
+preconditions and without invoking adapters.
+Returns (VALUES NEW-FACTS STEP-RESULT) with status :PROJECTED.
+Used when a stored step's goal already holds but its effects are not yet
+in the state."
+  (let* ((patterns (append (operator-preconditions operator)
+                           (operator-add-list operator)
+                           (operator-delete-list operator)))
+         (b (extend-bindings-from-state patterns bindings facts))
+         (new (apply-operator facts operator b)))
+    (values new (make-step-result operator b facts new :status :projected))))
 
 (defun simulate-operator (facts operator bindings &key mode context)
   "Apply OPERATOR symbolically to FACTS.
@@ -232,23 +289,43 @@ Records a deliberative execution trace. Step restarts as in Phase 5."
            (aborted nil))
       (handler-bind ((gp-error #'plan-runner-condition-handler))
         (dolist (step (plan-steps plan))
-          (let* ((op0 (resolve-operator (getf step :operator)
-                                        :context context
-                                        :operators ops))
+          (let* ((op0 (lookup-operator (getf step :operator)
+                                       :context context
+                                       :operators ops))
+                 (stored (and (getf step :effects-only)
+                              (getf step :effects-stored)))
                  (b0 (bindings-from-step step))
                  (alts (alternatives-for-step step ops)))
+            (unless (or (operator-p op0)
+                        (%recorded-step-without-operator-p step op0))
+              (error 'unknown-operator :name (getf step :operator)))
             (trace-record :selected-operator
-                          :operator (operator-name op0)
+                          :operator (if (operator-p op0)
+                                        (operator-name op0)
+                                        (getf step :operator))
                           :goal (getf step :goal)
                           :bindings (getf step :bindings))
             (multiple-value-bind (new result flag)
                 (run-step-with-restarts
                  (lambda ()
                    (let ((op (or *gp-alternative-operator* op0)))
-                     (simulate-operator facts op b0
-                                        :mode :simulate
-                                        :context context)))
-                 :operator op0
+                     (cond
+                       ((and (getf step :stored-apply)
+                             (not (operator-p op)))
+                        (apply-recorded-step facts step
+                                             :mode :simulate
+                                             :context context))
+                       ((and (getf step :effects-only)
+                             (not (operator-p op))
+                             stored)
+                        (project-stored-effects facts step))
+                       ((getf step :effects-only)
+                        (project-operator-effects facts op b0))
+                       (t
+                        (simulate-operator facts op b0
+                                           :mode :simulate
+                                           :context context)))))
+                 :operator (or op0 (getf step :operator))
                  :bindings b0
                  :alternatives alts
                  :mode :simulate
@@ -268,7 +345,8 @@ Records a deliberative execution trace. Step restarts as in Phase 5."
                 (return))
               (when (and (null flag)
                          (not (member (getf result :status)
-                                      '(:ok :skipped :use-value :executed))))
+                                      '(:ok :skipped :use-value :executed
+                                        :projected :recorded))))
                 (setf ok nil)
                 (return))
               (when (eq flag :skip) nil)))))
@@ -315,19 +393,64 @@ When ADAPTERS is true, bind *INVOKE-ADAPTERS* for this run so operators with
            (facts (context-all-facts context)))
       (handler-bind ((gp-error #'plan-runner-condition-handler))
         (dolist (step (plan-steps plan))
-          (let* ((op0 (resolve-operator (getf step :operator) :context context))
+          (let* ((op0 (lookup-operator (getf step :operator) :context context))
+                 (stored (and (getf step :effects-only)
+                              (getf step :effects-stored)))
                  (b0 (bindings-from-step step))
                  (alts (alternatives-for-step step ops)))
+            (unless (or (operator-p op0)
+                        (%recorded-step-without-operator-p step op0))
+              (error 'unknown-operator :name (getf step :operator)))
             (trace-record :selected-operator
-                          :operator (operator-name op0)
+                          :operator (if (operator-p op0)
+                                        (operator-name op0)
+                                        (getf step :operator))
                           :goal (getf step :goal)
                           :bindings (getf step :bindings))
             (multiple-value-bind (new result flag)
                 (run-step-with-restarts
                  (lambda ()
                    (let ((op (or *gp-alternative-operator* op0)))
-                     (execute-operator! context op b0 :confirm confirm)))
-                 :operator op0
+                     (cond
+                       ((and (getf step :stored-apply)
+                             (not (operator-p op)))
+                        (let ((live (context-all-facts context)))
+                          (unless (missing-stored-preconditions step live)
+                            (ensure-confirmed (%operator-for-stored-step step) b0
+                                              :confirm confirm
+                                              :mode :execute
+                                              :context context))
+                          (multiple-value-bind (new result)
+                              (apply-recorded-step live step
+                                                   :mode :execute
+                                                   :context context)
+                            (commit-facts-to-context! context new)
+                            (values new result))))
+                       ((and (getf step :effects-only)
+                             (not (operator-p op))
+                             stored)
+                        (ensure-confirmed (%operator-for-stored-step step) b0
+                                          :confirm confirm
+                                          :mode :execute
+                                          :context context)
+                        (multiple-value-bind (new result)
+                            (project-stored-effects
+                             (context-all-facts context) step)
+                          (commit-facts-to-context! context new)
+                          (values new result)))
+                       ((getf step :effects-only)
+                        (ensure-confirmed op b0
+                                          :confirm confirm
+                                          :mode :execute
+                                          :context context)
+                        (multiple-value-bind (new result)
+                            (project-operator-effects
+                             (context-all-facts context) op b0)
+                          (commit-facts-to-context! context new)
+                          (values new result)))
+                       (t
+                        (execute-operator! context op b0 :confirm confirm)))))
+                 :operator (or op0 (getf step :operator))
                  :bindings b0
                  :alternatives alts
                  :mode :execute

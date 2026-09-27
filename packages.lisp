@@ -317,6 +317,10 @@
    #:procedure-operators-used
    #:procedure-initial-state
    #:procedure-success-count
+   #:procedure-failure-count
+   #:procedure-last-success-at
+   #:procedure-last-failure-at
+   #:procedure-score
    #:procedure-meta
    #:procedural-memory
    #:procedural-memory-p
@@ -329,9 +333,22 @@
    #:procedure-from-plan
    #:remember-procedure!
    #:remember-procedure-from-plan!
+   #:install-procedure!
+   #:score-procedure!
+   #:record-procedure-outcome!
    #:find-procedure
    #:procedures-for-goals
+   #:rank-procedures
+   #:archive-best
    #:procedure->plan
+   #:replay-procedure
+   #:plan-from-procedure
+   #:plan-consulting-archive
+   #:*procedure-archive-path*
+   #:*procedure-archive-autosave*
+   #:*procedure-archive-autoload*
+   #:save-procedure-archive
+   #:load-procedure-archive
    ;; persistence service (Phase 7)
    #:*persistence-format-version*
    #:*default-snapshot-directory*
@@ -402,6 +419,12 @@
    #:gp-remember-procedure
    #:gp-procedures
    #:gp-find-procedure
+   #:gp-archive
+   #:gp-archive-best
+   #:gp-archive-save
+   #:gp-archive-load
+   #:gp-use-procedure
+   #:gp-score-procedure
    #:gp-save
    #:gp-load
    #:gp-save-context
@@ -500,6 +523,7 @@
    #:policy-learn
    #:policy-replan-on-discrepancy
    #:policy-remember-procedure
+   #:policy-prefer-archive
    #:ensure-authority
    #:make-autonomy-policy
    #:ensure-autonomy-policy

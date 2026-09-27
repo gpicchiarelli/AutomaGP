@@ -66,7 +66,12 @@
     :initarg :remember-procedure
     :accessor policy-remember-procedure
     :initform nil
-    :documentation "When true and plan succeeds under :EXECUTE/:SIMULATE, store procedure."))
+    :documentation "When true and plan succeeds under :EXECUTE/:SIMULATE, store procedure.")
+   (prefer-archive
+    :initarg :prefer-archive
+    :accessor policy-prefer-archive
+    :initform t
+    :documentation "When true, reuse a scored procedure whose steps still apply before MEA."))
   (:documentation "Explicit gates for autonomous operation."))
 
 (defun autonomy-policy-p (object)
@@ -85,7 +90,8 @@
                                (adapters nil) (auto-confirm nil)
                                confirm-fn (react-events t) (infer nil)
                                (learn t) (replan-on-discrepancy t)
-                               (remember-procedure nil))
+                               (remember-procedure nil)
+                               (prefer-archive t))
   "Construct an AUTONOMY-POLICY. Default authority is :SIMULATE (safe)."
   (make-instance 'autonomy-policy
                  :authority (ensure-authority authority)
@@ -97,7 +103,8 @@
                  :infer (and infer t)
                  :learn (and learn t)
                  :replan-on-discrepancy (and replan-on-discrepancy t)
-                 :remember-procedure (and remember-procedure t)))
+                 :remember-procedure (and remember-procedure t)
+                 :prefer-archive (and prefer-archive t)))
 
 (defun ensure-autonomy-policy (&optional policy)
   (cond
@@ -245,7 +252,9 @@ stored in *LAST-AUTONOMY*). Does not loop — see AUTONOMOUS-LOOP."
           (t
            ;; 4. Build plan
            (setf (context-mode ctx) :plan)
-           (setf plan (plan-from-context ctx :goals goals))
+           (setf plan (plan-consulting-archive
+                       ctx :goals goals
+                       :archive (policy-prefer-archive pol)))
            (setf *current-plan* plan)
            (when remember
              (record-plan-episode! plan :context-name (context-name ctx)))
@@ -253,7 +262,8 @@ stored in *LAST-AUTONOMY*). Does not loop — see AUTONOMOUS-LOOP."
                  :success (plan-success plan)
                  :length (plan-length plan)
                  :operators (plan-operators-used plan)
-                 :remaining (plan-remaining plan))
+                 :remaining (plan-remaining plan)
+                 :from-procedure (getf (plan-meta plan) :from-procedure))
 
            ;; 5–6. Evaluate constraints / choose operators (from plan)
            (note :evaluate
@@ -316,6 +326,20 @@ stored in *LAST-AUTONOMY*). Does not loop — see AUTONOMOUS-LOOP."
                        :success (execution-success execution)
                        :remaining left
                        :divergences div)
+                 ;; Score only a live run of a reused procedure. Simulation
+                 ;; leaves the archive unchanged. One outcome, no second copy.
+                 (when (and (eq auth :execute)
+                            (plan-reused-procedure-names plan))
+                   (let ((scored (record-procedure-outcome!
+                                  plan
+                                  :success (and (execution-success execution)
+                                                (null left)))))
+                     (when scored
+                       (note :update
+                             :procedure-score (procedure-name scored)
+                             :success (and (execution-success execution)
+                                           (null left))
+                             :score (procedure-score scored)))))
                  (cond
                    ;; 11. Goals hold in the observed state.
                    ((and (execution-success execution) (null left))
@@ -325,7 +349,10 @@ stored in *LAST-AUTONOMY*). Does not loop — see AUTONOMOUS-LOOP."
                       (%update-knowledge-from-success! ctx plan)
                       (note :update :knowledge t :goals goals))
                     (when (and (policy-remember-procedure pol)
-                               (plan-success plan))
+                               (plan-success plan)
+                               (not (and (getf (plan-meta plan) :from-procedure)
+                                         (find-procedure
+                                          (getf (plan-meta plan) :from-procedure)))))
                       (remember-procedure-from-plan! plan)
                       (note :update :procedure t))
                     (setf status :done halt :completed))
@@ -356,7 +383,8 @@ stored in *LAST-AUTONOMY*). Does not loop — see AUTONOMOUS-LOOP."
                         (list :success (plan-success plan)
                               :length (plan-length plan)
                               :operators (plan-operators-used plan)
-                              :remaining (plan-remaining plan)))
+                              :remaining (plan-remaining plan)
+                              :from-procedure (getf (plan-meta plan) :from-procedure)))
                 :execution (when (execution-result-p execution)
                              (list :success (execution-success execution)
                                    :mode (execution-mode execution)

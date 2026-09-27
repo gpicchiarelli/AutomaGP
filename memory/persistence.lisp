@@ -194,11 +194,17 @@
         :operators-used (copy-list (procedure-operators-used proc))
         :initial-state (copy-list (procedure-initial-state proc))
         :success-count (procedure-success-count proc)
+        :failure-count (procedure-failure-count proc)
+        :last-success-at (procedure-last-success-at proc)
+        :last-failure-at (procedure-last-failure-at proc)
+        :score (procedure-score proc)
         :meta (copy-tree (procedure-meta proc))))
 
 (defun deserialize-procedure (form)
   (destructuring-bind (&key name goals steps operators-used initial-state
-                         success-count meta &allow-other-keys)
+                         success-count failure-count
+                         last-success-at last-failure-at
+                         meta &allow-other-keys)
       (cdr form)
     (make-procedure :name name
                     :goals goals
@@ -206,7 +212,38 @@
                     :operators-used operators-used
                     :initial-state initial-state
                     :success-count (or success-count 1)
+                    :failure-count (or failure-count 0)
+                    :last-success-at last-success-at
+                    :last-failure-at last-failure-at
                     :meta meta)))
+
+(defun save-procedure-archive (&optional (path *procedure-archive-path*)
+                               &key (memory nil memory-p))
+  "Write procedural memory to PATH as a procedure-archive s-expression.
+Separate from the planner and from full session snapshots."
+  (let ((mem (if memory-p memory (ensure-procedural-memory))))
+    (write-sexp-file
+     path
+     (list :kind :automa-gp-procedure-archive
+           :format 1
+           :saved-at (get-universal-time)
+           :procedures (mapcar #'serialize-procedure
+                               (procedural-memory-procedures mem))))
+    path))
+
+(defun load-procedure-archive (&optional (path *procedure-archive-path*))
+  "Merge procedures from PATH into session procedural memory (same name wins).
+Returns the memory store."
+  (let* ((*loading-procedure-archive* t)
+         (form (read-sexp-file path)))
+    (unless (and (consp form)
+                 (eq (getf form :kind) :automa-gp-procedure-archive))
+      (error "Not an AUTOMA GP procedure archive: ~A" path))
+    (let ((memory (ensure-procedural-memory)))
+      (dolist (sexp (getf form :procedures))
+        (install-procedure! (deserialize-procedure sexp) memory))
+      (setf *procedure-archive-loaded* t)
+      memory)))
 
 (defun serialize-knowledge-memory (km)
   (list :knowledge

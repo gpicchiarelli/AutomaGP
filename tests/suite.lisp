@@ -11,8 +11,11 @@
   :description "AUTOMA GP Phase 1 tests")
 
 (defun run-tests ()
-  "Run all AUTOMA GP tests; return T if all pass."
-  (let ((result (run! 'automa-gp-suite)))
-    (unless result
-      (error "automa-gp tests failed"))
-    result))
+  "Run all AUTOMA GP tests; return T if all pass.
+Archive autosave/autoload stay off so the suite does not touch ~/.automa-gp."
+  (let ((*procedure-archive-autosave* nil)
+        (*procedure-archive-autoload* nil))
+    (let ((result (run! 'automa-gp-suite)))
+      (unless result
+        (error "automa-gp tests failed"))
+      result)))

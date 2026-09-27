@@ -5,8 +5,8 @@
 
 (in-package #:automa-gp)
 
-(defparameter *web-api-version* "0.12.0"
-  "API surface version (aligned with AUTOMA GP Phase 12).")
+(defparameter *web-api-version* "0.16.0"
+  "API surface version (operator archive routes included).")
 
 (defun %serialize-bindings (bindings)
   (json-array
@@ -18,11 +18,23 @@
                nil))))
 
 (defun %serialize-step (step)
-  (list :operator (getf step :operator)
-        :bindings (%serialize-bindings (getf step :bindings))
-        :goal (getf step :goal)
-        :subgoals (json-array (getf step :subgoals))
-        :cost (or (getf step :cost) 1)))
+  (let ((plist (list :operator (getf step :operator)
+                     :bindings (%serialize-bindings (getf step :bindings))
+                     :goal (getf step :goal)
+                     :subgoals (json-array (getf step :subgoals))
+                     :cost (or (getf step :cost) 1))))
+    (when (getf step :effects-stored)
+      (setf plist (list* :adds (json-array (getf step :adds))
+                         :deletes (json-array (getf step :deletes))
+                         plist)))
+    (when (getf step :preconditions-stored)
+      (setf plist (list* :preconditions (json-array (getf step :preconditions))
+                         plist)))
+    (when (getf step :stored-apply)
+      (setf plist (list* :stored-apply t plist)))
+    (if (getf step :effects-only)
+        (list* :effects-only t plist)
+        plist)))
 
 (defun %serialize-plan (plan)
   (if (plan-p plan)
@@ -32,7 +44,8 @@
             :remaining (json-array (plan-remaining plan))
             :operators-used (json-array (plan-operators-used plan))
             :length (plan-length plan)
-            :cost (plan-cost plan))
+            :cost (plan-cost plan)
+            :from-procedure (or (getf (plan-meta plan) :from-procedure) :null))
       :null))
 
 (defun %serialize-execution (ex)
@@ -132,12 +145,57 @@
                         :adapters (policy-adapters p)
                         :auto-confirm (policy-auto-confirm p)
                         :react-events (policy-react-events p)
-                        :learn (policy-learn p))
+                        :learn (policy-learn p)
+                        :prefer-archive (policy-prefer-archive p))
           :last (%serialize-autonomy *last-autonomy*))))
+
+(defun %find-archived-procedure (name)
+  "Resolve NAME (symbol or JSON string) to a stored procedure, or NIL.
+Exact match first, then a case-insensitive symbol name so the console can
+send back the string LISP->JSON produced."
+  (when name
+    (let* ((procs (gp-procedures))
+           (sym (cond
+                  ((symbolp name) name)
+                  ((stringp name) (json->sexp name))
+                  (t nil)))
+           (wanted (and (symbolp sym) (symbol-name sym))))
+      (or (and (symbolp sym) (find-procedure sym))
+          (and wanted
+               (find wanted procs
+                     :key (lambda (p)
+                            (let ((n (procedure-name p)))
+                              (if (symbolp n) (symbol-name n) "")))
+                     :test #'string-equal))))))
+
+(defun %serialize-procedure (procedure)
+  (list :name (procedure-name procedure)
+        :goals (json-array (procedure-goals procedure))
+        :success-count (procedure-success-count procedure)
+        :failure-count (procedure-failure-count procedure)
+        :score (procedure-score procedure)
+        :operators-used (json-array (procedure-operators-used procedure))
+        :step-count (length (procedure-steps procedure))))
+
+(defun %archive-body (&optional procedure)
+  (list :ok t
+        :procedure (if (procedure-p procedure)
+                       (%serialize-procedure procedure)
+                       :null)
+        :procedures (json-array
+                     (mapcar #'%serialize-procedure (gp-archive)))))
 
 (defun %body-get (body key &optional default)
   (let ((v (getf body key :missing)))
     (if (eq v :missing) default v)))
+
+(defun %json-sequence (value)
+  "A JSON array is a vector; a Lisp caller may pass a list. One item stays a list."
+  (cond
+    ((or (null value) (eq value :missing) (eq value :null)) nil)
+    ((vectorp value) (coerce value 'list))
+    ((listp value) value)
+    (t (list value))))
 
 (defun web-api-handle (method path &optional body)
   "Dispatch METHOD (:GET/:POST) and PATH (string) with optional BODY plist
@@ -193,6 +251,8 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                              (%serialize-last-reaction *last-reaction*))))
           ((and (eq m :get) (string= p "/api/autonomy"))
            (values 200 (%api-autonomy-status)))
+          ((and (eq m :get) (string= p "/api/archive"))
+           (values 200 (%archive-body)))
 
           ((and (eq m :post) (string= p "/api/reset"))
            (gp-reset)
@@ -228,10 +288,8 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
 
           ((and (eq m :post) (string= p "/api/plan"))
            (let* ((raw (%body-get body :goals :missing))
-                  (goals (if (eq raw :missing)
-                             nil
-                             (mapcar #'json->sexp
-                                     (if (listp raw) raw (list raw)))))
+                  (goals (unless (eq raw :missing)
+                           (mapcar #'json->sexp (%json-sequence raw))))
                   (plan (if goals
                             (gp-plan :goals goals)
                             (gp-plan))))
@@ -281,6 +339,45 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                            :plan (%serialize-plan *current-plan*)
                            :goals (json-array (gp-goals))))))
 
+          ((and (eq m :post) (string= p "/api/archive/remember"))
+           (let* ((raw (%body-get body :name :missing))
+                  (name (if (eq raw :missing) nil (json->sexp raw)))
+                  (proc (if name
+                            (gp-remember-procedure :name name)
+                            (gp-remember-procedure))))
+             (values 200 (%archive-body proc))))
+
+          ((and (eq m :post) (string= p "/api/archive/use"))
+           (let* ((raw-name (%body-get body :name :missing))
+                  (raw-goals (%body-get body :goals :missing))
+                  (found (unless (eq raw-name :missing)
+                           (or (%find-archived-procedure raw-name)
+                               (error "No archived procedure named ~S." raw-name))))
+                  (goals (unless (eq raw-goals :missing)
+                           (mapcar #'json->sexp (%json-sequence raw-goals))))
+                  (unchecked (and (%body-get body :unchecked nil)
+                                  (not (eq (%body-get body :unchecked nil) :null))))
+                  (plan (cond
+                          (found (gp-use-procedure :name (procedure-name found)
+                                                   :unchecked unchecked))
+                          (goals (gp-use-procedure :goals goals
+                                                   :unchecked unchecked))
+                          (t (gp-use-procedure :unchecked unchecked)))))
+             (values 200 (list* :plan (%serialize-plan plan)
+                                (%archive-body found)))))
+
+          ((and (eq m :post) (string= p "/api/archive/score"))
+           (let* ((raw (%body-get body :name :missing))
+                  (success (%body-get body :success t))
+                  (found (unless (eq raw :missing)
+                           (%find-archived-procedure raw))))
+             (unless found
+               (error "No archived procedure named ~S." raw))
+             (gp-score-procedure (procedure-name found)
+                                 :success (and success (not (eq success :null))))
+             (values 200 (%archive-body
+                          (find-procedure (procedure-name found))))))
+
           ((and (eq m :post) (string= p "/api/autonomy/policy"))
            (let* ((auth (%body-get body :authority :missing))
                   (args nil))
@@ -291,7 +388,7 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                                      auth)
                                  args)))
              (dolist (key '(:max-steps :adapters :auto-confirm
-                            :react-events :learn))
+                            :react-events :learn :prefer-archive))
                (let ((v (%body-get body key :missing)))
                  (unless (eq v :missing)
                    (setf args (list* key v args)))))

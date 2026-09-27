@@ -118,6 +118,7 @@
                              (:file "test-events")
                              (:file "test-web")
                              (:file "test-autonomy")
+                             (:file "test-archive")
                              (:file "test-repl"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))

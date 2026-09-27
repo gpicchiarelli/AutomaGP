@@ -53,6 +53,45 @@ Returns a new fact list. Does not touch the live context or adapters."
           (setf state (add-fact! state g)))))
     state))
 
+(defun apply-stored-effects (facts adds deletes)
+  "Apply already-ground ADDS and DELETES to FACTS.
+Same order as APPLY-OPERATOR: deletes, then each add retracts a conflicting
+3-element fact before it is asserted. No adapters and no precondition check."
+  (let ((state (copy-list facts)))
+    (dolist (del deletes)
+      (when (consp del)
+        (setf state (remove-fact! state del))))
+    (dolist (add adds)
+      (when (consp add)
+        (setf state (retract-slot-conflicts state add))
+        (setf state (add-fact! state add))))
+    state))
+
+(defun %ground-effects (patterns bindings)
+  "Ground effect PATTERNS. Patterns that do not ground are omitted."
+  (loop for pat in patterns
+        for g = (ground-pattern pat bindings)
+        unless (fail-p g)
+          collect g))
+
+(defun %ground-all (patterns bindings)
+  "Ground every PATTERN. Returns (VALUES GROUNDED COMPLETE-P).
+COMPLETE-P is false when any pattern does not ground."
+  (let ((out nil)
+        (complete t))
+    (dolist (pat patterns)
+      (let ((g (ground-pattern pat bindings)))
+        (if (fail-p g)
+            (setf complete nil)
+            (push g out))))
+    (values (nreverse out) complete)))
+
+(defun missing-stored-preconditions (step facts)
+  "Recorded preconditions of STEP that do not hold in FACTS."
+  (loop for pre in (getf step :preconditions)
+        unless (and (consp pre) (goal-holds-p pre facts))
+          collect pre))
+
 (defun extend-bindings-from-state (patterns bindings facts)
   "Extend BINDINGS by matching still-open variables in PATTERNS against FACTS.
 Uses the first successful match per pattern (Phase-3 simplicity)."
@@ -72,16 +111,29 @@ Uses the first successful match per pattern (Phase-3 simplicity)."
           collect g))
 
 (defun make-plan-step (operator bindings goal subgoals)
-  "A single planned step (plist)."
-  (list :operator (operator-name operator)
-        :bindings (instantiate-bindings
-                   (cons goal (append (operator-preconditions operator)
-                                      (operator-add-list operator)))
-                   bindings)
-        :goal goal
-        :subgoals subgoals
-        :action (operator-action operator)
-        :cost (operator-cost operator)))
+  "A single planned step (plist).
+:ADDS and :DELETES are the effects grounded at plan time. :PRECONDITIONS
+are the grounded preconditions, and :PRECONDITIONS-STORED is true only when
+every precondition grounded. A later replay can apply that record when
+OPERATOR is no longer registered."
+  (multiple-value-bind (pres complete)
+      (%ground-all (operator-preconditions operator) bindings)
+    (list :operator (operator-name operator)
+          :bindings (instantiate-bindings
+                     (cons goal (append (operator-preconditions operator)
+                                        (operator-add-list operator)))
+                     bindings)
+          :goal goal
+          :subgoals subgoals
+          :action (operator-action operator)
+          :cost (operator-cost operator)
+          :adds (%ground-effects (operator-add-list operator) bindings)
+          :deletes (%ground-effects (operator-delete-list operator) bindings)
+          :effects-stored t
+          :preconditions pres
+          :preconditions-stored complete
+          :risk (operator-risk operator)
+          :reversible (operator-reversible operator))))
 
 ;;; Core MEA (with deliberative recording)
 

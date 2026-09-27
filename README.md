@@ -10,13 +10,34 @@ CONTEXT → REPRESENT → REASON → PLAN → ACT → OBSERVE → UPDATE
 Spec: [`docs/PROMPT.md`](docs/PROMPT.md) · Architecture:
 [`docs/architecture.md`](docs/architecture.md) · Roadmap: [`ROADMAP.md`](ROADMAP.md).
 
-## Status (Phase 12 / v0.12.0)
+## Status (v0.91.0)
 
-All twelve roadmap phases are present as a **working core**: context, matching,
-MEA planning, simulate/execute, conditions, explain, memory, adapters, domains,
-events, thin web console, and a **policy-gated autonomy loop**.
+Working core through phase 12, plus a **persistent procedure archive**.
+`gp-plan` reuses a stored procedure whose goals include the request. An
+exact match comes first; extra goals of a larger procedure are applied
+when its steps still work. Otherwise procedures that each achieve part of
+the request are combined: no extra goals first, then procedures that also
+achieve something else. Steps whose extra goals cannot be restored are
+left aside. A search fills anything left. If a
+precondition is missing, stored procedures
+that achieve some of those facts restore it. A full cover comes first,
+then procedures with no extra goals, then procedures that also achieve
+something else. Steps whose extra goals cannot be restored are left aside.
+A search fills anything left. That repair may itself reuse a stored
+procedure, sixty-one levels deep. The stored steps then continue. A live
+`gp-run` updates the score.
 
-Autonomy defaults to `:SIMULATE` — not unattended OS destruction.
+Autonomy defaults to `:SIMULATE`.
+
+## Procedure archive (REPL)
+
+```lisp
+(gp-remember-procedure :name 'connect-iface)  ; also saves the archive
+(gp-archive)                                  ; highest score first
+(gp-plan :goals '((connection interface-01 computer))) ; archive, then MEA
+(gp-run)                                      ; live result updates the score
+(gp-score-procedure 'connect-iface :success t) ; manual score, still available
+```
 
 ## Autonomy (REPL)
 

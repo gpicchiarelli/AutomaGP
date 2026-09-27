@@ -2,5 +2,5 @@
 
 (in-package #:automa-gp)
 
-(defparameter *version* "0.12.0"
-  "AUTOMA GP version (Phase 12: controlled autonomous operation).")
+(defparameter *version* "0.91.0"
+  "AUTOMA GP version (a precondition repair may reuse an archived procedure sixty-one levels deep).")
