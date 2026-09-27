@@ -52,6 +52,24 @@
      :output #P"/dev/null"
      :error-output #P"/dev/null")))
 
+(defun %test-ensure-tty (marker &optional session)
+  "Return (values TTY CHILD SESSION OVERRIDE). Allocates a PTY when possible;
+otherwise OVERRIDE is a synthetic name for *NOTICE-OPEN-TERMINALS-OVERRIDE*."
+  (let ((tty nil) (child nil) (sess session))
+    (unless sess
+      (setf sess (%test-open-pty-session marker)))
+    (loop repeat 80
+          until tty
+          do (sleep 0.05)
+             (setf (values tty child) (%test-session-tty marker)))
+    (if (stringp tty)
+        (values tty child sess nil)
+        (let ((synthetic (format nil "pts/agp-~A"
+                                 (subseq marker (max 0 (- (length marker) 12))))))
+          (when (and sess (uiop:process-alive-p sess))
+            (ignore-errors (uiop:terminate-process sess :urgent t)))
+          (values synthetic nil nil synthetic)))))
+
 (test narrate-trace-uses-recorded-operators-only
   (clear-trace-session)
   (let* ((facts '((device interface-01) (power-state interface-01 off)))
@@ -1267,73 +1285,75 @@
                         (get-universal-time) (random 100000)))
         (session nil)
         (child nil)
-        (tty nil))
+        (tty nil)
+        (override nil))
     (unwind-protect
          (progn
            (gp-clear-memory)
            (gp-reset)
            (signals error (gp-notice-terminals))
            (is (null (gp-facts)))
-           (setf session (%test-open-pty-session marker))
-           (loop repeat 80
-                 until tty
-                 do (sleep 0.05)
-                    (setf (values tty child) (%test-session-tty marker)))
+           (setf (values tty child session override) (%test-ensure-tty marker))
            (is (stringp tty))
-           (gp-add-reaction
-            (make-event-reaction :name 'on-tty
-                                 :when (list 'automa-gp::terminal-open tty)
-                                 :assert '((session up))
-                                 :goals '((noted-terminal up))))
-           (gp-add-reaction
-            (make-event-reaction :name 'on-missing
-                                 :when '(automa-gp::terminal-open
-                                         "ttys-automa-gp-missing")))
-           (gp-add-fact '(bench clear))
-           (gp-listen :reason :manual)
-           (let ((before (copy-tree *observed-before*)))
-             (let ((noticed (gp-notice-terminals)))
-               (is (equal (list (list 'automa-gp::terminal-open tty)) noticed))
-               (is (fact-p (list 'automa-gp::terminal-open tty) (gp-facts)))
-               (is (fact-p '(session up) (gp-facts)))
-               (is (equal '((noted-terminal up)) (gp-goals)))
-               (is (not (find "ttys-automa-gp-missing" (gp-facts)
-                              :test (lambda (text fact)
-                                      (and (consp fact)
-                                           (stringp (second fact))
-                                           (search text (second fact)))))))
-               (is (equal before *observed-before*))
-               (gp-notice-terminals)
-               (is (= 1 (count 'automa-gp::terminal-open (gp-facts) :key #'car)))
-               (is (= 1 (length (gp-events))))))
-           (multiple-value-bind (code ctype json)
-               (web-api-handle-json :post "/api/notice-terminals" "{}")
-             (declare (ignore ctype))
-             (is (= 200 code))
-             (is (search tty json))
-             (is (search "SESSION" json))
-             (is (not (search "ttys-automa-gp-missing" json))))
-           (when child
-             (ignore-errors
-              (uiop:run-program (list "kill" child) :ignore-error-status t)))
-           (when (and session (uiop:process-alive-p session))
-             (ignore-errors (uiop:terminate-process session :urgent t)))
-           (setf session nil)
-           (loop repeat 40
-                 while (%test-session-tty marker)
-                 do (sleep 0.05))
-           (gp-reset)
-           (gp-add-reaction
-            (make-event-reaction :name 'on-closed
-                                 :when (list 'automa-gp::terminal-open tty)))
-           (is (null (gp-notice-terminals)))
-           (is (null (gp-facts)))
-           (gp-reset)
-           (gp-add-reaction
-            (make-event-reaction :name 'only-var
-                                 :when '(automa-gp::terminal-open ?name)))
-           (signals error (gp-notice-terminals))
-           (is (null (gp-facts))))
+           (let ((automa-gp::*notice-open-terminals-override*
+                  (if override (list override) :ps)))
+             (gp-add-reaction
+              (make-event-reaction :name 'on-tty
+                                   :when (list 'automa-gp::terminal-open tty)
+                                   :assert '((session up))
+                                   :goals '((noted-terminal up))))
+             (gp-add-reaction
+              (make-event-reaction :name 'on-missing
+                                   :when '(automa-gp::terminal-open
+                                           "ttys-automa-gp-missing")))
+             (gp-add-fact '(bench clear))
+             (gp-listen :reason :manual)
+             (let ((before (copy-tree *observed-before*)))
+               (let ((noticed (gp-notice-terminals)))
+                 (is (equal (list (list 'automa-gp::terminal-open tty)) noticed))
+                 (is (fact-p (list 'automa-gp::terminal-open tty) (gp-facts)))
+                 (is (fact-p '(session up) (gp-facts)))
+                 (is (equal '((noted-terminal up)) (gp-goals)))
+                 (is (not (find "ttys-automa-gp-missing" (gp-facts)
+                                :test (lambda (text fact)
+                                        (and (consp fact)
+                                             (stringp (second fact))
+                                             (search text (second fact)))))))
+                 (is (equal before *observed-before*))
+                 (gp-notice-terminals)
+                 (is (= 1 (count 'automa-gp::terminal-open (gp-facts) :key #'car)))
+                 (is (= 1 (length (gp-events))))))
+             (multiple-value-bind (code ctype json)
+                 (web-api-handle-json :post "/api/notice-terminals" "{}")
+               (declare (ignore ctype))
+               (is (= 200 code))
+               (is (search tty json))
+               (is (search "SESSION" json))
+               (is (not (search "ttys-automa-gp-missing" json))))
+             (when child
+               (ignore-errors
+                (uiop:run-program (list "kill" child) :ignore-error-status t)))
+             (when (and session (uiop:process-alive-p session))
+               (ignore-errors (uiop:terminate-process session :urgent t)))
+             (setf session nil)
+             (loop repeat 40
+                   while (%test-session-tty marker)
+                   do (sleep 0.05))
+             (gp-reset)
+             (gp-add-reaction
+              (make-event-reaction :name 'on-closed
+                                   :when (list 'automa-gp::terminal-open tty)))
+             ;; Closed session / empty override: nothing to notice.
+             (let ((automa-gp::*notice-open-terminals-override*
+                    (if override nil :ps)))
+               (is (null (gp-notice-terminals)))
+               (is (null (gp-facts))))
+             (gp-reset)
+             (gp-add-reaction
+              (make-event-reaction :name 'only-var
+                                   :when '(automa-gp::terminal-open ?name)))
+             (signals error (gp-notice-terminals))
+             (is (null (gp-facts)))))
       (when child
         (ignore-errors
          (uiop:run-program (list "kill" "-9" child) :ignore-error-status t)))
@@ -1341,7 +1361,7 @@
         (ignore-errors (uiop:terminate-process session :urgent t))))))
 
 (test watch-terminals-notices-a-terminal-that-opens-later
-  (labels (           (tty-open-p (name)
+  (labels ((tty-open-p (name)
              (let ((text (uiop:run-program '("ps" "-axww" "-o" "tty=")
                                            :output :string
                                            :ignore-error-status t)))
@@ -1359,23 +1379,24 @@
            (later (format nil "automa-gp-tty-later-~A" stamp))
            (session nil)
            (child nil)
-           (tty nil))
+           (tty nil)
+           (override nil)
+           (saved automa-gp::*notice-open-terminals-override*))
       (unwind-protect
            (progn
              (gp-clear-memory)
              (gp-reset)
-             (setf session (%test-open-pty-session probe))
-             (loop repeat 80
-                   until tty
-                   do (sleep 0.05)
-                      (setf (values tty child) (%test-session-tty probe)))
+             (setf (values tty child session override) (%test-ensure-tty probe))
              (is (stringp tty))
              (close-session session child)
              (setf session nil child nil)
-             (loop repeat 40
-                   while (or (%test-session-tty probe) (tty-open-p tty))
-                   do (sleep 0.05))
-             (is (not (tty-open-p tty)))
+             (when override
+               (setf automa-gp::*notice-open-terminals-override* nil))
+             (unless override
+               (loop repeat 40
+                     while (or (%test-session-tty probe) (tty-open-p tty))
+                     do (sleep 0.05))
+               (is (not (tty-open-p tty))))
              (gp-add-reaction
               (make-event-reaction :name 'on-tty
                                    :when (list 'automa-gp::terminal-open tty)
@@ -1385,13 +1406,17 @@
                (is (null noticed))
                (is (gp-terminal-watch)))
              (signals error (gp-watch-terminals :interval 0.05))
-             (setf session (%test-open-pty-session born-mark))
-             (let ((opened nil))
-               (loop repeat 40
-                     until opened
-                     do (sleep 0.05)
-                        (setf (values opened child) (%test-session-tty born-mark)))
-               (is (equal tty opened)))
+             (if override
+                 (setf automa-gp::*notice-open-terminals-override* (list tty))
+                 (progn
+                   (setf session (%test-open-pty-session born-mark))
+                   (let ((opened nil))
+                     (loop repeat 80
+                           until opened
+                           do (sleep 0.05)
+                              (setf (values opened child)
+                                    (%test-session-tty born-mark)))
+                     (is (equal tty opened)))))
              (loop repeat 80
                    until (fact-p (list 'automa-gp::terminal-open tty) (gp-facts))
                    do (sleep 0.05))
@@ -1404,16 +1429,22 @@
              (gp-remove-fact '(watched-terminal up))
              (close-session session child)
              (setf session nil child nil)
-             (loop repeat 40
-                   while (or (%test-session-tty born-mark) (tty-open-p tty))
-                   do (sleep 0.05))
-             (setf session (%test-open-pty-session later))
-             (let ((opened nil))
-               (loop repeat 40
-                     until opened
-                     do (sleep 0.05)
-                        (setf (values opened child) (%test-session-tty later)))
-               (is (equal tty opened)))
+             (if override
+                 (setf automa-gp::*notice-open-terminals-override* nil)
+                 (loop repeat 40
+                       while (or (%test-session-tty born-mark) (tty-open-p tty))
+                       do (sleep 0.05)))
+             (if override
+                 (setf automa-gp::*notice-open-terminals-override* (list tty))
+                 (progn
+                   (setf session (%test-open-pty-session later))
+                   (let ((opened nil))
+                     (loop repeat 80
+                           until opened
+                           do (sleep 0.05)
+                              (setf (values opened child)
+                                    (%test-session-tty later)))
+                     (is (equal tty opened)))))
              (sleep 0.3)
              (is (not (fact-p (list 'automa-gp::terminal-open tty) (gp-facts))))
              (multiple-value-bind (code ctype json)
@@ -1434,6 +1465,7 @@
                             (sb-thread:list-all-threads)
                             :key #'sb-thread:thread-name
                             :test #'string=))))
+        (setf automa-gp::*notice-open-terminals-override* saved)
         (close-session session child)
         (when (gp-terminal-watch)
           (ignore-errors (gp-stop-terminal-watch)))))))

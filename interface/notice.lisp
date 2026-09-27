@@ -426,10 +426,19 @@ No watch is an error."
               (push target targets))))))
     (remove-duplicates (nreverse targets) :test #'equal)))
 
+(defvar *notice-open-terminals-override* :ps
+  "When a list, GP-NOTICE-TERMINALS treats these names as open (tests).
+:PS (default) means ask ps. An empty list means no terminals are open.")
+
 (defun %open-terminal-names ()
   "TTY names ps currently reports. ?? and console are not terminals.
-NIL when this notice look has stopped."
-  (let ((text (%cancellable-program '("ps" "-ax" "-o" "tty=") :output t)))
+NIL when this notice look has stopped.
+*NOTICE-OPEN-TERMINALS-OVERRIDE*, when a list, replaces the ps look — used by
+tests on hosts that cannot allocate a PTY."
+  (when (listp *notice-open-terminals-override*)
+    (return-from %open-terminal-names
+      (copy-list *notice-open-terminals-override*)))
+  (let ((text (%cancellable-program '("ps" "-axww" "-o" "tty=") :output t)))
     (when text
       (remove-duplicates
        (loop for raw in (uiop:split-string text :separator '(#\Newline #\Return))
@@ -437,7 +446,8 @@ NIL when this notice look has stopped."
              unless (or (zerop (length name))
                         (string= name "??")
                         (string= name "?")
-                        (string= name "console"))
+                        (string= name "console")
+                        (string= name "-"))
                collect name)
        :test #'string=))))
 
