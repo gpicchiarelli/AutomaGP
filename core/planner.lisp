@@ -100,6 +100,3 @@ Stores operators and deliberative trace in plan meta."
 
 (defun plan-cost (plan)
   (loop for s in (plan-steps plan) sum (or (getf s :cost) 1)))
-
-(defvar *current-plan* nil
-  "Last plan produced by GP-PLAN in this session.")

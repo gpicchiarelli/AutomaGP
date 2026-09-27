@@ -5,6 +5,50 @@
 (def-suite workbench-suite :in automa-gp-suite)
 (in-suite workbench-suite)
 
+(defun %test-tty-name-p (name)
+  "True when NAME looks like a pty (ttys000, ttyv0, pts/0)."
+  (and (stringp name)
+       (plusp (length name))
+       (or (search "tty" name :test #'char-equal)
+           (and (>= (length name) 4)
+                (string-equal "pts/" name :end2 4)))))
+
+(defun %test-linux-script-p ()
+  "util-linux script(1) needs -c; BSD/macOS take a trailing command."
+  (eq (uiop:operating-system) :linux))
+
+(defun %test-script-argv (typescript &rest command)
+  "Argv that runs COMMAND under script(1) writing TYPESCRIPT."
+  (if (%test-linux-script-p)
+      (list "script" "-q" "-c" (uiop:escape-shell-command command) typescript)
+      (list* "script" "-q" typescript command)))
+
+(defun %test-session-tty (marker)
+  "TTY name and pid of the process whose command contains MARKER."
+  (let ((text (uiop:run-program '("ps" "-ax" "-o" "pid=,tty=,command=")
+                                :output :string
+                                :ignore-error-status t)))
+    (dolist (line (uiop:split-string text :separator '(#\Newline #\Return)))
+      (when (search marker line)
+        (let* ((trim (string-left-trim '(#\Space #\Tab) line))
+               (gap (position #\Space trim))
+               (pid (and gap (subseq trim 0 gap)))
+               (rest (and gap
+                          (string-left-trim '(#\Space #\Tab)
+                                            (subseq trim gap))))
+               (gap2 (and rest (position #\Space rest)))
+               (tty (and gap2 (subseq rest 0 gap2))))
+          (when (and tty (%test-tty-name-p tty) pid)
+            (return (values tty pid))))))))
+
+(defun %test-open-pty-session (marker)
+  "Launch a short-lived PTY session whose command line contains MARKER."
+  (uiop:launch-program
+   (%test-script-argv "/dev/null" "perl" "-e"
+                      (format nil "sleep 60; # ~A" marker))
+   :output #P"/dev/null"
+   :error-output #P"/dev/null"))
+
 (test narrate-trace-uses-recorded-operators-only
   (clear-trace-session)
   (let* ((facts '((device interface-01) (power-state interface-01 off)))
@@ -1216,134 +1260,90 @@
         (ignore-errors (gp-stop-process-watch))))))
 
 (test notice-terminals-records-an-open-session
-  (labels ((session-tty (marker)
-             "The tty and pid of the process whose command contains MARKER."
-             (let ((text (uiop:run-program '("ps" "-ax" "-o" "pid=,tty=,command=")
-                                           :output :string
-                                           :ignore-error-status t)))
-               (dolist (line (uiop:split-string text :separator '(#\Newline #\Return)))
-                 (when (search marker line)
-                   (let* ((trim (string-left-trim '(#\Space #\Tab) line))
-                          (gap (position #\Space trim))
-                          (pid (and gap (subseq trim 0 gap)))
-                          (rest (and gap
-                                     (string-left-trim '(#\Space #\Tab)
-                                                       (subseq trim gap))))
-                          (gap2 (and rest (position #\Space rest)))
-                          (tty (and gap2 (subseq rest 0 gap2))))
-                     (when (and tty (search "tty" tty) pid)
-                       (return (values tty pid)))))))))
-    (let ((marker (format nil "automa-gp-tty-~A-~A"
-                          (get-universal-time) (random 100000)))
-          (session nil)
-          (child nil)
-          (tty nil))
-      (unwind-protect
-           (progn
-             (gp-clear-memory)
-             (gp-reset)
-             (signals error (gp-notice-terminals))
-             (is (null (gp-facts)))
-             (setf session
-                   (uiop:launch-program
-                    (list "script" "-q" "/dev/null" "perl" "-e"
-                          (format nil "sleep 60; # ~A" marker))
-                    :output #P"/dev/null"
-                    :error-output #P"/dev/null"))
-             (loop repeat 40
-                   until tty
-                   do (sleep 0.05)
-                      (setf (values tty child) (session-tty marker)))
-             (is (stringp tty))
-             (gp-add-reaction
-              (make-event-reaction :name 'on-tty
-                                   :when (list 'automa-gp::terminal-open tty)
-                                   :assert '((session up))
-                                   :goals '((noted-terminal up))))
-             (gp-add-reaction
-              (make-event-reaction :name 'on-missing
-                                   :when '(automa-gp::terminal-open
-                                           "ttys-automa-gp-missing")))
-             (gp-add-fact '(bench clear))
-             (gp-listen :reason :manual)
-             (let ((before (copy-tree *observed-before*)))
-               (let ((noticed (gp-notice-terminals)))
-                 (is (equal (list (list 'automa-gp::terminal-open tty)) noticed))
-                 (is (fact-p (list 'automa-gp::terminal-open tty) (gp-facts)))
-                 (is (fact-p '(session up) (gp-facts)))
-                 (is (equal '((noted-terminal up)) (gp-goals)))
-                 (is (not (find "ttys-automa-gp-missing" (gp-facts)
-                                :test (lambda (text fact)
-                                        (and (consp fact)
-                                             (stringp (second fact))
-                                             (search text (second fact)))))))
-                 (is (equal before *observed-before*))
-                 (gp-notice-terminals)
-                 (is (= 1 (count 'automa-gp::terminal-open (gp-facts) :key #'car)))
-                 (is (= 1 (length (gp-events))))))
-             (multiple-value-bind (code ctype json)
-                 (web-api-handle-json :post "/api/notice-terminals" "{}")
-               (declare (ignore ctype))
-               (is (= 200 code))
-               (is (search tty json))
-               (is (search "SESSION" json))
-               (is (not (search "ttys-automa-gp-missing" json))))
-             (when child
-               (ignore-errors
-                (uiop:run-program (list "kill" child) :ignore-error-status t)))
-             (when (and session (uiop:process-alive-p session))
-               (ignore-errors (uiop:terminate-process session :urgent t)))
-             (setf session nil)
-             (loop repeat 40
-                   while (session-tty marker)
-                   do (sleep 0.05))
-             (gp-reset)
-             (gp-add-reaction
-              (make-event-reaction :name 'on-closed
-                                   :when (list 'automa-gp::terminal-open tty)))
-             (is (null (gp-notice-terminals)))
-             (is (null (gp-facts)))
-             (gp-reset)
-             (gp-add-reaction
-              (make-event-reaction :name 'only-var
-                                   :when '(automa-gp::terminal-open ?name)))
-             (signals error (gp-notice-terminals))
-             (is (null (gp-facts))))
-        (when child
-          (ignore-errors
-           (uiop:run-program (list "kill" "-9" child) :ignore-error-status t)))
-        (when (and session (uiop:process-alive-p session))
-          (ignore-errors (uiop:terminate-process session :urgent t)))))))
+  (let ((marker (format nil "automa-gp-tty-~A-~A"
+                        (get-universal-time) (random 100000)))
+        (session nil)
+        (child nil)
+        (tty nil))
+    (unwind-protect
+         (progn
+           (gp-clear-memory)
+           (gp-reset)
+           (signals error (gp-notice-terminals))
+           (is (null (gp-facts)))
+           (setf session (%test-open-pty-session marker))
+           (loop repeat 40
+                 until tty
+                 do (sleep 0.05)
+                    (setf (values tty child) (%test-session-tty marker)))
+           (is (stringp tty))
+           (gp-add-reaction
+            (make-event-reaction :name 'on-tty
+                                 :when (list 'automa-gp::terminal-open tty)
+                                 :assert '((session up))
+                                 :goals '((noted-terminal up))))
+           (gp-add-reaction
+            (make-event-reaction :name 'on-missing
+                                 :when '(automa-gp::terminal-open
+                                         "ttys-automa-gp-missing")))
+           (gp-add-fact '(bench clear))
+           (gp-listen :reason :manual)
+           (let ((before (copy-tree *observed-before*)))
+             (let ((noticed (gp-notice-terminals)))
+               (is (equal (list (list 'automa-gp::terminal-open tty)) noticed))
+               (is (fact-p (list 'automa-gp::terminal-open tty) (gp-facts)))
+               (is (fact-p '(session up) (gp-facts)))
+               (is (equal '((noted-terminal up)) (gp-goals)))
+               (is (not (find "ttys-automa-gp-missing" (gp-facts)
+                              :test (lambda (text fact)
+                                      (and (consp fact)
+                                           (stringp (second fact))
+                                           (search text (second fact)))))))
+               (is (equal before *observed-before*))
+               (gp-notice-terminals)
+               (is (= 1 (count 'automa-gp::terminal-open (gp-facts) :key #'car)))
+               (is (= 1 (length (gp-events))))))
+           (multiple-value-bind (code ctype json)
+               (web-api-handle-json :post "/api/notice-terminals" "{}")
+             (declare (ignore ctype))
+             (is (= 200 code))
+             (is (search tty json))
+             (is (search "SESSION" json))
+             (is (not (search "ttys-automa-gp-missing" json))))
+           (when child
+             (ignore-errors
+              (uiop:run-program (list "kill" child) :ignore-error-status t)))
+           (when (and session (uiop:process-alive-p session))
+             (ignore-errors (uiop:terminate-process session :urgent t)))
+           (setf session nil)
+           (loop repeat 40
+                 while (%test-session-tty marker)
+                 do (sleep 0.05))
+           (gp-reset)
+           (gp-add-reaction
+            (make-event-reaction :name 'on-closed
+                                 :when (list 'automa-gp::terminal-open tty)))
+           (is (null (gp-notice-terminals)))
+           (is (null (gp-facts)))
+           (gp-reset)
+           (gp-add-reaction
+            (make-event-reaction :name 'only-var
+                                 :when '(automa-gp::terminal-open ?name)))
+           (signals error (gp-notice-terminals))
+           (is (null (gp-facts))))
+      (when child
+        (ignore-errors
+         (uiop:run-program (list "kill" "-9" child) :ignore-error-status t)))
+      (when (and session (uiop:process-alive-p session))
+        (ignore-errors (uiop:terminate-process session :urgent t))))))
 
 (test watch-terminals-notices-a-terminal-that-opens-later
-  (labels ((session-tty (marker)
-             (let ((text (uiop:run-program '("ps" "-ax" "-o" "pid=,tty=,command=")
-                                           :output :string
-                                           :ignore-error-status t)))
-               (dolist (line (uiop:split-string text :separator '(#\Newline #\Return)))
-                 (when (search marker line)
-                   (let* ((trim (string-left-trim '(#\Space #\Tab) line))
-                          (gap (position #\Space trim))
-                          (pid (and gap (subseq trim 0 gap)))
-                          (rest (and gap
-                                     (string-left-trim '(#\Space #\Tab)
-                                                       (subseq trim gap))))
-                          (gap2 (and rest (position #\Space rest)))
-                          (name (and gap2 (subseq rest 0 gap2))))
-                     (when (and name (search "tty" name) pid)
-                       (return (values name pid))))))))
-           (tty-open-p (name)
+  (labels ((tty-open-p (name)
              (let ((text (uiop:run-program '("ps" "-ax" "-o" "tty=")
                                            :output :string
                                            :ignore-error-status t)))
                (find name (uiop:split-string text :separator '(#\Newline #\Return #\Space #\Tab))
                      :test #'string=)))
-           (open-session (marker)
-             (uiop:launch-program
-              (list "script" "-q" "/dev/null" "perl" "-e"
-                    (format nil "sleep 60; # ~A" marker))
-              :output #P"/dev/null"
-              :error-output #P"/dev/null"))
            (close-session (session child)
              (when child
                (ignore-errors
@@ -1361,16 +1361,16 @@
            (progn
              (gp-clear-memory)
              (gp-reset)
-             (setf session (open-session probe))
+             (setf session (%test-open-pty-session probe))
              (loop repeat 40
                    until tty
                    do (sleep 0.05)
-                      (setf (values tty child) (session-tty probe)))
+                      (setf (values tty child) (%test-session-tty probe)))
              (is (stringp tty))
              (close-session session child)
              (setf session nil child nil)
              (loop repeat 40
-                   while (or (session-tty probe) (tty-open-p tty))
+                   while (or (%test-session-tty probe) (tty-open-p tty))
                    do (sleep 0.05))
              (is (not (tty-open-p tty)))
              (gp-add-reaction
@@ -1382,12 +1382,12 @@
                (is (null noticed))
                (is (gp-terminal-watch)))
              (signals error (gp-watch-terminals :interval 0.05))
-             (setf session (open-session born-mark))
+             (setf session (%test-open-pty-session born-mark))
              (let ((opened nil))
                (loop repeat 40
                      until opened
                      do (sleep 0.05)
-                        (setf (values opened child) (session-tty born-mark)))
+                        (setf (values opened child) (%test-session-tty born-mark)))
                (is (equal tty opened)))
              (loop repeat 80
                    until (fact-p (list 'automa-gp::terminal-open tty) (gp-facts))
@@ -1402,14 +1402,14 @@
              (close-session session child)
              (setf session nil child nil)
              (loop repeat 40
-                   while (or (session-tty born-mark) (tty-open-p tty))
+                   while (or (%test-session-tty born-mark) (tty-open-p tty))
                    do (sleep 0.05))
-             (setf session (open-session later))
+             (setf session (%test-open-pty-session later))
              (let ((opened nil))
                (loop repeat 40
                      until opened
                      do (sleep 0.05)
-                        (setf (values opened child) (session-tty later)))
+                        (setf (values opened child) (%test-session-tty later)))
                (is (equal tty opened)))
              (sleep 0.3)
              (is (not (fact-p (list 'automa-gp::terminal-open tty) (gp-facts))))
@@ -1447,8 +1447,8 @@
            (signals error (gp-notice-terminal-text))
            (is (null (gp-facts)))
            (uiop:run-program
-            (list "script" "-q" path "perl" "-e"
-                  (format nil "print \"~A\\n\";" token))
+            (%test-script-argv path "perl" "-e"
+                               (format nil "print \"~A\\n\";" token))
             :output #P"/dev/null"
             :error-output #P"/dev/null"
             :ignore-error-status t)

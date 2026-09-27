@@ -61,8 +61,7 @@
     :meta (list :domain *documents-domain-name*
                 :prompt-example t))))
 
-(defun install-documents-domain (&optional (context *current-context*)
-                                 &key (seed-demo t) archive-path
+(defun install-documents-domain (context &key (seed-demo t) archive-path
                                  &allow-other-keys)
   "Install documents-domain pack into CONTEXT. Returns CONTEXT."
   (unless (context-p context)
@@ -82,8 +81,7 @@
   (%tag-domains context *documents-domain-name*)
   context)
 
-(defun documents-demo-plan (&optional (context *current-context*)
-                            &key (source "note.txt")
+(defun documents-demo-plan (context &key (source "note.txt")
                               (class 'automa-gp::memo)
                               archive-path)
   "Seed source/class facts and plan for (document-archived SOURCE)."

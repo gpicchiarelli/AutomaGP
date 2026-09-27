@@ -53,7 +53,7 @@ jobs:
           sync: rsync
           copyback: false
           prepare: |
-            pkg install -y sbcl bash curl git ca_root_nss
+            pkg install -y sbcl bash curl git ca_root_nss perl5
           run: |
             set -e
             sbcl --version

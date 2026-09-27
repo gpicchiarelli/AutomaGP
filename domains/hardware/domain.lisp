@@ -40,8 +40,7 @@
               :then '(automa-gp::peripheral-ready ?d)
               :meta (list :domain *hardware-domain-name*))))
 
-(defun install-hardware-domain (&optional (context *current-context*)
-                                &key (seed-demo nil) &allow-other-keys)
+(defun install-hardware-domain (context &key (seed-demo nil) &allow-other-keys)
   "Install hardware-domain operators/rules into CONTEXT."
   (unless (context-p context)
     (error "install-hardware-domain requires a context"))
@@ -57,8 +56,7 @@
   (%tag-domains context *hardware-domain-name*)
   context)
 
-(defun hardware-demo-plan (&optional (context *current-context*)
-                           &key (device 'automa-gp::interface-01))
+(defun hardware-demo-plan (context &key (device 'automa-gp::interface-01))
   "Seed device off and plan for (device-configured DEVICE)."
   (install-hardware-domain context)
   (setf (context-facts context)

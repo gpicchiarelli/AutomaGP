@@ -742,9 +742,16 @@ process is stopped if the wait is cut short."
 
 (defun %notice-process-running-p (name-or-pid)
   "True when NAME-OR-PID is running. NIL when this notice look has stopped.
-A pid uses kill -0. A name uses pgrep -x, then pgrep -f."
+A pid uses kill -0. A name uses pgrep -x, then pgrep -f, then a ps scan."
   (flet ((exited-zero (argv)
-           (eql 0 (%cancellable-program argv))))
+           (eql 0 (%cancellable-program argv)))
+         (ps-has-name (name)
+           (let ((text (%cancellable-program
+                        '("ps" "-ax" "-o" "command=") :output t)))
+             (and text
+                  (loop for line in (uiop:split-string
+                                     text :separator '(#\Newline #\Return))
+                        thereis (search name line))))))
     (cond
       ((integerp name-or-pid)
        (exited-zero (list "kill" "-0" (princ-to-string name-or-pid))))
@@ -752,7 +759,9 @@ A pid uses kill -0. A name uses pgrep -x, then pgrep -f."
        (let ((name (princ-to-string name-or-pid)))
          (or (exited-zero (list "pgrep" "-xq" name))
              (and (not (%notice-halted-p))
-                  (exited-zero (list "pgrep" "-fq" name)))))))))
+                  (exited-zero (list "pgrep" "-fq" name)))
+             (and (not (%notice-halted-p))
+                  (ps-has-name name))))))))
 
 (defun %osascript (source &key (timeout 2))
   "Run SOURCE with osascript, or NIL if it does not finish in TIMEOUT seconds.

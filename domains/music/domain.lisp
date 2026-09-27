@@ -40,8 +40,7 @@
               :then '(automa-gp::studio-session-live ?i)
               :meta (list :domain *music-domain-name*))))
 
-(defun install-music-domain (&optional (context *current-context*)
-                              &key (seed-demo t) &allow-other-keys)
+(defun install-music-domain (context &key (seed-demo t) &allow-other-keys)
   "Install music-domain operators/rules into CONTEXT."
   (unless (context-p context)
     (error "install-music-domain requires a context"))
@@ -57,8 +56,7 @@
   (%tag-domains context *music-domain-name*)
   context)
 
-(defun music-demo-plan (&optional (context *current-context*)
-                         &key (interface 'automa-gp::scarlett-2i2)
+(defun music-demo-plan (context &key (interface 'automa-gp::scarlett-2i2)
                            (destination 'automa-gp::logic-pro))
   "Seed interface/MIDI facts and plan for (session-ready INTERFACE)."
   (install-music-domain context :seed-demo t)

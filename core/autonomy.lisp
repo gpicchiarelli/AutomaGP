@@ -241,7 +241,6 @@ stored in *LAST-AUTONOMY*). Does not loop — see AUTONOMOUS-LOOP."
          (execution nil)
          (halt nil)
          (status :ok)
-         (discrepancy nil)
          (authorized nil)
          (auth-reason nil))
     (unless (context-p ctx)
@@ -391,7 +390,6 @@ stored in *LAST-AUTONOMY*). Does not loop — see AUTONOMOUS-LOOP."
                                        (state-facts (execution-final-state execution))))
                       (left (differences facts-after goals))
                       (div (execution-divergences execution)))
-                 (setf discrepancy (or left div))
                  (note :observe-result
                        :success (execution-success execution)
                        :remaining left

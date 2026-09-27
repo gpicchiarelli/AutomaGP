@@ -4,9 +4,6 @@
 
 (in-package #:automa-gp)
 
-(defvar *current-context* nil
-  "Session current context for REPL helpers.")
-
 (define-condition not-yet-implemented-error (error)
   ((feature :initarg :feature :reader not-yet-implemented-feature)
    (phase :initarg :phase :reader not-yet-implemented-phase :initform nil))
@@ -288,11 +285,11 @@ as it was. An unsuccessful plan is refused the same way."
   "Return the last EXECUTION-RESULT from GP-SIMULATE or GP-RUN."
   *last-execution*)
 
-(defun gp-failure-strategy (&optional policy &key (retry-limit 3))
+(defun gp-failure-strategy (&optional (policy nil policy-p) (retry-limit 3))
   "Get or set the session *DELIBERATIVE-STRATEGY*.
 With no args: return current strategy (or NIL).
 With POLICY (:SIGNAL :SKIP :RETRY :ABORT :ASK): install a fresh strategy."
-  (if policy
+  (if policy-p
       (setf *deliberative-strategy*
             (make-strategy :policy policy :retry-limit retry-limit))
       *deliberative-strategy*))
@@ -427,7 +424,7 @@ not fit. Clears the session only after a successful induction."
     (setf *observation* nil)
     operator))
 
-(defun gp-explain (&optional (topic :last) &key (stream t))
+(defun gp-explain (&optional (topic :last) (stream t))
   "Print (and return) an explanation derived from a recorded deliberative trace.
 TOPIC may be :LAST (default), :PLAN, :EXECUTION, :HISTORY, a PLAN,
 an EXECUTION-RESULT, or a DELIBERATIVE-TRACE.
@@ -519,7 +516,7 @@ An unsuccessful plan is refused before the archive is touched."
 
 (defun gp-archive-save (&optional (path *procedure-archive-path*))
   "Write the procedure archive to PATH (default ~/.automa-gp/procedure-archive.agp)."
-  (save-procedure-archive path))
+  (save-procedure-archive :path path))
 
 (defun gp-archive-load (&optional (path *procedure-archive-path*))
   "Load the procedure archive from PATH into session procedural memory."

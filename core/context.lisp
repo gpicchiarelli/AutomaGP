@@ -71,6 +71,17 @@
 (defun context-p (object)
   (typep object 'context))
 
+;;; Session specials used across core, memory, domains, and the REPL.
+;;; Defined here (early in the ASDF order) so later files compile cleanly.
+(defvar *current-context* nil
+  "Session current context for REPL helpers and domain defaults.")
+
+(defvar *current-plan* nil
+  "Last plan produced by GP-PLAN in this session.")
+
+(defvar *last-execution* nil
+  "Last EXECUTION-RESULT from GP-SIMULATE or GP-RUN.")
+
 (defun make-context (&key name parent facts goals actions rules operators
                        events event-reactions mode meta children)
   "Construct a CONTEXT. MODE defaults to :READ."

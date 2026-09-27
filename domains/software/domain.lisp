@@ -62,8 +62,7 @@
                 :effects '((automa-gp::tests-ok ?p))
                 :adapter :processes)))
 
-(defun install-software-domain (&optional (context *current-context*)
-                                &key (seed-demo t) &allow-other-keys)
+(defun install-software-domain (context &key (seed-demo t) &allow-other-keys)
   "Install software-domain operators, rules, and actions into CONTEXT.
 When SEED-DEMO, assert (toolchain ready) if missing.
 Returns CONTEXT."
@@ -84,8 +83,7 @@ Returns CONTEXT."
   (%tag-domains context *software-domain-name*)
   context)
 
-(defun software-demo-plan (&optional (context *current-context*)
-                           &key (project 'automa-gp::myapp))
+(defun software-demo-plan (context &key (project 'automa-gp::myapp))
   "Seed a project fact and plan for (tests-ok PROJECT). Returns PLAN."
   (install-software-domain context :seed-demo t)
   (setf (context-facts context)

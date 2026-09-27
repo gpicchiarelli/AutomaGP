@@ -40,8 +40,7 @@
               :then '(automa-gp::shape-constructed automa-gp::triangle)
               :meta (list :domain *geometry-domain-name*))))
 
-(defun install-geometry-domain (&optional (context *current-context*)
-                                 &key (seed-demo t) &allow-other-keys)
+(defun install-geometry-domain (context &key (seed-demo t) &allow-other-keys)
   "Install geometry-domain operators/rules into CONTEXT."
   (unless (context-p context)
     (error "install-geometry-domain requires a context"))
@@ -58,7 +57,7 @@
   (%tag-domains context *geometry-domain-name*)
   context)
 
-(defun geometry-demo-plan (&optional (context *current-context*))
+(defun geometry-demo-plan (context)
   "Seed three points and segment requests; plan for a triangle."
   (install-geometry-domain context :seed-demo t)
   (dolist (f '((automa-gp::point-id automa-gp::a)

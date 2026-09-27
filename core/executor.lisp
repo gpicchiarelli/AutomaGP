@@ -16,9 +16,6 @@
 Defined here so the executor can bind it; adapters implement the dispatch.
 Default NIL keeps EXECUTE symbolic-only. SIMULATE never invokes adapters.")
 
-(defvar *last-execution* nil
-  "Last EXECUTION-RESULT from GP-SIMULATE or GP-RUN.")
-
 (defvar *execution-confirm* nil
   "Optional function (OPERATOR BINDINGS) → true to allow irreversible EXECUTE.
 If NIL, irreversible/high-risk steps require :CONFIRM T on GP-RUN.")

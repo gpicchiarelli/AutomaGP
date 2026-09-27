@@ -217,8 +217,8 @@
                     :last-failure-at last-failure-at
                     :meta meta)))
 
-(defun save-procedure-archive (&optional (path *procedure-archive-path*)
-                               &key (memory nil memory-p))
+(defun save-procedure-archive (&key (path *procedure-archive-path*)
+                                 (memory nil memory-p))
   "Write procedural memory to PATH as a procedure-archive s-expression.
 Separate from the planner and from full session snapshots."
   (let ((mem (if memory-p memory (ensure-procedural-memory))))

@@ -266,7 +266,7 @@ Prefers *PROCEDURE-ARCHIVE-PATH* (.agp); falls back to a sibling .sexp if presen
 (defun maybe-autosave-procedure-archive ()
   "Write the archive file when autosave is enabled."
   (when *procedure-archive-autosave*
-    (save-procedure-archive *procedure-archive-path*)
+    (save-procedure-archive :path *procedure-archive-path*)
     (setf *procedure-archive-loaded* t)))
 
 (defun procedure->plan (procedure &key (meta nil))
