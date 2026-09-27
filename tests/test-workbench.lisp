@@ -25,7 +25,8 @@
 
 (defun %test-session-tty (marker)
   "TTY name and pid of the process whose command contains MARKER."
-  (let ((text (uiop:run-program '("ps" "-ax" "-o" "pid=,tty=,command=")
+  ;; -ww keeps BSD/Linux from truncating the marker off the command line.
+  (let ((text (uiop:run-program '("ps" "-axww" "-o" "pid=,tty=,command=")
                                 :output :string
                                 :ignore-error-status t)))
     (dolist (line (uiop:split-string text :separator '(#\Newline #\Return)))
@@ -43,11 +44,13 @@
 
 (defun %test-open-pty-session (marker)
   "Launch a short-lived PTY session whose command line contains MARKER."
-  (uiop:launch-program
-   (%test-script-argv "/dev/null" "perl" "-e"
-                      (format nil "sleep 60; # ~A" marker))
-   :output #P"/dev/null"
-   :error-output #P"/dev/null"))
+  ;; A real typescript path is more reliable than /dev/null on FreeBSD.
+  (let ((typescript (format nil "/tmp/automa-gp-script-~A" marker)))
+    (uiop:launch-program
+     (%test-script-argv typescript "perl" "-e"
+                        (format nil "sleep 60; # ~A" marker))
+     :output #P"/dev/null"
+     :error-output #P"/dev/null")))
 
 (test narrate-trace-uses-recorded-operators-only
   (clear-trace-session)
@@ -1272,7 +1275,7 @@
            (signals error (gp-notice-terminals))
            (is (null (gp-facts)))
            (setf session (%test-open-pty-session marker))
-           (loop repeat 40
+           (loop repeat 80
                  until tty
                  do (sleep 0.05)
                     (setf (values tty child) (%test-session-tty marker)))
@@ -1338,8 +1341,8 @@
         (ignore-errors (uiop:terminate-process session :urgent t))))))
 
 (test watch-terminals-notices-a-terminal-that-opens-later
-  (labels ((tty-open-p (name)
-             (let ((text (uiop:run-program '("ps" "-ax" "-o" "tty=")
+  (labels (           (tty-open-p (name)
+             (let ((text (uiop:run-program '("ps" "-axww" "-o" "tty=")
                                            :output :string
                                            :ignore-error-status t)))
                (find name (uiop:split-string text :separator '(#\Newline #\Return #\Space #\Tab))
@@ -1362,7 +1365,7 @@
              (gp-clear-memory)
              (gp-reset)
              (setf session (%test-open-pty-session probe))
-             (loop repeat 40
+             (loop repeat 80
                    until tty
                    do (sleep 0.05)
                       (setf (values tty child) (%test-session-tty probe)))
