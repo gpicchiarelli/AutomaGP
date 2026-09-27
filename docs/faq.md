@@ -44,17 +44,20 @@ them. Simulation never reaches an adapter.
 
 ## What is persisted, and where?
 
-Two things, both as readable s-expressions.
+Two things, both as readable s-expressions in `.agp` files (AutomaGP).
 
-- The procedure archive is written to `~/.automa-gp/procedure-archive.sexp`
+- The procedure archive is written to `~/.automa-gp/procedure-archive.agp`
   when `gp-remember-procedure` stores a plan or a score changes, and it is
-  read back the first time the archive is consulted. `*procedure-archive-path*`,
+  read back the first time the archive is consulted. An older
+  `procedure-archive.sexp` in the same directory is still loaded if the
+  `.agp` file is missing. `*procedure-archive-path*`,
   `*procedure-archive-autosave*` and `*procedure-archive-autoload*` in
   `memory/procedural.lisp` control this.
 - A snapshot bundle is written only when you ask for it: `(gp-save path)`
   stores the current context plus knowledge, episodic, and procedural
-  memory; `(gp-load path)` restores it. `gp-save-context` and
-  `gp-load-context` handle the context alone.
+  memory; `(gp-load path)` restores it. Paths without a type get `.agp`.
+  An explicit path (including a legacy `.sexp`) still opens as given.
+  `gp-save-context` and `gp-load-context` handle the context alone.
 
 Nothing else is written outside the repository. `gp-reset` keeps
 knowledge and procedural memory, and `gp-clear-memory` drops them from
@@ -67,12 +70,12 @@ Set `AUTOMA_GP_WEB_PORT` to change the port, or call
 `(automa-gp/web:start-web :port N)` from a REPL. The server binds
 `127.0.0.1` and has no authentication; it is meant for the same machine.
 
-## Does it run on Linux?
+## Does it run on Linux or FreeBSD?
 
-The core, the tests, and the web console do. CI runs the suite on Ubuntu
-and macOS. The `macos` adapter (`open`, `hostname`, `uname`), the
-Terminal.app screen look through `osascript`, and the Swift Workbench
-need a Mac.
+The core, the tests, and the web console do. CI runs the suite on Ubuntu,
+macOS, and FreeBSD 14.x. The `macos` adapter (`open`, `hostname`,
+`uname`), the Terminal.app screen look through `osascript`, and the
+Swift Workbench need a Mac.
 
 ## How do I build the macOS Workbench?
 

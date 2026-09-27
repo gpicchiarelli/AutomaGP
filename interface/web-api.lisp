@@ -199,6 +199,36 @@
                         :prefer-archive (policy-prefer-archive p))
           :last (%serialize-autonomy *last-autonomy*))))
 
+(defun %positive-step-count (value &optional default)
+  "Coerce VALUE to an integer ≥ 1, or DEFAULT when VALUE is not a number."
+  (cond
+    ((integerp value) (max 1 value))
+    ((and (realp value) (not (complexp value)))
+     (max 1 (round value)))
+    (t default)))
+
+(defun %autonomy-policy-from-body (body &key (default-authority :simulate))
+  "Build a policy for one step or loop from BODY, inheriting max-steps
+from the session policy when the body omits it."
+  (let* ((base (ensure-autonomy-policy))
+         (auth-raw (%body-get body :authority :missing))
+         (auth (cond
+                 ((eq auth-raw :missing) default-authority)
+                 ((stringp auth-raw)
+                  (intern (string-upcase auth-raw) :keyword))
+                 (t auth-raw)))
+         (steps-raw (%body-get body :max-steps :missing))
+         (steps (if (eq steps-raw :missing)
+                    (policy-max-steps base)
+                    (%positive-step-count steps-raw (policy-max-steps base))))
+         (adapters (%body-get body :adapters nil))
+         (auto-confirm (%body-get body :auto-confirm nil)))
+    (make-autonomy-policy
+     :authority auth
+     :max-steps steps
+     :adapters (and adapters (not (eq adapters :null)))
+     :auto-confirm (and auto-confirm (not (eq auto-confirm :null))))))
+
 (defun %find-archived-procedure (name)
   "Resolve NAME (symbol or JSON string) to a stored procedure, or NIL.
 Exact match first, then a case-insensitive symbol name so the console can
@@ -802,13 +832,7 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
            (let* ((auth (%body-get body :authority :missing))
                   (pol (if (eq auth :missing)
                            (ensure-autonomy-policy)
-                           (make-autonomy-policy
-                            :authority (if (stringp auth)
-                                           (intern (string-upcase auth) :keyword)
-                                           auth)
-                            :auto-confirm (%body-get body :auto-confirm nil)
-                            :adapters (%body-get body :adapters nil)
-                            :max-steps (or (%body-get body :max-steps) 8))))
+                           (%autonomy-policy-from-body body)))
                   (summary (gp-autonomous-step :policy pol)))
              (values 200 (list :ok t
                                :autonomy (%serialize-autonomy summary)
@@ -817,14 +841,7 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
                                :plan (%serialize-plan *current-plan*)))))
 
           ((and (eq m :post) (string= p "/api/autonomy/loop"))
-           (let* ((auth (%body-get body :authority :simulate))
-                  (pol (make-autonomy-policy
-                        :authority (if (stringp auth)
-                                       (intern (string-upcase auth) :keyword)
-                                       (or auth :simulate))
-                        :auto-confirm (%body-get body :auto-confirm nil)
-                        :adapters (%body-get body :adapters nil)
-                        :max-steps (or (%body-get body :max-steps) 8)))
+           (let* ((pol (%autonomy-policy-from-body body))
                   (summary (gp-autonomous-loop :policy pol
                                                :max-steps (policy-max-steps pol))))
              (values 200 (list :ok t

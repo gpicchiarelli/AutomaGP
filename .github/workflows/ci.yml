@@ -37,3 +37,32 @@ jobs:
 
       - name: Run test suite
         run: ./scripts/run-tests.sh
+
+  test-freebsd:
+    name: Tests (freebsd)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Run test suite in FreeBSD
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.3"
+          sync: rsync
+          copyback: false
+          prepare: |
+            pkg install -y sbcl bash curl git ca_root_nss
+          run: |
+            set -e
+            sbcl --version
+            curl -fsSL https://beta.quicklisp.org/quicklisp.lisp -o /tmp/quicklisp.lisp
+            sbcl --non-interactive \
+              --load /tmp/quicklisp.lisp \
+              --eval "(quicklisp-quickstart:install :path \"$HOME/quicklisp/\")" \
+              --eval '(quit)'
+            mkdir -p "$HOME/quicklisp/local-projects"
+            ln -sfn "$(pwd)" "$HOME/quicklisp/local-projects/automa-gp"
+            rm -f "$HOME/quicklisp/local-projects/system-index.txt"
+            ./scripts/run-tests.sh

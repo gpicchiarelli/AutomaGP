@@ -200,15 +200,21 @@ No fact-like goal is an error."
 Sets mode to :SIMULATE. Returns an EXECUTION-RESULT.
 Step failures signal GP-ERROR with restarts; *DELIBERATIVE-STRATEGY* may
 auto-invoke SKIP/RETRY/ABORT/ASK. Symbolic effects only — no adapters.
-When REMEMBER is true (default), records an episode."
+When the plan recorded an external action that no longer matches, this
+signals before any simulated step and leaves the context mode as it was.
+When the facts no longer support an action that would be handed to an
+adapter, this signals the same way. When REMEMBER is true (default),
+records an episode."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
     (unless (plan-p p)
       (error "GP-SIMULATE requires a plan; call GP-PLAN first or pass :PLAN."))
-    (setf (context-mode ctx) :simulate)
     (setf *last-execution*
-          (simulate-plan p :context ctx
-                         :operators (context-planning-operators ctx)))
+          (call-with-execution-mode
+           ctx :simulate
+           (lambda ()
+             (simulate-plan p :context ctx
+                            :operators (context-planning-operators ctx)))))
     (refresh-working-memory ctx)
     (when remember
       (record-execution-episode! *last-execution*))
@@ -466,7 +472,7 @@ Same name accumulates successes. Autosaves the procedure archive when
   (archive-best goals))
 
 (defun gp-archive-save (&optional (path *procedure-archive-path*))
-  "Write the procedure archive to PATH (default ~/.automa-gp/procedure-archive.sexp)."
+  "Write the procedure archive to PATH (default ~/.automa-gp/procedure-archive.agp)."
   (save-procedure-archive path))
 
 (defun gp-archive-load (&optional (path *procedure-archive-path*))

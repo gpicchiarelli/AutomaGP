@@ -135,7 +135,58 @@
     (is (= 200 code))
     (is (eq t (getf body :ok)))
     (is (eq :done (getf (getf body :autonomy) :status)))
-    (is-false (fact-p '(connection interface-01 computer) (gp-facts)))))
+    (is-false (fact-p '(connection interface-01 computer) (gp-facts))))
+  (multiple-value-bind (code body)
+      (web-api-handle :post "/api/autonomy/step"
+                      '(:authority "execute"
+                        :adapters t
+                        :auto-confirm t))
+    (is (= 200 code))
+    (is (eq t (getf body :ok)))
+    (let ((autonomy (getf body :autonomy)))
+      (is (member (getf autonomy :status) '(:done :halted :continue) :test #'eq))
+      (is (eq :execute (getf autonomy :authority)))))
+  (%auto-studio)
+  (multiple-value-bind (code body)
+      (web-api-handle :post "/api/autonomy/loop"
+                      '(:authority "simulate" :max-steps 3))
+    (is (= 200 code))
+    (is (eq t (getf body :ok)))
+    (let ((autonomy (getf body :autonomy)))
+      (is (eq :done (getf autonomy :status)))
+      (is (eq :completed (getf autonomy :halt)))
+      (is (= 1 (getf autonomy :iterations)))
+      (is (eq :simulate (getf autonomy :authority))))
+    (is-false (fact-p '(connection interface-01 computer) (gp-facts))))
+  (multiple-value-bind (code body)
+      (web-api-handle :get "/api/autonomy")
+    (is (= 200 code))
+    (is (eq t (getf body :ok)))
+    (let ((last (getf body :last)))
+      (is (listp last))
+      (is (eq :done (getf last :status)))
+      (is (eq :completed (getf last :halt)))
+      (is (= 1 (getf last :iterations)))
+      (is (eq :simulate (getf last :authority)))))
+  (multiple-value-bind (code body)
+      (web-api-handle :post "/api/autonomy/policy" '(:max-steps 3))
+    (is (= 200 code))
+    (is (= 3 (getf (getf body :policy) :max-steps))))
+  (multiple-value-bind (code body)
+      (web-api-handle :get "/api/autonomy")
+    (is (= 200 code))
+    (is (= 3 (getf (getf body :policy) :max-steps))))
+  (%auto-studio)
+  (multiple-value-bind (code body)
+      (web-api-handle :post "/api/autonomy/loop" '(:authority "simulate"))
+    (is (= 200 code))
+    (is (eq t (getf body :ok)))
+    (is (eq :done (getf (getf body :autonomy) :status)))
+    (is (= 1 (getf (getf body :autonomy) :iterations))))
+  (multiple-value-bind (code body)
+      (web-api-handle :post "/api/autonomy/policy" '(:max-steps 8))
+    (is (= 200 code))
+    (is (= 8 (getf (getf body :policy) :max-steps)))))
 
 (test autonomy-halts-when-the-external-action-is-refused
   (gp-clear-memory)
@@ -183,6 +234,25 @@
                     (is (not (fact-p (list 'noted path) (gp-facts))))))
              (sb-impl::unencapsulate 'record-plan-episode! 'drop-support))
            (gp-add-fact (list 'seen path))
+           (let ((sim (make-autonomy-policy :authority :simulate
+                                            :learn nil
+                                            :prefer-archive nil)))
+             (unwind-protect
+                  (progn
+                    (sb-impl::encapsulate
+                     'record-plan-episode! 'drop-support-sim
+                     (lambda (next &rest args)
+                       (prog1 (apply next args)
+                         (gp-remove-fact (list 'seen path)))))
+                    (let ((summary (gp-autonomous-step :policy sim)))
+                      (is (eq :halted (getf summary :status)))
+                      (is (eq :external-unsupported (getf summary :halt)))
+                      (is (eq :plan (context-mode (gp-context))))
+                      (is (null (getf summary :execution)))
+                      (is (not (fact-p (list 'noted path) (gp-facts))))
+                      (is-false (file-exists-p marker))))
+               (sb-impl::unencapsulate 'record-plan-episode! 'drop-support-sim)))
+           (gp-add-fact (list 'seen path))
            (unwind-protect
                 (progn
                   (sb-impl::encapsulate
@@ -229,6 +299,30 @@
                       (is (not (fact-p (list 'noted path) (gp-facts))))
                       (is-false (file-exists-p marker))))
                (sb-impl::unencapsulate 'record-plan-episode! 'change-again)))
+           (let ((sim (make-autonomy-policy :authority :simulate
+                                            :learn nil
+                                            :prefer-archive nil)))
+             (unwind-protect
+                  (progn
+                    (sb-impl::encapsulate
+                     'record-plan-episode! 'change-for-sim
+                     (lambda (next &rest args)
+                       (prog1 (apply next args)
+                         (setf (operator-meta
+                                (find-operator (gp-context) 'note-file))
+                               (list :external
+                                     (list :adapter :filesystem
+                                           :op :write-string
+                                           :args (list :path '?path
+                                                       :content "simulated")))))))
+                    (let ((summary (gp-autonomous-step :policy sim)))
+                      (is (eq :halted (getf summary :status)))
+                      (is (eq :external-mismatch (getf summary :halt)))
+                      (is (eq :plan (context-mode (gp-context))))
+                      (is (null (getf summary :execution)))
+                      (is (not (fact-p (list 'noted path) (gp-facts))))
+                      (is-false (file-exists-p marker))))
+               (sb-impl::unencapsulate 'record-plan-episode! 'change-for-sim)))
            (setf (operator-meta (find-operator (gp-context) 'note-file))
                  (list :external
                        (list :adapter :filesystem

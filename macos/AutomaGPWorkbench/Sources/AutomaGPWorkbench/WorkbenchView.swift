@@ -13,6 +13,8 @@ struct AutomaGPWorkbenchApp: App {
 struct WorkbenchView: View {
     @StateObject private var model = WorkbenchModel()
     @State private var confirmExecute = false
+    @State private var confirmAutonomy = false
+    @State private var confirmAutonomyLoop = false
     @FocusState private var nameFocused: Bool
 
     private var repairCount: Int {
@@ -47,6 +49,36 @@ struct WorkbenchView: View {
             Button("Annulla", role: .cancel) {}
         } message: {
             Text(model.executeDialogMessage)
+        }
+        .confirmationDialog(
+            model.authority == "execute"
+                ? "Lanciare un passo autonomo con esecuzione?"
+                : "Lanciare un passo autonomo?",
+            isPresented: $confirmAutonomy,
+            titleVisibility: .visible
+        ) {
+            Button(model.authority == "execute" ? "Passo con esecuzione" : "Passo",
+                   role: model.authority == "execute" ? .destructive : nil) {
+                model.autonomyStep()
+            }
+            Button("Annulla", role: .cancel) {}
+        } message: {
+            Text(model.autonomyDialogMessage)
+        }
+        .confirmationDialog(
+            model.authority == "execute"
+                ? "Lanciare un ciclo autonomo con esecuzione?"
+                : "Lanciare un ciclo autonomo?",
+            isPresented: $confirmAutonomyLoop,
+            titleVisibility: .visible
+        ) {
+            Button(model.authority == "execute" ? "Ciclo con esecuzione" : "Ciclo",
+                   role: model.authority == "execute" ? .destructive : nil) {
+                model.autonomyLoop()
+            }
+            Button("Annulla", role: .cancel) {}
+        } message: {
+            Text(model.autonomyLoopDialogMessage)
         }
     }
 
@@ -265,7 +297,13 @@ struct WorkbenchView: View {
                     Button("Simula") { model.simulate() }
                         .buttonStyle(.borderedProminent)
                         .tint(.orange)
+                        .disabled(!model.externalMatches || model.executeLacksSupport)
                         .keyboardShortcut(.return, modifiers: .command)
+                        .help(!model.externalMatches
+                              ? "L'azione sul computer non è più quella del piano. Pianifica di nuovo."
+                              : model.executeLacksSupport
+                                ? "I fatti non sostengono più l'azione sul computer. Pianifica di nuovo."
+                                : "Applica il piano su una copia. I fatti del contesto restano fermi.")
                     Button("Esegui…") { confirmExecute = true }
                         .disabled(model.executeLacksSupport || !model.externalMatches)
                         .tint(.red)
@@ -300,21 +338,70 @@ struct WorkbenchView: View {
                         .foregroundStyle(.orange)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Picker("Autonomia", selection: Binding(
-                    get: { model.authority == "execute" ? "execute" : "simulate" },
-                    set: { model.setAuthority($0) }
-                )) {
-                    Text("Simula").tag("simulate")
-                    Text("Esegui").tag("execute")
+                HStack {
+                    Picker("Autonomia", selection: Binding(
+                        get: { model.authority == "execute" ? "execute" : "simulate" },
+                        set: { model.setAuthority($0) }
+                    )) {
+                        Text("Simula").tag("simulate")
+                        Text("Esegui").tag("execute")
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .help("Tetto di passo e ciclo autonomi. Non li lancia.")
+                    Button(model.authority == "execute" ? "Passo…" : "Passo") {
+                        if model.authority == "execute" {
+                            confirmAutonomy = true
+                        } else {
+                            model.autonomyStep()
+                        }
+                    }
+                    .disabled(!model.connected)
+                    .tint(model.authority == "execute" ? .red : .accentColor)
+                    .help(model.authority == "execute"
+                          ? "Chiede conferma, poi un ciclo: osserva, pianifica ed esegue. Sul computer solo se il piano nuovo lo richiede."
+                          : "Un ciclo: osserva, pianifica e simula. I fatti del contesto restano fermi.")
+                    Button(model.authority == "execute" ? "Ciclo…" : "Ciclo") {
+                        if model.authority == "execute" {
+                            confirmAutonomyLoop = true
+                        } else {
+                            model.autonomyLoop()
+                        }
+                    }
+                    .disabled(!model.connected)
+                    .tint(model.authority == "execute" ? .red : .accentColor)
+                    .help(model.authority == "execute"
+                          ? "Chiede conferma, poi fino a \(model.autonomyMaxSteps) passi con esecuzione. Si ferma a obiettivo o a un rifiuto."
+                          : "Fino a \(model.autonomyMaxSteps) passi di simulazione. I fatti restano fermi. Si ferma a obiettivo o a un rifiuto.")
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .help("Autorità del ciclo autonomo. Non lancia il piano.")
+                HStack {
+                    Text("Limite ciclo")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Stepper(value: Binding(
+                        get: { model.autonomyMaxSteps },
+                        set: { model.setMaxSteps($0) }
+                    ), in: 1...32) {
+                        Text("\(model.autonomyMaxSteps)")
+                            .font(.caption.monospacedDigit())
+                            .frame(minWidth: 24, alignment: .trailing)
+                    }
+                    .disabled(!model.connected)
+                    .help("Quanti passi al massimo fa Ciclo. Resta nella policy di sessione.")
+                    Spacer(minLength: 0)
+                }
                 Text(model.authority == "execute"
-                     ? "L'autonomia può eseguire."
-                     : "L'autonomia si ferma alla simulazione.")
+                     ? "L'autonomia può eseguire. Passo… e Ciclo… chiedono conferma."
+                     : "L'autonomia si ferma alla simulazione. Fino a \(model.autonomyMaxSteps) passi per ciclo.")
                     .font(.caption)
                     .foregroundStyle(model.authority == "execute" ? Color.red : Color.secondary)
+                if !model.autonomyLastLine.isEmpty {
+                    Text(model.autonomyLastLine)
+                        .font(.caption)
+                        .foregroundStyle(model.autonomyLastIsError ? Color.orange : Color.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .help("Ultimo esito di Passo o Ciclo, anche dopo un aggiornamento.")
+                }
             }
             if let learned = model.learned {
                 VStack(alignment: .leading, spacing: 2) {

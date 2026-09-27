@@ -147,10 +147,11 @@
   "Return (VALUES OK REASON). OK means policy allows running the plan
 at the configured authority (simulate or execute).
 When the plan recorded an external action that no longer matches,
-execution is not authorized, with or without adapters. When adapters
-are requested, a plan that never recorded its actions is not
-authorized either. An external action the facts no longer support is
-not authorized, with or without adapters."
+execution is not authorized, with or without adapters, and simulation
+is not authorized either. When adapters are requested, a plan that
+never recorded its actions is not authorized for execute either. An
+external action the facts no longer support is not authorized for
+execute or simulate, with or without adapters."
   (let ((auth (policy-authority policy)))
     (cond
       ((eq auth :read)
@@ -160,7 +161,13 @@ not authorized, with or without adapters."
       ((not (plan-success plan))
        (values nil :plan-unsuccessful))
       ((eq auth :simulate)
-       (values t :simulate-authorized))
+       (cond
+         ((and (getf (plan-meta plan) :external-actions-recorded)
+               (not (plan-external-actions-match-p plan :context context)))
+          (values nil :external-mismatch))
+         ((not (plan-external-actions-supported-p plan :context context))
+          (values nil :external-unsupported))
+         (t (values t :simulate-authorized))))
       ((eq auth :execute)
        (cond
          ((and (not (plan-external-actions-match-p plan :context context))
@@ -300,15 +307,34 @@ stored in *LAST-AUTONOMY*). Does not loop — see AUTONOMOUS-LOOP."
              (when (eq status :ok)
                (cond
                  ((eq auth :simulate)
-                  (setf (context-mode ctx) :simulate)
-                  (setf execution
-                        (simulate-plan plan :context ctx
-                                       :operators (context-planning-operators ctx)))
-                  (setf *last-execution* execution)
-                  (when remember
-                    (record-execution-episode! execution))
-                  (note :execute :mode :simulate
-                        :success (execution-success execution)))
+                  (handler-case
+                      (progn
+                        (setf execution
+                              (call-with-execution-mode
+                               ctx :simulate
+                               (lambda ()
+                                 (simulate-plan plan :context ctx
+                                                :operators
+                                                (context-planning-operators ctx)))))
+                        (setf *last-execution* execution)
+                        (when remember
+                          (record-execution-episode! execution))
+                        (note :execute :mode :simulate
+                              :success (execution-success execution)))
+                    (error (condition)
+                      (let ((text (princ-to-string condition)))
+                        (cond
+                          ((search "no longer matches" text)
+                           (setf execution nil
+                                 halt :external-mismatch
+                                 status :halted)
+                           (note :refuse :reason :external-mismatch))
+                          ((search "no longer support" text)
+                           (setf execution nil
+                                 halt :external-unsupported
+                                 status :halted)
+                           (note :refuse :reason :external-unsupported))
+                          (t (error condition)))))))
                  ((eq auth :execute)
                   (let ((confirm (or (policy-auto-confirm pol)
                                      (and (policy-confirm-fn pol) t))))

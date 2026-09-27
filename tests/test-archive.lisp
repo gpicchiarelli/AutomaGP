@@ -41,7 +41,7 @@
 
 (test archive-file-roundtrip-and-use-without-search
   (let* ((path (merge-pathnames
-                (format nil "automa-gp-archive-~A.sexp" (get-universal-time))
+                (format nil "automa-gp-archive-~A.agp" (get-universal-time))
                 (uiop:temporary-directory)))
          (*procedure-archive-path* path)
          (*procedure-archive-autosave* t)
@@ -84,7 +84,7 @@
 
 (test archive-autoload-after-clear-image-memory
   (let* ((path (merge-pathnames
-                (format nil "automa-gp-archive-auto-~A.sexp" (get-universal-time))
+                (format nil "automa-gp-archive-auto-~A.agp" (get-universal-time))
                 (uiop:temporary-directory)))
          (*procedure-archive-path* path)
          (*procedure-archive-autosave* t)
@@ -655,7 +655,7 @@
       (is (member '(ready interface-01) (getf step :adds) :test #'equal))
       (is (member '(charge-state interface-01 empty) (getf step :deletes)
                   :test #'equal))))
-  (let ((path (merge-pathnames "automa-gp-stored-effects.sexp"
+  (let ((path (merge-pathnames "automa-gp-stored-effects.agp"
                                (uiop:temporary-directory))))
     (unwind-protect
          (progn

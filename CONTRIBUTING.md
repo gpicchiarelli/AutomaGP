@@ -27,6 +27,7 @@ You need SBCL and Quicklisp. Nothing else is installed globally.
 
 ```sh
 brew install sbcl                      # macOS; on Debian/Ubuntu: apt install sbcl
+                                       # FreeBSD: pkg install sbcl bash curl git ca_root_nss
 curl -fsSL https://beta.quicklisp.org/quicklisp.lisp -o /tmp/quicklisp.lisp
 sbcl --non-interactive --load /tmp/quicklisp.lisp \
      --eval '(quicklisp-quickstart:install)' --eval '(ql:add-to-init-file)'
@@ -54,7 +55,7 @@ Every push to `main` and every pull request runs on GitHub Actions:
 
 | Workflow | What it checks |
 | --- | --- |
-| **CI** (`ci.yml`) | `./scripts/run-tests.sh` on Ubuntu and macOS with a fresh SBCL + Quicklisp. |
+| **CI** (`ci.yml`) | `./scripts/run-tests.sh` on Ubuntu and macOS with a fresh SBCL + Quicklisp, plus a FreeBSD 14.x job (`test-freebsd` via `vmactions/freebsd-vm`). |
 | **Lint** (`lint.yml`) | markdownlint, yamllint, actionlint, shellcheck on `scripts/*.sh`, and a from-scratch `asdf:load-system` of `automa-gp`, `automa-gp/web`, `automa-gp/tests` that fails on compiler warnings. |
 | **macOS Workbench** (`macos-workbench.yml`) | `swift build -c release` of the Workbench, only when `macos/**` changes. |
 | **CodeQL** (`codeql.yml`) | Static analysis of the Swift sources and of the workflows themselves. Common Lisp is not supported by CodeQL. |

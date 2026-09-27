@@ -278,9 +278,23 @@ Establishes CONFIRM restart for irreversible ops when confirmation needed."
 (defun simulate-plan (plan &key context operators
                              (initial-facts nil initial-p))
   "Simulate PLAN steps without mutating any context.
-Records a deliberative execution trace. Step restarts as in Phase 5."
+Records a deliberative execution trace. Step restarts as in Phase 5.
+When the plan recorded an external action that no longer matches, this
+signals before any simulated step, so the result does not report
+success for a plan that must be rebuilt. When the facts no longer
+support an action that would be handed to an adapter, including
+through earlier steps, this also signals before any simulated step."
   (unless (plan-p plan)
     (error "SIMULATE-PLAN requires a PLAN, got ~S" plan))
+  (when (and (fboundp 'plan-external-actions-match-p)
+             (getf (plan-meta plan) :external-actions-recorded)
+             (not (funcall 'plan-external-actions-match-p plan
+                           :context context :operators operators)))
+    (error "The external action no longer matches the plan."))
+  (when (and (fboundp 'plan-external-actions-supported-p)
+             (not (funcall 'plan-external-actions-supported-p plan
+                           :context context :operators operators)))
+    (error "The facts no longer support the external action."))
   (with-trace (:simulate :context-name
                          (or (and context (context-name context))
                              (getf (plan-meta plan) :context)))
@@ -388,7 +402,8 @@ Records a deliberative execution trace. Step restarts as in Phase 5."
 (defun call-with-execution-mode (context mode thunk)
   "Set CONTEXT's mode to MODE while THUNK runs.
 If THUNK signals, restore the mode from before this call and signal again.
-A refusal from EXECUTE-PLAN! therefore leaves the mode unchanged."
+A refusal from EXECUTE-PLAN! or SIMULATE-PLAN therefore leaves the mode
+unchanged."
   (let ((previous (context-mode context)))
     (setf (context-mode context) mode)
     (handler-case (funcall thunk)

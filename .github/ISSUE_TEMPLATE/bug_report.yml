@@ -29,11 +29,23 @@ body:
         - "Altro / Other"
     validations:
       required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Sistema · OS
+      description: Il sistema su cui hai osservato il comportamento. Aggiungi la versione nel campo Passi se conta.
+      options:
+        - macOS
+        - Linux
+        - FreeBSD
+        - Altro / Other
+    validations:
+      required: true
   - type: input
     id: system
     attributes:
-      label: Sistema · System
-      description: macOS o Linux, e la versione.
+      label: Dettaglio sistema · System detail
+      description: Versione del sistema e architettura, se le conosci.
       placeholder: "macOS 15.6, Apple Silicon"
   - type: textarea
     id: steps

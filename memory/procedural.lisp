@@ -75,9 +75,9 @@
   "Session procedural memory. Also the in-memory procedure archive.")
 
 (defvar *procedure-archive-path*
-  (merge-pathnames ".automa-gp/procedure-archive.sexp"
+  (merge-pathnames ".automa-gp/procedure-archive.agp"
                    (user-homedir-pathname))
-  "Durable archive of successful procedures (readable s-expression).")
+  "Durable archive of successful procedures (readable s-expression, .agp).")
 
 (defvar *procedure-archive-autosave* t
   "When true, REMEMBER-PROCEDURE! and SCORE-PROCEDURE! write the archive file.")
@@ -251,11 +251,15 @@ Returns one scored procedure, or NIL when nothing was scored."
   (first (rank-procedures (procedures-for-goals goals memory))))
 
 (defun maybe-autoload-procedure-archive ()
-  "Load the archive file once per image, unless loading or explicitly cleared."
+  "Load the archive file once per image, unless loading or explicitly cleared.
+Prefers *PROCEDURE-ARCHIVE-PATH* (.agp); falls back to a sibling .sexp if present."
   (when (and *procedure-archive-autoload*
              (not *procedure-archive-loaded*)
              (not *loading-procedure-archive*)
-             (probe-file *procedure-archive-path*))
+             (or (probe-file *procedure-archive-path*)
+                 (probe-file (make-pathname
+                              :defaults *procedure-archive-path*
+                              :type "sexp"))))
     (setf *procedure-archive-loaded* t)
     (load-procedure-archive *procedure-archive-path*)))
 

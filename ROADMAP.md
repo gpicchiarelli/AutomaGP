@@ -208,6 +208,12 @@ after that deepens memory, observation, adapters, and the autonomy policy.
 - [x] An autonomous execute halts when the external action is refused (v0.147.0)
 - [x] An unsupported external action refuses before earlier steps apply (v0.148.0)
 - [x] A changed external action refuses before earlier steps apply (v0.149.0)
+- [x] A simulation refuses when the external action no longer matches (v0.150.0)
+- [x] A simulation refuses when the facts no longer support the external action (v0.151.0)
+- [x] The workbench can take one autonomous step (v0.152.0)
+- [x] The workbench can run a bounded autonomous loop (v0.153.0)
+- [x] The workbench shows the last autonomous outcome (v0.154.0)
+- [x] The workbench can set the autonomous loop bound (v0.155.0)
 
 ---
 

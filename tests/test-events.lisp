@@ -95,7 +95,7 @@
                (merge-pathnames
                 (format nil "automa-gp-evt-~A/" (get-universal-time))
                 (uiop:temporary-directory))))
-         (path (merge-pathnames "ctx.sexp" dir)))
+         (path (merge-pathnames "ctx.agp" dir)))
     (unwind-protect
          (progn
            (ensure-directories-exist dir)

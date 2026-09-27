@@ -7,6 +7,79 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions up to 0.12.0 track the phases in `docs/PROMPT.md` §25; later
 versions are the increments listed in `ROADMAP.md`.
 
+## [Unreleased]
+
+### Changed
+
+- Durable archive and snapshot files use the `.agp` extension
+  (`~/.automa-gp/procedure-archive.agp`; `gp-save` / `gp-load` default
+  type). A missing `.agp` archive still loads a sibling `.sexp` once;
+  an explicit `.sexp` path still opens.
+
+## [0.155.0] — 2026-09-27
+
+### Added
+
+- The workbench can set the autonomous loop bound. Limite ciclo posts
+  `max-steps` to the session policy (1–32). Ciclo and a loop request
+  that omits `max-steps` use that policy value instead of a hard-coded
+  eight.
+
+## [0.154.0] — 2026-09-27
+
+### Added
+
+- The workbench shows the last autonomous outcome from
+  `GET /api/autonomy`. After Passo or Ciclo, and on every refresh, the
+  caption under the autonomy controls names the status and halt, and
+  the step count when the last run was a loop. A refused halt stays
+  visible. Disconnect clears it.
+
+## [0.153.0] — 2026-09-27
+
+### Added
+
+- The workbench can run a bounded autonomous loop. Ciclo uses the
+  policy max-steps (default 8). With authority simulate it only
+  simulates; with authority execute, Ciclo… asks for confirmation,
+  then may enable adapters on each step. The loop stops when goals
+  hold, when a step halts, or when the step limit is reached. The
+  notice names the outcome and the step count.
+
+## [0.152.0] — 2026-09-27
+
+### Added
+
+- The workbench can take one autonomous step. With authority simulate,
+  Passo observes, plans, and simulates without changing facts. With
+  authority execute, Passo… asks for confirmation, then may execute;
+  adapters run only after that confirmation, and only if the new plan
+  requires them. The notice names the halt when the step stops.
+
+## [0.151.0] — 2026-09-27
+
+### Fixed
+
+- A simulation refuses when the facts no longer support an external
+  action, including through earlier steps. The refusal happens before
+  any simulated step. The context mode stays as it was. No execution
+  result is recorded. An autonomous simulate halts the same way and
+  does not take another step. The workbench does not offer Simula in
+  that case. When the facts support the action again, simulate and
+  execute run as before.
+
+## [0.150.0] — 2026-09-27
+
+### Fixed
+
+- A simulation refuses when the external action recorded with the plan
+  no longer matches. The refusal happens before any simulated step.
+  The context mode stays as it was. No execution result is recorded.
+  An autonomous simulate halts the same way and does not take another
+  step. The workbench does not offer Simula in that case. Planning
+  again records the action as it is now; simulate and execute then
+  run as before.
+
 ## [0.149.0] — 2026-09-27
 
 ### Fixed

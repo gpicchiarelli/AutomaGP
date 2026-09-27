@@ -33,7 +33,9 @@ core/          events · mea · planner · executor
 - Default authority `:simulate`; adapters still opt-in
 - `prefer-archive` (default true): reuse a scored procedure when its steps
   still apply; otherwise MEA. A live execution of that plan updates the score.
-  Simulation does not. The archive file stays in the persistence service.
+  Simulation does not. The archive file stays in the persistence service
+  (`~/.automa-gp/procedure-archive.agp` by default; snapshot paths without
+  a type also use `.agp`).
 
 ## Workbench, observation, and external actions
 
@@ -138,7 +140,8 @@ The workbench runs it on a confirmed execute only when the list is
 not empty and still matches. When the recorded action no longer
 matches, an execute refuses before any fact changes, whether or not
 adapters were requested, so that step's symbolic effect and any
-earlier step are not applied. The workbench does not offer Esegui.
+earlier step are not applied. A simulation refuses before any
+simulated step. The workbench does not offer Simula or Esegui.
 Planning again records the action as it is now.
 `gp-use-procedure` records the external action of the rebuilt plan.
 It does not invoke the adapter. A confirmed execute with adapters runs
@@ -158,20 +161,30 @@ recorded when the plan was built.
 `plan-external-actions-supported-p` is false when the current facts,
 including the effects of earlier steps, no longer reach an action the
 plan would hand to an adapter. `GET /api/plan` returns that as
-`external-supported`. An execute then refuses before any fact
-changes, whether or not adapters were requested, so an earlier step
-is not applied. The workbench does not offer Esegui in that case.
-Simulation still does not change facts. A precondition produced by an
-earlier step still leaves the action supported. When the facts
-support the action again, an execute without adapters applies the
-steps and leaves the computer alone.
-A refused `gp-run`, including the same refusal from an autonomous
-execute, leaves the context mode as it was and does not record an
-execution. A run that starts still sets the mode to execute.
-An autonomous execute halts, and does not signal, when that action
-no longer matches or the facts no longer support it, with or without
-adapters when the plan recorded its actions. The loop does not take
-another step. When the action is authorized, the execute still runs.
+`external-supported`. An execute or a simulation then refuses before
+any fact changes or simulated step, whether or not adapters were
+requested for execute, so an earlier step is not applied. The
+workbench does not offer Simula or Esegui in that case.
+Simulation still does not change facts when it is allowed. A
+precondition produced by an earlier step still leaves the action
+supported. When the facts support the action again, an execute
+without adapters applies the steps and leaves the computer alone.
+A refused `gp-run` or `gp-simulate`, including the same refusal from an
+autonomous cycle, leaves the context mode as it was and does not
+record an execution. A run that starts still sets the mode to execute
+or simulate.
+An autonomous execute or simulate halts, and does not signal, when that
+action no longer matches or the facts no longer support it, with or
+without adapters when the plan recorded its actions. The loop does not
+take another step. When the action is authorized, the execute or
+simulate still runs. The workbench Passo and Ciclo buttons post `/api/autonomy/step` and
+`/api/autonomy/loop`: simulate authority does not touch facts; execute
+authority asks for confirmation and may enable adapters for that run.
+Ciclo stops at the policy max-steps, when goals hold, or when a step
+halts. The workbench shows that last outcome from `GET /api/autonomy`
+under Passo and Ciclo, including after a refresh. Limite ciclo sets
+that max-steps on the session policy; a loop request without
+`max-steps` inherits it.
 `gp-ask` reads an Italian phrase. A leading `voglio`, `raggiungi`,
 `obiettivo`, `manca`, `fammi`, `ottieni`, or `rendi` is optional: the
 words that remain are the goal. It is recorded only when an operator add,
@@ -218,8 +231,10 @@ unsaid, and the phrase is refused when two goals would fit. A request to
 execute or delete is refused. The plan does not change facts.
 
 The native shell is `macos/AutomaGPWorkbench`. While listening it offers the
-rule name and the fact list; otherwise it offers simulate, and asks before
-execute. Start the Lisp server, then:
+rule name and the fact list; otherwise it offers simulate, confirm before
+execute, and Passo or Ciclo for one autonomous step or a bounded loop. The
+last autonomous outcome stays visible under those controls. Start the Lisp
+server, then:
 
 ```bash
 ./scripts/run-web.sh

@@ -16,6 +16,10 @@
 
 <p align="center">
   <a href="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/ci.yml"><img src="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/ci.yml"><img src="https://img.shields.io/badge/CI-FreeBSD%2014.x-AB2B28.svg" alt="CI on FreeBSD 14.x"></a>
+  <a href="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/lint.yml"><img src="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/lint.yml/badge.svg?branch=main" alt="Lint"></a>
+  <a href="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/macos-workbench.yml"><img src="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/macos-workbench.yml/badge.svg?branch=main" alt="macOS Workbench"></a>
+  <a href="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/codeql.yml"><img src="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/codeql.yml/badge.svg?branch=main" alt="CodeQL"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-63735f.svg" alt="License: BSD-2-Clause"></a>
   <a href="version.lisp"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgpicchiarelli%2FAutomaGP%2Fmain%2Fversion.lisp-expr&search=%22(%5B0-9.%5D%2B)%22&replace=%241&label=version&color=214237" alt="Version, read from version.lisp-expr on main"></a>
   <a href="automa-gp.asd"><img src="https://img.shields.io/badge/Common%20Lisp-SBCL-3f5f72.svg" alt="Common Lisp on SBCL"></a>
@@ -84,9 +88,9 @@ Three surfaces reach the same session. The REPL is primary. The JSON façade in 
 
 ## Memory and the procedure archive
 
-Four memory layers sit beside the context. Working memory is a snapshot of the current facts, goals, and mode. Knowledge memory holds durable facts and rules that can be merged into a context. Episodic memory records plans and executions with their outcome. Procedural memory stores successful plans as named procedures with a success and failure count. `gp-save` and `gp-load` write and read the whole bundle as readable s-expressions.
+Four memory layers sit beside the context. Working memory is a snapshot of the current facts, goals, and mode. Knowledge memory holds durable facts and rules that can be merged into a context. Episodic memory records plans and executions with their outcome. Procedural memory stores successful plans as named procedures with a success and failure count. `gp-save` and `gp-load` write and read the whole bundle as readable s-expressions in `.agp` files (the default type when a path has no extension).
 
-The procedure archive is the part that learns. `gp-remember-procedure` stores the last successful plan under a name and writes the archive to `~/.automa-gp/procedure-archive.sexp`. `gp-plan` consults that archive before searching: an exact goal match comes first, then a procedure whose goals include the request, then a combination of procedures that each cover a part of it. Steps whose extra goals cannot be restored are left aside and a search fills the gap. When a stored step meets a missing precondition, the planner repairs it with other archived procedures, up to sixty-one levels deep, and falls back to plain Means-Ends Analysis past that. A live `gp-run` of a reused procedure updates its score. Simulation leaves the score alone.
+The procedure archive is the part that learns. `gp-remember-procedure` stores the last successful plan under a name and writes the archive to `~/.automa-gp/procedure-archive.agp`. `gp-plan` consults that archive before searching: an exact goal match comes first, then a procedure whose goals include the request, then a combination of procedures that each cover a part of it. Steps whose extra goals cannot be restored are left aside and a search fills the gap. When a stored step meets a missing precondition, the planner repairs it with other archived procedures, up to sixty-one levels deep, and falls back to plain Means-Ends Analysis past that. A live `gp-run` of a reused procedure updates its score. Simulation leaves the score alone.
 
 ```lisp
 (gp-remember-procedure :name 'configure-interface)   ; store and autosave
@@ -121,7 +125,7 @@ A family of *notice* functions brings observations from the machine into the con
 
 ## Adapters and what stays out of reach
 
-Three adapters exist. `filesystem` probes, reads, writes, and deletes files and creates directories. `processes` runs a program and checks whether a pid or a process name is alive. `macos` calls `open`, `hostname`, and `uname`. An operator reaches an adapter only through an `:external` spec in its meta, and only when `*invoke-adapters*` is true for that execute. Before anything runs, `plan-external-actions` names the actions a plan would hand to an adapter, and an execute refuses, with or without adapters, when those actions no longer ground the same way or the facts no longer support them. That refusal happens before any fact changes, so the symbolic effect is not applied and an earlier step is not applied. The goal stays open until a new plan records the action as it is now. An autonomous execute with adapters halts on that refusal instead of signaling, and the loop does not take another step.
+Three adapters exist. `filesystem` probes, reads, writes, and deletes files and creates directories. `processes` runs a program and checks whether a pid or a process name is alive. `macos` calls `open`, `hostname`, and `uname`. An operator reaches an adapter only through an `:external` spec in its meta, and only when `*invoke-adapters*` is true for that execute. Before anything runs, `plan-external-actions` names the actions a plan would hand to an adapter, and an execute refuses, with or without adapters, when those actions no longer ground the same way or the facts no longer support them. A simulation refuses the same way, before any simulated step. That refusal happens before any fact changes, so the symbolic effect is not applied and an earlier step is not applied. The goal stays open until a new plan records the action as it is now. An autonomous execute or simulate halts on that refusal instead of signaling, and the loop does not take another step.
 
 The rest is stated plainly so the README stays a faithful picture.
 
@@ -157,7 +161,7 @@ Each domain pack installs operators, rules, and sometimes reactions into the cur
 | `POST` | `/api/notice-path` · `/api/notice-directory` · `/api/notice-processes` · `/api/notice-terminals` · `/api/notice-terminal-text` · `/api/notice-terminal-screen` · `/api/watch-*` · `/api/watch-*/stop` |
 | `POST` | `/api/archive/remember` · `/api/archive/use` · `/api/archive/score` · `/api/autonomy/policy` · `/api/autonomy/step` · `/api/autonomy/loop` |
 
-The Workbench in [`macos/AutomaGPWorkbench`](macos/AutomaGPWorkbench) is a SwiftPM app for macOS 13 and later. It leads with one next step: while a plan is incomplete, edit the facts and induce an operator from the before and after; otherwise simulate, and confirm before execute. The narrated trace stays folded under the plan. It shows the external actions a confirmed execute would run, and says which were withheld.
+The Workbench in [`macos/AutomaGPWorkbench`](macos/AutomaGPWorkbench) is a SwiftPM app for macOS 13 and later. It leads with one next step: while a plan is incomplete, edit the facts and induce an operator from the before and after; otherwise simulate, and confirm before execute. It can also take one autonomous step or a bounded autonomous loop: with authority simulate, Passo and Ciclo only simulate; with authority execute, Passo… and Ciclo… ask for confirmation before adapters may run. Limite ciclo sets how many steps Ciclo may take. The last autonomous outcome stays under those controls after a refresh. The narrated trace stays folded under the plan. It shows the external actions a confirmed execute would run, and says which were withheld.
 
 ```bash
 ./scripts/run-web.sh
@@ -184,14 +188,14 @@ From a REPL, or from SLIME or SLY:
 (gp-reset)
 ```
 
-Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The web system adds Hunchentoot. Tests add FiveAM. The Workbench needs Xcode command line tools for `swift run`. CI runs the same suite on Ubuntu, so the core is portable; the `macos` adapter and the Terminal.app look are the parts that need a Mac.
+Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The web system adds Hunchentoot. Tests add FiveAM. The Workbench needs Xcode command line tools for `swift run`. CI runs the same suite on Ubuntu, macOS, and FreeBSD 14.x, so the core is portable; the `macos` adapter and the Terminal.app look are the parts that need a Mac. Day-to-day wrappers live in the root `Makefile` (`make test`, `make load`, `make web`, `make lint`).
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
 | [`core`](core) | Context, facts, matcher, unification, rules, queries, operators, MEA, planner, executor, conditions, trace, events, induction, autonomy |
-| [`memory`](memory) | Working, knowledge, episodic, procedural memory and the s-expression persistence service |
+| [`memory`](memory) | Working, knowledge, episodic, procedural memory and `.agp` s-expression persistence |
 | [`adapters`](adapters) | Filesystem, processes, and macOS adapters; external-action naming and refusal |
 | [`domains`](domains) | Five domain packs and the `gp-load-domain` registry |
 | [`interface`](interface) | REPL commands, notice and watch, `gp-ask`, narration, JSON, the web API façade, and the Hunchentoot console |
@@ -204,13 +208,17 @@ Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The 
 
 ## Roadmap and status
 
-The twelve phases in [`ROADMAP.md`](ROADMAP.md) are delivered: context, matching, Means-Ends Analysis, execution, conditions, explanation, memory, adapters, domains, events, web, and policy-gated autonomy. Everything after that is deepening, one small tested increment per version. The most recent series is about external actions: a plan names the adapter actions it would run before anything runs, and an execute refuses, without touching mode or facts, and with or without adapters, when those actions changed or the facts no longer support them. That refusal happens before an earlier step can apply, and the goal stays open. An autonomous execute halts on that refusal and does not run the adapter. `version.lisp` holds the current number and [`CHANGELOG.md`](CHANGELOG.md) has one entry per version.
+The twelve phases in [`ROADMAP.md`](ROADMAP.md) are delivered: context, matching, Means-Ends Analysis, execution, conditions, explanation, memory, adapters, domains, events, web, and policy-gated autonomy. Everything after that is deepening, one small tested increment per version. The most recent series is about external actions and the workbench gate around them: a plan names the adapter actions it would run, execute and simulate refuse when those actions changed or the facts no longer support them, and the workbench can take one autonomous step or a bounded loop, set that bound, and keep showing the last outcome. `version.lisp` holds the current number and [`CHANGELOG.md`](CHANGELOG.md) has one entry per version.
 
 Priority is correctness, then clarity, then testability, then performance.
 
 ## Contributing
 
 Read [`CONTRIBUTING.md`](CONTRIBUTING.md). Keep the system loadable and the tests green, add a FiveAM test with each change, and keep the README, roadmap, and changelog faithful to what the code does. Announce a capability only when it is loadable and tested. Security reports go through [`.github/SECURITY.md`](.github/SECURITY.md). Italian and English are both welcome.
+
+## Citation
+
+If you use AUTOMA GP in academic work, please cite [`CITATION.cff`](CITATION.cff).
 
 ## License
 

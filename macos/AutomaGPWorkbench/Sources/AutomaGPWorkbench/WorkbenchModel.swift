@@ -73,6 +73,9 @@ final class WorkbenchModel: ObservableObject {
     @Published var statusLine = "In attesa del server Lisp."
     @Published var repairDepth = 0
     @Published var authority = "simulate"
+    @Published var autonomyMaxSteps = 8
+    @Published var autonomyLastLine = ""
+    @Published var autonomyLastIsError = false
     @Published var nodes: [TraceNode] = []
     @Published var narration = ""
     @Published var cards: [ArchiveCard] = []
@@ -136,6 +139,20 @@ final class WorkbenchModel: ObservableObject {
             return "I fatti del contesto cambiano. La simulazione li lascia fermi."
         }
         return "I fatti del contesto cambiano. L'azione sul computer non è più quella del piano."
+    }
+
+    var autonomyDialogMessage: String {
+        if authority == "execute" {
+            return "Un passo autonomo osserva, pianifica e può eseguire. Sul computer solo se il piano nuovo lo richiede, e solo dopo questa conferma."
+        }
+        return "Un passo autonomo osserva, pianifica e simula. I fatti del contesto restano fermi."
+    }
+
+    var autonomyLoopDialogMessage: String {
+        if authority == "execute" {
+            return "Fino a \(autonomyMaxSteps) passi. Ognuno osserva, pianifica e può eseguire. Sul computer solo se un piano lo richiede, e solo dopo questa conferma. Il ciclo si ferma a obiettivo raggiunto o a un rifiuto."
+        }
+        return "Fino a \(autonomyMaxSteps) passi di osservazione, piano e simulazione. I fatti del contesto restano fermi. Il ciclo si ferma a obiettivo raggiunto o a un rifiuto."
     }
 
     init() {
@@ -210,7 +227,13 @@ final class WorkbenchModel: ObservableObject {
                     authority = (string(policy["authority"]) ?? "simulate")
                         .replacingOccurrences(of: ":", with: "")
                         .lowercased()
+                    if let steps = policy["max-steps"] as? Int {
+                        autonomyMaxSteps = max(1, steps)
+                    } else if let steps = policy["max-steps"] as? Double {
+                        autonomyMaxSteps = max(1, Int(steps))
+                    }
                 }
+                applyAutonomyLast(autonomy["last"])
                 connected = true
                 statusLine = "v\(version)"
                 if !wasConnected {
@@ -223,6 +246,8 @@ final class WorkbenchModel: ObservableObject {
                 externalWithheld = []
                 externalMatches = true
                 externalSupported = true
+                autonomyLastLine = ""
+                autonomyLastIsError = false
                 statusLine = "Server non raggiungibile su \(baseURL)"
                 report(error.localizedDescription, error: true)
             }
@@ -234,6 +259,53 @@ final class WorkbenchModel: ObservableObject {
         Task {
             _ = try? await post("/api/autonomy/policy", ["authority": value])
             refresh()
+        }
+    }
+
+    func setMaxSteps(_ value: Int) {
+        let steps = min(32, max(1, value))
+        autonomyMaxSteps = steps
+        Task {
+            _ = try? await post("/api/autonomy/policy", ["max-steps": steps])
+            refresh()
+        }
+    }
+
+    func autonomyStep() {
+        Task {
+            await postAutonomy(path: "/api/autonomy/step", loop: false)
+        }
+    }
+
+    func autonomyLoop() {
+        Task {
+            await postAutonomy(path: "/api/autonomy/loop", loop: true)
+        }
+    }
+
+    private func postAutonomy(path: String, loop: Bool) async {
+        let auth = authority == "execute" ? "execute" : "simulate"
+        let touchesComputer = auth == "execute"
+        do {
+            var payload: [String: Any] = ["authority": auth]
+            if loop {
+                payload["max-steps"] = autonomyMaxSteps
+            }
+            if touchesComputer {
+                payload["adapters"] = true
+                payload["auto-confirm"] = true
+            }
+            let body = try await post(path, payload)
+            if let error = string(body["error"]), body["ok"] as? Bool == false {
+                report(error, error: true)
+            } else {
+                applyAutonomyLast(body["autonomy"])
+                let (text, isError) = autonomyOutcome(from: body["autonomy"])
+                report(text, error: isError)
+            }
+            refresh()
+        } catch {
+            report(error.localizedDescription, error: true)
         }
     }
 
@@ -592,6 +664,80 @@ final class WorkbenchModel: ObservableObject {
             } catch {
                 report(error.localizedDescription, error: true)
             }
+        }
+    }
+
+    private func applyAutonomyLast(_ value: Any?) {
+        if value == nil || value is NSNull {
+            autonomyLastLine = ""
+            autonomyLastIsError = false
+            return
+        }
+        let (text, isError) = autonomyOutcome(from: value)
+        if text.isEmpty {
+            autonomyLastLine = ""
+            autonomyLastIsError = false
+        } else {
+            autonomyLastLine = text
+            autonomyLastIsError = isError
+        }
+    }
+
+    private func autonomyOutcome(from value: Any?) -> (String, Bool) {
+        guard let autonomy = value as? [String: Any],
+              string(autonomy["status"]) != nil else {
+            return ("", false)
+        }
+        let status = (string(autonomy["status"]) ?? "")
+            .replacingOccurrences(of: ":", with: "")
+            .lowercased()
+        let halt = (string(autonomy["halt"]) ?? "")
+            .replacingOccurrences(of: ":", with: "")
+            .lowercased()
+        let iterations: Int? = {
+            if let n = autonomy["iterations"] as? Int { return n }
+            if let n = autonomy["iterations"] as? Double { return Int(n) }
+            return nil
+        }()
+        let loop = iterations != nil
+        let label = loop ? "Ciclo autonomo" : "Passo autonomo"
+        let count: String = {
+            guard let n = iterations else { return "" }
+            return n == 1 ? " (1 passo)" : " (\(n) passi)"
+        }()
+        switch (status, halt) {
+        case ("done", _):
+            return ("\(label) concluso\(count).", false)
+        case ("continue", _):
+            return ("\(label): resta da ripianificare\(count).", false)
+        case ("halted", "no-goals"):
+            return ("\(label) fermo\(count): non c'è un obiettivo.", true)
+        case ("halted", "goals-already-satisfied"):
+            return ("\(label): gli obiettivi sono già soddisfatti\(count).", false)
+        case ("halted", "authority-read"):
+            return ("\(label) fermo\(count): l'autorità è solo lettura.", true)
+        case ("halted", "plan-failed"):
+            return ("\(label) fermo\(count): il piano non è riuscito.", true)
+        case ("halted", "external-mismatch"):
+            return ("\(label) fermo\(count): l'azione sul computer non è più quella del piano.", true)
+        case ("halted", "external-unsupported"):
+            return ("\(label) fermo\(count): i fatti non sostengono più l'azione sul computer.", true)
+        case ("halted", "confirmation-required"):
+            return ("\(label) fermo\(count): serve una conferma.", true)
+        case ("halted", "confirmation-denied"):
+            return ("\(label) fermo\(count): conferma rifiutata.", true)
+        case ("halted", "execution-failed"):
+            return ("\(label) fermo\(count): l'esecuzione non è riuscita.", true)
+        case ("halted", "discrepancy"):
+            return ("\(label) fermo\(count): resta una differenza.", true)
+        case ("halted", "max-steps"):
+            return ("\(label) fermo\(count): raggiunto il limite di passi.", true)
+        case ("halted", let reason) where !reason.isEmpty:
+            return ("\(label) fermo\(count) (\(reason)).", true)
+        case ("halted", _):
+            return ("\(label) fermo\(count).", true)
+        default:
+            return ("\(label) concluso\(count).", false)
         }
     }
 

@@ -231,14 +231,24 @@ Separate from the planner and from full session snapshots."
                                (procedural-memory-procedures mem))))
     path))
 
+(defun %procedure-archive-read-path (path)
+  "PATH if it exists; else a sibling .sexp when PATH's type is agp (legacy)."
+  (let ((p (uiop:ensure-pathname path :want-pathname t)))
+    (or (probe-file p)
+        (when (equalp (pathname-type p) "agp")
+          (probe-file (make-pathname :defaults p :type "sexp")))
+        p)))
+
 (defun load-procedure-archive (&optional (path *procedure-archive-path*))
   "Merge procedures from PATH into session procedural memory (same name wins).
-Returns the memory store."
+Returns the memory store. If PATH is a missing .agp file, tries a sibling
+.sexp once (pre-rename archives). Explicit .sexp paths still load directly."
   (let* ((*loading-procedure-archive* t)
-         (form (read-sexp-file path)))
+         (resolved (%procedure-archive-read-path path))
+         (form (read-sexp-file resolved)))
     (unless (and (consp form)
                  (eq (getf form :kind) :automa-gp-procedure-archive))
-      (error "Not an AUTOMA GP procedure archive: ~A" path))
+      (error "Not an AUTOMA GP procedure archive: ~A" resolved))
     (let ((memory (ensure-procedural-memory)))
       (dolist (sexp (getf form :procedures))
         (install-procedure! (deserialize-procedure sexp) memory))

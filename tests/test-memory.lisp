@@ -62,7 +62,7 @@
 
 (test persistence-snapshot-roundtrip
   (let* ((path (merge-pathnames
-                (format nil "automa-gp-snap-~A.sexp" (get-universal-time))
+                (format nil "automa-gp-snap-~A.agp" (get-universal-time))
                 (uiop:temporary-directory))))
     (unwind-protect
          (progn
@@ -98,11 +98,11 @@
          (progn
            (ensure-directories-exist dir)
            (plan-for '((a 1)) '((a 1)) nil)
-           (is (null (uiop:directory-files dir "*.sexp"))))
+           (is (null (uiop:directory-files dir "*.agp"))))
       (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
 
 (test context-only-persist
-  (let ((path (merge-pathnames "automa-gp-ctx-only.sexp"
+  (let ((path (merge-pathnames "automa-gp-ctx-only.agp"
                                (uiop:temporary-directory))))
     (unwind-protect
          (progn
