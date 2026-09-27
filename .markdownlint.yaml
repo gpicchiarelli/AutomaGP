@@ -1,0 +1,32 @@
+# markdownlint rules for AUTOMA GP.
+# The README opens with an HTML hero and badge block; the CHANGELOG repeats
+# "### Added / ### Fixed" under every version. Rules below allow that.
+
+default: true
+
+# Long lines: prose, badge URLs, and tables are wrapped by the editor, not the linter.
+MD013: false
+
+# Inline HTML is used for the hero image, logo <picture>, and centered badges.
+MD033: false
+
+# The README does not start with an H1 (it starts with the hero block).
+MD041: false
+
+# Community files are bilingual: one H1 for Italian, one for English.
+MD025: false
+
+# Duplicate headings are fine when they sit under different parents
+# (e.g. "### Fixed" under each CHANGELOG version).
+MD024:
+  siblings_only: true
+
+# Emphasis used as a caption/label is acceptable in this project's docs.
+MD036: false
+
+# Ordered lists may use 1. 1. 1. or 1. 2. 3.
+MD029:
+  style: one_or_ordered
+
+# Allow bare URLs in prose (the CHANGELOG cites them frequently).
+MD034: false

@@ -4,31 +4,36 @@ on:
   push:
     branches: [main, "cursor/**"]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
-    name: SBCL tests
-    runs-on: ubuntu-latest
+    name: Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out
+        uses: actions/checkout@v7
 
-      - name: Install SBCL
-        run: sudo apt-get update && sudo apt-get install -y sbcl
+      - name: Set up SBCL and Quicklisp
+        uses: ./.github/actions/setup-lisp
 
-      - name: Install Quicklisp
+      - name: Show versions
         run: |
-          curl -fsSL https://beta.quicklisp.org/quicklisp.lisp -o /tmp/quicklisp.lisp
-          sbcl --non-interactive --load /tmp/quicklisp.lisp \
-            --eval '(quicklisp-quickstart:install :path "/home/runner/quicklisp/")' \
-            --eval '(quit)'
+          sbcl --version
+          tr -d '"' < version.lisp-expr | sed 's/^/automa-gp /'
 
-      - name: Link project into local-projects
-        run: |
-          mkdir -p /home/runner/quicklisp/local-projects
-          ln -sfn "$GITHUB_WORKSPACE" /home/runner/quicklisp/local-projects/automa-gp
-
-      - name: Run tests
-        run: |
-          sbcl --non-interactive \
-            --load /home/runner/quicklisp/setup.lisp \
-            --load "$GITHUB_WORKSPACE/scripts/run-tests.lisp"
+      - name: Run test suite
+        run: ./scripts/run-tests.sh

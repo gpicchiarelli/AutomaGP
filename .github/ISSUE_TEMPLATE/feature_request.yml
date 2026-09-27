@@ -1,0 +1,50 @@
+name: Proposta · Feature request
+description: Un'idea per l'agente simbolico sul proprio computer. / An idea for the symbolic agent on your own machine.
+title: "[proposta] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Italiano o English. Una buona proposta dice a quale parte del programma appartiene, e che cosa il programma deve poter mostrare quando è finita.
+        A good proposal names the part of the program it belongs to, and what the program must be able to show once it is done.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Vedi ROADMAP.md. Le dodici fasi sono nel nucleo; il lavoro successivo approfondisce queste aree.
+      options:
+        - "Pianificazione e Means-Ends Analysis"
+        - "Memoria e archivio delle procedure"
+        - "Osservazione (notice e watch)"
+        - "Adattatori e azioni esterne"
+        - "Domini"
+        - "Eventi e autonomia"
+        - "Frasi in italiano (gp-ask)"
+        - "Console web e Workbench macOS"
+        - "Chiarimento o correzione di ciò che c'è già"
+        - "Non lo so ancora"
+    validations:
+      required: true
+  - type: textarea
+    id: sense
+    attributes:
+      label: Il senso · Why
+      description: >-
+        In che modo questa idea rende più chiaro, o più capace, un agente simbolico sulla propria macchina.
+        / How this makes a symbolic agent on one's own machine clearer, or more capable.
+    validations:
+      required: true
+  - type: textarea
+    id: done
+    attributes:
+      label: Come si capisce che è fatta · Definition of done
+      description: Un fatto osservabile. Un test, una traccia, un file, un piano. / Something observable. A test, a trace, a file, a plan.
+    validations:
+      required: true
+  - type: textarea
+    id: sketch
+    attributes:
+      label: Abbozzo · Sketch (facoltativo · optional)
+      description: Operatori, fatti, o una sessione REPL immaginata. / Operators, facts, or an imagined REPL session.
+      render: lisp

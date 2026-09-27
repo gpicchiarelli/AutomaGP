@@ -1,0 +1,21 @@
+# yamllint configuration for workflows, Dependabot, and issue forms.
+extends: default
+
+ignore: |
+  .build/
+  node_modules/
+
+rules:
+  line-length:
+    max: 160
+    allow-non-breakable-inline-mappings: true
+  document-start: disable
+  truthy:
+    # GitHub Actions uses the bare key `on:`.
+    allowed-values: ["true", "false", "on"]
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: disable
+  braces:
+    max-spaces-inside: 1

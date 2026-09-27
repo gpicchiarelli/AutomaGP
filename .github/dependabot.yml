@@ -1,0 +1,44 @@
+version: 2
+updates:
+  # Actions used by the workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Rome
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Actions used inside the composite setup action.
+  - package-ecosystem: github-actions
+    directory: /.github/actions/setup-lisp
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Rome
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # SwiftPM manifest of the macOS Workbench (no dependencies today; kept so
+  # any future package gets updates).
+  - package-ecosystem: swift
+    directory: /macos/AutomaGPWorkbench
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Rome
+    labels: ["dependencies", "macos"]
+    commit-message:
+      prefix: "macos"

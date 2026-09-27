@@ -1,4 +1,8 @@
-# Architecture (Phases 1–12)
+# Architecture
+
+Three surfaces reach one Lisp session. The REPL is primary; the JSON
+façade and the Hunchentoot console are thin layers over it; the macOS
+Workbench is a native window over that server.
 
 ```text
 macOS app →  http://127.0.0.1:47391  →  web-api-handle  →  core
@@ -31,7 +35,10 @@ core/          events · mea · planner · executor
   still apply; otherwise MEA. A live execution of that plan updates the score.
   Simulation does not. The archive file stays in the persistence service.
 
-## Workbench (v0.123.0)
+## Workbench, observation, and external actions
+
+This section is the detailed contract behind the summary in the README.
+Each sentence corresponds to a tested behaviour.
 
 `gp-narrate` speaks the recorded trace in Italian. A failed `gp-plan` opens
 a listening session. `gp-induce-rule` turns the manual before/after change
@@ -48,8 +55,123 @@ when a registered reaction matches that event. It does not walk a
 directory, watch the terminal, or reset the listening before-state.
 `gp-notice-directory` looks once at the files in one existing directory,
 asserts each file that reaction accepts, and applies the reaction so its
-facts and goals enter the context. It does not enter subdirectories,
-watch processes, plan, or run adapters.
+facts and goals enter the context. It enters subdirectories. A
+subdirectory that is a symbolic link is not entered. It does not watch
+processes, plan, or run adapters.
+`gp-watch-directory` repeats that look until `gp-stop-directory-watch`
+or `gp-reset`. A file created while the watch runs is noticed on a
+later look. The watch still does not plan or run adapters.
+`gp-notice-processes` looks once at each process a `process-running`
+reaction already names. A running pid or name is asserted and the
+reaction's facts and goals enter the context. A variable does not name
+a process. It does not list the process table, watch the terminal,
+plan, or run adapters.
+`gp-watch-processes` repeats that look until `gp-stop-process-watch`
+or `gp-reset`. A process that starts while the watch runs is noticed
+on a later look, when a reaction already names it. The watch still
+does not list the process table, read a terminal, plan, or run
+adapters.
+`gp-notice-terminals` looks once at each terminal a `terminal-open`
+reaction already names. The name is the tty `ps` prints, such as
+`ttys000`. An open one is asserted and the reaction's facts and goals
+enter the context. A variable does not name a terminal. It does not
+list the open terminals, read what is written there, stay listening,
+plan, or run adapters.
+`gp-watch-terminals` repeats that look until `gp-stop-terminal-watch`
+or `gp-reset`. A terminal that opens while the watch runs is noticed
+on a later look, when a reaction already names it. The watch still
+does not list the open terminals, read what is written there, plan,
+or run adapters.
+`gp-notice-terminal-text` looks once for a text a `terminal-text`
+reaction already names, in the transcript file that reaction names.
+The text is an exact sequence of characters. A symbolic link is not
+followed, and a device is not opened. The rest of the file is not
+returned. It does not stay listening, plan, or run adapters.
+`gp-watch-terminal-text` repeats that read until
+`gp-stop-terminal-text-watch` or `gp-reset`. A text that appears while
+the watch runs is noticed on a later look, when a reaction already
+names it. The watch still does not follow a link, open a device,
+return the rest of the file, read a Terminal.app tab, plan, or run
+adapters.
+`gp-notice-terminal-screen` looks once for a text a `terminal-screen`
+reaction already names, on the Terminal.app tab whose tty that
+reaction names. The text is an exact sequence of characters. The rest
+of the screen is not returned. The look does not type and does not
+run a command in the tab. If Terminal.app is closed or does not
+answer within two seconds, that text is skipped. It does not stay
+listening, plan, or run adapters.
+`gp-watch-terminal-screen` repeats that look until
+`gp-stop-terminal-screen-watch` or `gp-reset`. A text that appears
+while the watch runs is noticed on a later look, when a reaction
+already names it and Terminal.app answers. The watch still does not
+type, run a command in the tab, return the rest of the screen, plan,
+or run adapters.
+Those five watches share one start, repeat, and stop. Each kind has
+its own lock. Stopping one leaves the others. A later look that fails
+keeps the facts from the previous look. The screen watch allows three
+extra seconds for its look to finish; the others allow two.
+The slot is taken before the first look. A second start of that kind
+fails at once. A stop or `gp-reset` during that look does not leave
+the repeat running, including a directory watch whose path is not
+known yet. A first look that signals leaves the slot empty.
+A stop during the look keeps the target already accepted and does not
+record the next file, process, terminal, transcript line, or tab text.
+The look does not hold its lock while it reads. A notice that is not
+a watch still records every target.
+A stop during the directory walk leaves out every file not yet
+accepted. A stop during the Terminal.app read stops that osascript and
+does not record the tab. A target already accepted stays.
+A process check and a transcript read during a notice look use that
+same wait. A stop drops the check or the read still open, and that
+target is not recorded. A match split across two reads of a transcript
+is still found when the look is not stopped. `process-running-p`
+outside a notice look is unchanged.
+`gp-plan-open-goals` plans those goals. It does not change facts,
+simulate, or execute. No fact-like goal is an error.
+`POST /api/plan-open-goals` returns that plan.
+`plan-external-actions` names the adapter action that plan would run,
+with arguments grounded from the step. It does not invoke the adapter.
+An operator removed after the plan contributes nothing.
+`GET /api/plan` includes that list, recorded when the plan was built,
+and whether it still matches. Simulation does not run it.
+The workbench runs it on a confirmed execute only when the list is
+not empty and still matches. When the recorded action no longer
+matches, an execute refuses before any fact changes, whether or not
+adapters were requested, so that step's symbolic effect and any
+earlier step are not applied. The workbench does not offer Esegui.
+Planning again records the action as it is now.
+`gp-use-procedure` records the external action of the rebuilt plan.
+It does not invoke the adapter. A confirmed execute with adapters runs
+that action when the operator is still the one recorded. When the
+operator is gone, the stored effects still apply and no command is
+invented. An effects-only step, whose preconditions no longer hold,
+applies the symbolic leftovers and does not run the external action.
+That step is marked withheld when adapters were requested. Simulation
+and an execute without adapters leave the computer alone and do not
+mark the step. The workbench says so after a confirmed execute.
+`plan-external-actions` omits that step. `plan-external-actions-withheld`
+names it, and `GET /api/plan` returns it as `external-withheld`.
+The workbench does not offer it as an action that will run.
+Changing the operator of that step does not refuse the execute and
+does not run the command. The withheld action shown is the one
+recorded when the plan was built.
+`plan-external-actions-supported-p` is false when the current facts,
+including the effects of earlier steps, no longer reach an action the
+plan would hand to an adapter. `GET /api/plan` returns that as
+`external-supported`. An execute then refuses before any fact
+changes, whether or not adapters were requested, so an earlier step
+is not applied. The workbench does not offer Esegui in that case.
+Simulation still does not change facts. A precondition produced by an
+earlier step still leaves the action supported. When the facts
+support the action again, an execute without adapters applies the
+steps and leaves the computer alone.
+A refused `gp-run`, including the same refusal from an autonomous
+execute, leaves the context mode as it was and does not record an
+execution. A run that starts still sets the mode to execute.
+An autonomous execute halts, and does not signal, when that action
+no longer matches or the facts no longer support it, with or without
+adapters when the plan recorded its actions. The loop does not take
+another step. When the action is authorized, the execute still runs.
 `gp-ask` reads an Italian phrase. A leading `voglio`, `raggiungi`,
 `obiettivo`, `manca`, `fammi`, `ottieni`, or `rendi` is optional: the
 words that remain are the goal. It is recorded only when an operator add,
@@ -129,11 +251,14 @@ the request. Those extra goals are applied. When they cannot be restored, the st
 that serve the request are kept and the others are left aside. A search
 fills anything they leave. If the useful steps cannot run either, that
 procedure is skipped. The stored steps then continue.
-Adapters are not invoked for a recorded step. A high-risk or irreversible
-step still requires confirmation on a live run.
+A recorded step runs its external action only on a confirmed execute with
+adapters, and only when its operator is still the one recorded; the
+section above states the full rule. A high-risk or irreversible step still
+requires confirmation on a live run.
 
 ## Dependency policy
 
-Core: ANSI CL + ASDF + UIOP.  
-Web (optional): Hunchentoot.  
+Core: ANSI Common Lisp, ASDF, UIOP.
+Web (optional): Hunchentoot.
 Tests: FiveAM.
+Workbench: Swift 5.9, macOS 13 or later, no packages.

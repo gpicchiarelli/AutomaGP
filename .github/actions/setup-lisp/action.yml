@@ -1,0 +1,75 @@
+name: Set up SBCL and Quicklisp
+description: >-
+  Installs SBCL (apt on Linux, Homebrew on macOS), installs Quicklisp under
+  ~/quicklisp, links this checkout into local-projects, and pre-fetches the
+  Quicklisp libraries the system needs. Everything under ~/quicklisp and the
+  ASDF output cache is restored from / saved to the Actions cache.
+
+inputs:
+  prefetch:
+    description: Quicklisp systems to fetch and compile ahead of time (Lisp list syntax).
+    required: false
+    default: '("fiveam" "hunchentoot")'
+
+runs:
+  using: composite
+  steps:
+    - name: Install SBCL (Linux)
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq --no-install-recommends sbcl
+        sbcl --version
+
+    - name: Install SBCL (macOS)
+      if: runner.os == 'macOS'
+      shell: bash
+      env:
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+        HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      run: |
+        brew list --versions sbcl >/dev/null 2>&1 || brew install sbcl
+        sbcl --version
+
+    - name: Restore Quicklisp and ASDF cache
+      id: ql-cache
+      uses: actions/cache@v6
+      with:
+        path: |
+          ~/quicklisp
+          ~/.cache/common-lisp
+        key: quicklisp-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('automa-gp.asd', '.github/actions/setup-lisp/action.yml') }}
+        restore-keys: |
+          quicklisp-${{ runner.os }}-${{ runner.arch }}-
+
+    - name: Install Quicklisp
+      if: steps.ql-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        if [ -f "$HOME/quicklisp/setup.lisp" ]; then
+          echo "Quicklisp already present at $HOME/quicklisp"
+          exit 0
+        fi
+        curl -fsSL https://beta.quicklisp.org/quicklisp.lisp -o /tmp/quicklisp.lisp
+        sbcl --non-interactive \
+          --load /tmp/quicklisp.lisp \
+          --eval "(quicklisp-quickstart:install :path \"$HOME/quicklisp/\")" \
+          --eval '(quit)'
+
+    - name: Link checkout into local-projects
+      shell: bash
+      run: |
+        mkdir -p "$HOME/quicklisp/local-projects"
+        ln -sfn "$GITHUB_WORKSPACE" "$HOME/quicklisp/local-projects/automa-gp"
+        rm -f "$HOME/quicklisp/local-projects/system-index.txt"
+
+    - name: Prefetch Quicklisp dependencies
+      shell: bash
+      env:
+        PREFETCH: ${{ inputs.prefetch }}
+      run: |
+        sbcl --non-interactive \
+          --load "$HOME/quicklisp/setup.lisp" \
+          --eval "(ql:quickload '$PREFETCH :silent t)" \
+          --eval '(quit)'

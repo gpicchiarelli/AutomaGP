@@ -1,0 +1,71 @@
+# Path-based labels for pull requests (actions/labeler v5 syntax).
+# Label names match the repository's label set.
+
+planner:
+  - changed-files:
+      - any-glob-to-any-file:
+          - core/**
+          - packages.lisp
+          - tests/test-planner.lisp
+          - tests/test-mea.lisp
+          - tests/test-executor.lisp
+          - tests/test-conditions.lisp
+          - tests/test-explanation.lisp
+          - tests/test-autonomy.lisp
+          - tests/test-events.lisp
+
+memory:
+  - changed-files:
+      - any-glob-to-any-file:
+          - memory/**
+          - tests/test-memory.lisp
+          - tests/test-persistence.lisp
+          - tests/test-archive.lisp
+
+adapters:
+  - changed-files:
+      - any-glob-to-any-file:
+          - adapters/**
+          - interface/notice.lisp
+          - tests/test-adapters.lisp
+
+domains:
+  - changed-files:
+      - any-glob-to-any-file:
+          - domains/**
+          - tests/test-domains.lisp
+
+workbench:
+  - changed-files:
+      - any-glob-to-any-file:
+          - macos/**
+          - interface/web.lisp
+          - interface/web-api.lisp
+          - interface/json.lisp
+          - scripts/run-web.sh
+          - tests/test-web.lisp
+          - tests/test-workbench.lisp
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/*.md"
+          - docs/**
+          - examples/**
+          - assets/**
+          - CITATION.cff
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - .github/**
+          - .devcontainer/**
+          - Dockerfile
+          - Makefile
+          - .pre-commit-config.yaml
+          - .editorconfig
+          - .markdownlint.yaml
+          - .markdownlint-cli2.yaml
+          - .yamllint.yaml
+          - scripts/run-tests.sh
+          - scripts/run-tests.lisp

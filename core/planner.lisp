@@ -85,10 +85,15 @@ Stores operators and deliberative trace in plan meta."
   (let* ((state (context-all-facts context))
          (g (or goals (normalize-planning-goals (goals-of context))))
          (ops (or operators (context-planning-operators context))))
-    (plan-for state g ops
-              :context-name (context-name context)
-              :meta (list :context (context-name context)
-                          :operators ops))))
+    (let ((plan (plan-for state g ops
+                          :context-name (context-name context)
+                          :meta (list :context (context-name context)
+                                      :operators ops))))
+      (when (fboundp 'remember-plan-external-actions)
+        (funcall 'remember-plan-external-actions plan
+                 :context context
+                 :operators ops))
+      plan)))
 
 (defun plan-length (plan)
   (length (plan-steps plan)))

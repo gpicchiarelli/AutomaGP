@@ -414,6 +414,7 @@
    #:gp-query
    #:gp-infer
    #:gp-plan
+   #:gp-plan-open-goals
    #:gp-last-plan
    #:gp-simulate
    #:gp-run
@@ -462,6 +463,10 @@
    #:adapter-open
    #:macos-dispatch
    #:operator-external-spec
+   #:plan-external-actions
+   #:plan-external-actions-withheld
+   #:plan-external-actions-supported-p
+   #:plan-external-actions-match-p
    #:invoke-external-spec
    #:maybe-invoke-external!
    #:with-adapters-enabled
@@ -504,6 +509,25 @@
    #:process-pending-events!
    #:gp-notice-path
    #:gp-notice-directory
+   #:gp-watch-directory
+   #:gp-stop-directory-watch
+   #:gp-directory-watch
+   #:gp-notice-processes
+   #:gp-watch-processes
+   #:gp-stop-process-watch
+   #:gp-process-watch
+   #:gp-notice-terminals
+   #:gp-watch-terminals
+   #:gp-stop-terminal-watch
+   #:gp-terminal-watch
+   #:gp-notice-terminal-text
+   #:gp-watch-terminal-text
+   #:gp-stop-terminal-text-watch
+   #:gp-terminal-text-watch
+   #:gp-notice-terminal-screen
+   #:gp-watch-terminal-screen
+   #:gp-stop-terminal-screen-watch
+   #:gp-terminal-screen-watch
    #:gp-interpret
    #:gp-ask
    #:gp-name-operator

@@ -1,0 +1,70 @@
+name: CodeQL
+
+# CodeQL has no Common Lisp support. It covers the two languages this repo
+# does have: Swift (the macOS Workbench) and GitHub Actions workflows.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "macos/**"
+      - ".github/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "macos/**"
+      - ".github/**"
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: swift
+            runs-on: macos-latest
+            build-mode: manual
+          - language: actions
+            runs-on: ubuntu-latest
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config: |
+            paths:
+              - macos
+              - .github
+            paths-ignore:
+              - macos/AutomaGPWorkbench/.build
+
+      - name: Build the Workbench (Swift)
+        if: matrix.language == 'swift'
+        working-directory: macos/AutomaGPWorkbench
+        run: swift build -c debug
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

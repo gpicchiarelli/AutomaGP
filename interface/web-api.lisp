@@ -38,14 +38,37 @@
 
 (defun %serialize-plan (plan)
   (if (plan-p plan)
-      (list :success (and (plan-success plan) t)
-            :goals (json-array (plan-goals plan))
-            :steps (json-array (mapcar #'%serialize-step (plan-steps plan)))
-            :remaining (json-array (plan-remaining plan))
-            :operators-used (json-array (plan-operators-used plan))
-            :length (plan-length plan)
-            :cost (plan-cost plan)
-            :from-procedure (or (getf (plan-meta plan) :from-procedure) :null))
+      (let* ((ctx (ensure-current-context))
+             (recorded (getf (plan-meta plan) :external-actions-recorded))
+             (live (plan-external-actions plan :context ctx))
+             (withheld (plan-external-actions-withheld plan :context ctx)))
+        (list :success (and (plan-success plan) t)
+              :goals (json-array (plan-goals plan))
+              :steps (json-array (mapcar #'%serialize-step (plan-steps plan)))
+              :remaining (json-array (plan-remaining plan))
+              :operators-used (json-array (plan-operators-used plan))
+              :length (plan-length plan)
+              :cost (plan-cost plan)
+              :from-procedure (or (getf (plan-meta plan) :from-procedure) :null)
+              :external (json-array
+                         (if recorded
+                             (getf (plan-meta plan) :external-actions)
+                             live))
+              :external-matches
+              (if recorded
+                  (and (plan-external-actions-match-p plan :context ctx) t)
+                  (and (null live) t))
+              :external-withheld
+              (json-array
+               (if recorded
+                   (getf (plan-meta plan) :external-actions-withheld)
+                   withheld))
+              :external-supported
+              (and (or (null (if recorded
+                                 (getf (plan-meta plan) :external-actions)
+                                 live))
+                       (plan-external-actions-supported-p plan :context ctx))
+                   t)))
       :null))
 
 (defun %serialize-execution (ex)
@@ -94,6 +117,21 @@
           :facts (length (gp-facts))
           :repair-depth *procedure-repair-archive-depth*
           :listening (and (observation-active-p) t)
+          :directory-watch (or (and (fboundp 'gp-directory-watch)
+                                    (gp-directory-watch))
+                               :null)
+          :process-watch (or (and (fboundp 'gp-process-watch)
+                                  (gp-process-watch))
+                             :null)
+          :terminal-watch (or (and (fboundp 'gp-terminal-watch)
+                                   (gp-terminal-watch))
+                              :null)
+          :terminal-text-watch (or (and (fboundp 'gp-terminal-text-watch)
+                                        (gp-terminal-text-watch))
+                                   :null)
+          :terminal-screen-watch (or (and (fboundp 'gp-terminal-screen-watch)
+                                          (gp-terminal-screen-watch))
+                                     :null)
           :listening-missing
           (json-array (if (observation-active-p)
                           (getf *observation* :missing)
@@ -347,6 +385,131 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
              (values 200 (list :ok t :fact fact
                                :facts (json-array (gp-facts))))))
 
+          ((and (eq m :post) (string= p "/api/watch-directory"))
+           (let ((path (%body-get body :path))
+                 (interval (%body-get body :interval 1)))
+             (unless (stringp path)
+               (error "watch-directory requires :path string"))
+             (unless (realp interval)
+               (error "watch-directory requires :interval number"))
+             (let ((noticed (gp-watch-directory path :interval interval)))
+               (values 200 (list :ok t
+                                 :path (gp-directory-watch)
+                                 :noticed (json-array noticed)
+                                 :facts (json-array (gp-facts))
+                                 :goals (json-array (gp-goals)))))))
+
+          ((and (eq m :post) (string= p "/api/watch-directory/stop"))
+           (let ((noticed (gp-stop-directory-watch)))
+             (values 200 (list :ok t
+                               :noticed (json-array noticed)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/watch-processes"))
+           (let ((interval (%body-get body :interval 1)))
+             (unless (realp interval)
+               (error "watch-processes requires :interval number"))
+             (let ((noticed (gp-watch-processes :interval interval)))
+               (values 200 (list :ok t
+                                 :watching (gp-process-watch)
+                                 :noticed (json-array noticed)
+                                 :facts (json-array (gp-facts))
+                                 :goals (json-array (gp-goals)))))))
+
+          ((and (eq m :post) (string= p "/api/watch-processes/stop"))
+           (let ((noticed (gp-stop-process-watch)))
+             (values 200 (list :ok t
+                               :noticed (json-array noticed)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/watch-terminals"))
+           (let ((interval (%body-get body :interval 1)))
+             (unless (realp interval)
+               (error "watch-terminals requires :interval number"))
+             (let ((noticed (gp-watch-terminals :interval interval)))
+               (values 200 (list :ok t
+                                 :watching (gp-terminal-watch)
+                                 :noticed (json-array noticed)
+                                 :facts (json-array (gp-facts))
+                                 :goals (json-array (gp-goals)))))))
+
+          ((and (eq m :post) (string= p "/api/watch-terminals/stop"))
+           (let ((noticed (gp-stop-terminal-watch)))
+             (values 200 (list :ok t
+                               :noticed (json-array noticed)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/watch-terminal-text"))
+           (let ((interval (%body-get body :interval 1)))
+             (unless (realp interval)
+               (error "watch-terminal-text requires :interval number"))
+             (let ((noticed (gp-watch-terminal-text :interval interval)))
+               (values 200 (list :ok t
+                                 :watching (gp-terminal-text-watch)
+                                 :noticed (json-array noticed)
+                                 :facts (json-array (gp-facts))
+                                 :goals (json-array (gp-goals)))))))
+
+          ((and (eq m :post) (string= p "/api/watch-terminal-text/stop"))
+           (let ((noticed (gp-stop-terminal-text-watch)))
+             (values 200 (list :ok t
+                               :noticed (json-array noticed)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/watch-terminal-screen"))
+           (let ((interval (%body-get body :interval 1)))
+             (unless (realp interval)
+               (error "watch-terminal-screen requires :interval number"))
+             (let ((noticed (gp-watch-terminal-screen :interval interval)))
+               (values 200 (list :ok t
+                                 :watching (gp-terminal-screen-watch)
+                                 :noticed (json-array noticed)
+                                 :facts (json-array (gp-facts))
+                                 :goals (json-array (gp-goals)))))))
+
+          ((and (eq m :post) (string= p "/api/watch-terminal-screen/stop"))
+           (let ((noticed (gp-stop-terminal-screen-watch)))
+             (values 200 (list :ok t
+                               :noticed (json-array noticed)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/notice-terminal-screen"))
+           (let ((noticed (gp-notice-terminal-screen)))
+             (values 200 (list :ok t
+                               :noticed (json-array noticed)
+                               :listening (and (observation-active-p) t)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/notice-terminal-text"))
+           (let ((noticed (gp-notice-terminal-text)))
+             (values 200 (list :ok t
+                               :noticed (json-array noticed)
+                               :listening (and (observation-active-p) t)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/notice-terminals"))
+           (let ((noticed (gp-notice-terminals)))
+             (values 200 (list :ok t
+                               :noticed (json-array noticed)
+                               :listening (and (observation-active-p) t)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
+
+          ((and (eq m :post) (string= p "/api/notice-processes"))
+           (let ((noticed (gp-notice-processes)))
+             (values 200 (list :ok t
+                               :noticed (json-array noticed)
+                               :listening (and (observation-active-p) t)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
+
           ((and (eq m :post) (string= p "/api/notice-directory"))
            (let ((path (%body-get body :path)))
              (unless (stringp path)
@@ -429,6 +592,13 @@ STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer."
              (gp-load-domain kw :seed-demo (and seed (not (eq seed :null))))
              (values 200 (list :ok t :domains (json-array (gp-domains))
                                :context (%api-context)))))
+
+          ((and (eq m :post) (string= p "/api/plan-open-goals"))
+           (let ((plan (gp-plan-open-goals)))
+             (values 200 (list :ok t
+                               :plan (%serialize-plan plan)
+                               :facts (json-array (gp-facts))
+                               :goals (json-array (gp-goals))))))
 
           ((and (eq m :post) (string= p "/api/plan"))
            (let* ((raw (%body-get body :goals :missing))

@@ -28,6 +28,11 @@ Chi mantiene il repository può moderare discussioni, issue e contributi
 che rompono questo patto. Il gesto ordinario è chiedere di correggere;
 l'allontanamento è l'ultima misura.
 
+Per ciò che questo testo non dice, vale il
+[Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/),
+anche per la scala delle misure (richiamo, avvertimento, allontanamento
+temporaneo, allontanamento definitivo). Le segnalazioni restano riservate.
+
 ---
 
 # Working together
@@ -59,3 +64,8 @@ Open an issue, or write to Giacomo Picchiarelli
 Maintainers may moderate discussions, issues, and contributions that break
 this pact. The ordinary step is to ask for a correction; removal is the last
 measure.
+
+Where this text is silent, the
+[Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/)
+applies, including its enforcement ladder (correction, warning, temporary
+ban, permanent ban). Reports are kept confidential.

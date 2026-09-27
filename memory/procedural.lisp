@@ -1022,7 +1022,10 @@ comes first. Otherwise combine procedures that each achieve part of the
 request, those with no extra goals first. If those do not apply,
 Means-Ends Analysis."
   (let* ((g (normalize-planning-goals (or goals (goals-of context))))
-         (ops (or operators (context-planning-operators context))))
-    (or (and archive
-             (plan-from-ranked-procedures context g ops))
-        (plan-from-context context :goals g :operators ops))))
+         (ops (or operators (context-planning-operators context)))
+         (plan (or (and archive
+                        (plan-from-ranked-procedures context g ops))
+                   (plan-from-context context :goals g :operators ops))))
+    (when plan
+      (remember-plan-external-actions plan :context context :operators ops))
+    plan))

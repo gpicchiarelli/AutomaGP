@@ -1,0 +1,26 @@
+# Review ownership. Order matters: the last matching pattern wins.
+
+*                               @gpicchiarelli
+
+# Lisp core, memory, adapters, domains, interface, tests
+*.lisp                          @gpicchiarelli
+*.asd                           @gpicchiarelli
+/core/                          @gpicchiarelli
+/memory/                        @gpicchiarelli
+/adapters/                      @gpicchiarelli
+/domains/                       @gpicchiarelli
+/interface/                     @gpicchiarelli
+/tests/                         @gpicchiarelli
+
+# macOS Workbench (Swift)
+/macos/                         @gpicchiarelli
+
+# Automation and community files
+/.github/                       @gpicchiarelli
+/scripts/                       @gpicchiarelli
+
+# Docs and project narrative
+/README.md                      @gpicchiarelli
+/ROADMAP.md                     @gpicchiarelli
+/CHANGELOG.md                   @gpicchiarelli
+/docs/                          @gpicchiarelli

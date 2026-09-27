@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use AUTOMA GP in your work, please cite it using this metadata."
+type: software
+title: "AutomaGP"
+abstract: >-
+  A symbolic planner for a personal computer. Means-Ends Analysis in
+  Common Lisp (SBCL) over a context of symbolic facts, with multilevel
+  memory, a deliberative trace for explanation, opt-in operating-system
+  adapters, and a policy gate that decides whether a plan is only
+  simulated or executed.
+authors:
+  - family-names: Picchiarelli
+    given-names: Giacomo
+    email: gpicchiarelli@gmail.com
+version: "0.148.0"
+date-released: 2026-09-27
+license: BSD-2-Clause
+repository-code: "https://github.com/gpicchiarelli/AutomaGP"
+url: "https://github.com/gpicchiarelli/AutomaGP#readme"
+keywords:
+  - common-lisp
+  - sbcl
+  - symbolic-ai
+  - means-ends-analysis
+  - automated-planning
+  - knowledge-representation
+  - cognitive-architecture
+  - macos

@@ -49,6 +49,8 @@ Knowledge and procedural memory are kept (use GP-CLEAR-MEMORY to drop them)."
   (clear-episodic-memory)
   (setf *observed-before* nil)
   (setf *observation* nil)
+  (when (fboundp '%stop-notice-watches)
+    (funcall '%stop-notice-watches))
   *current-context*)
 
 (defun gp-context (&key name parent facts mode rules operators)
@@ -180,6 +182,15 @@ When REMEMBER is true (default), records a plan episode in episodic memory."
                   :reason :plan-failed)))
     *current-plan*))
 
+(defun gp-plan-open-goals ()
+  "Plan the goals already in the context.
+Does not change facts, does not simulate, and does not execute.
+No fact-like goal is an error."
+  (let ((goals (normalize-planning-goals (gp-goals))))
+    (unless goals
+      (error "There is no goal to plan."))
+    (gp-plan :goals goals)))
+
 (defun gp-last-plan ()
   "Return the last plan produced by GP-PLAN, or NIL."
   *current-plan*)
@@ -213,16 +224,20 @@ Symbolic effects always apply. When ADAPTERS is true, operators with
 :EXTERNAL meta may invoke OS adapters (Phase 8). Default: adapters off.
 When REMEMBER is true (default), records an episode.
 A plan reused from the archive (:FROM-PROCEDURE) updates that procedure's
-score from this live result. GP-SIMULATE does not."
+score from this live result. GP-SIMULATE does not.
+A refusal signals before any fact changes and leaves the context mode
+as it was."
   (let* ((ctx (ensure-current-context))
          (p (or plan *current-plan*)))
     (unless (plan-p p)
       (error "GP-RUN requires a plan; call GP-PLAN first or pass :PLAN."))
-    (setf (context-mode ctx) :execute)
     (setf *last-execution*
-          (execute-plan! ctx p
-                         :confirm (if confirm-p confirm nil)
-                         :adapters (if adapters-p adapters *invoke-adapters*)))
+          (call-with-execution-mode
+           ctx :execute
+           (lambda ()
+             (execute-plan! ctx p
+                            :confirm (if confirm-p confirm nil)
+                            :adapters (if adapters-p adapters *invoke-adapters*)))))
     (refresh-working-memory ctx)
     (when remember
       (record-execution-episode! *last-execution*))
@@ -468,6 +483,7 @@ the request are combined, those with no extra goals first.
 The plan is a replay on the current facts and carries a deliberative trace.
 When the stored steps do not apply, no plan is built.
 UNCHECKED T rebuilds the named procedure anyway, without that check.
+Records the external actions that replay would run. Does not invoke them.
 Sets *CURRENT-PLAN*."
   (let* ((ctx (ensure-current-context))
          (goal-set (or goals (goals-of ctx)))
@@ -497,6 +513,7 @@ Sets *CURRENT-PLAN*."
                               (context-planning-operators ctx))))
                        (error "Procedure ~A does not apply to the current state; no plan was built."
                               (if name (procedure-name proc) goal-set))))))
+    (remember-plan-external-actions plan :context ctx)
     (setf (context-mode ctx) :plan)
     (setf *current-plan* plan)
     plan))

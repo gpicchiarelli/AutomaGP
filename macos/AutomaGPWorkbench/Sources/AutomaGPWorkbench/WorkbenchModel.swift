@@ -47,6 +47,11 @@ struct InducedOperator {
     let examples: Int
 }
 
+struct ExternalAction: Identifiable, Equatable {
+    let id: Int
+    let label: String
+}
+
 struct AliasTarget: Identifiable, Equatable {
     let kind: String
     let name: String
@@ -86,6 +91,52 @@ final class WorkbenchModel: ObservableObject {
     @Published var actionName = ""
     @Published var learned: InducedOperator?
     @Published var listening = false
+    @Published var watchingDirectory = false
+    @Published var watchingProcesses = false
+    @Published var watchingTerminals = false
+    @Published var watchingTerminalText = false
+    @Published var watchingTerminalScreen = false
+    @Published var openGoals = 0
+    @Published var externalActions: [ExternalAction] = []
+    @Published var externalWithheld: [ExternalAction] = []
+    @Published var externalMatches = true
+    @Published var externalSupported = true
+
+    var externalSummary: String {
+        externalActions.map(\.label).joined(separator: " · ")
+    }
+
+    var externalWithheldSummary: String {
+        externalWithheld.map(\.label).joined(separator: " · ")
+    }
+
+    var executeConfirmsComputer: Bool {
+        !externalActions.isEmpty && externalMatches && externalSupported
+    }
+
+    var executeLacksSupport: Bool {
+        !externalActions.isEmpty && externalMatches && !externalSupported
+    }
+
+    var executeWithholdsComputer: Bool {
+        externalActions.isEmpty && !externalWithheld.isEmpty && externalMatches
+    }
+
+    var executeDialogMessage: String {
+        if executeConfirmsComputer {
+            return "I fatti del contesto cambiano. Sul computer: \(externalSummary)."
+        }
+        if executeLacksSupport {
+            return "I fatti del contesto non sostengono più l'azione sul computer. Pianifica di nuovo."
+        }
+        if executeWithholdsComputer {
+            return "I fatti del contesto cambiano. L'azione sul computer non parte: le precondizioni non ci sono più. \(externalWithheldSummary)."
+        }
+        if externalMatches {
+            return "I fatti del contesto cambiano. La simulazione li lascia fermi."
+        }
+        return "I fatti del contesto cambiano. L'azione sul computer non è più quella del piano."
+    }
 
     init() {
         if let env = ProcessInfo.processInfo.environment["AUTOMA_GP_URL"], !env.isEmpty {
@@ -112,11 +163,29 @@ final class WorkbenchModel: ObservableObject {
                 let version = string(status["version"]) ?? "?"
                 repairDepth = int(status["repair-depth"])
                 listening = (status["listening"] as? Bool) ?? false
+                watchingDirectory = status["directory-watch"] is String
+                watchingProcesses = (status["process-watch"] as? Bool) ?? false
+                watchingTerminals = (status["terminal-watch"] as? Bool) ?? false
+                watchingTerminalText = (status["terminal-text-watch"] as? Bool) ?? false
+                watchingTerminalScreen = (status["terminal-screen-watch"] as? Bool) ?? false
+                openGoals = int(status["goals"])
                 let missing = factLines(from: status["listening-missing"])
                 missingLabel = missing.map(\.label).joined(separator: " · ")
                 if listening && !wasListening && actionName.trimmingCharacters(in: .whitespaces).isEmpty,
                    let predicate = missing.first?.parts.first {
                     actionName = predicate.lowercased()
+                }
+                let planBody = try await get("/api/plan")
+                if let plan = planBody["plan"] as? [String: Any] {
+                    externalActions = externalActions(from: plan, key: "external")
+                    externalWithheld = externalActions(from: plan, key: "external-withheld")
+                    externalMatches = (plan["external-matches"] as? Bool) ?? true
+                    externalSupported = (plan["external-supported"] as? Bool) ?? true
+                } else {
+                    externalActions = []
+                    externalWithheld = []
+                    externalMatches = true
+                    externalSupported = true
                 }
                 let explain = try await get("/api/explain")
                 narration = string(explain["narration"]) ?? ""
@@ -150,6 +219,10 @@ final class WorkbenchModel: ObservableObject {
                 }
             } catch {
                 connected = false
+                externalActions = []
+                externalWithheld = []
+                externalMatches = true
+                externalSupported = true
                 statusLine = "Server non raggiungibile su \(baseURL)"
                 report(error.localizedDescription, error: true)
             }
@@ -164,6 +237,13 @@ final class WorkbenchModel: ObservableObject {
         }
     }
 
+    func planOpenGoals() {
+        Task {
+            await run("/api/plan-open-goals", [:],
+                      success: "Piano aggiornato. Non è stato eseguito.")
+        }
+    }
+
     func simulate() {
         Task {
             await run("/api/simulate", [:], success: "Simulazione conclusa. I fatti non sono cambiati.")
@@ -171,8 +251,30 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func execute() {
+        let touchesComputer = executeConfirmsComputer
         Task {
-            await run("/api/run", ["confirm": true, "adapters": false], success: "Esecuzione conclusa. I fatti del contesto sono aggiornati.")
+            do {
+                let body = try await post("/api/run",
+                                          ["confirm": true, "adapters": touchesComputer])
+                if let error = string(body["error"]), body["ok"] as? Bool == false {
+                    report(error, error: true)
+                } else if !executionSucceeded(body) {
+                    report("Esecuzione interrotta. Gli obiettivi del piano non sono stati raggiunti.",
+                           error: true)
+                } else if executionWithheld(body) {
+                    report("Esecuzione conclusa. I fatti sono aggiornati. Un'azione sul computer non è partita: le sue precondizioni non ci sono più.",
+                           error: false)
+                } else if touchesComputer {
+                    report("Esecuzione conclusa. I fatti sono aggiornati e l'azione sul computer è partita.",
+                           error: false)
+                } else {
+                    report("Esecuzione conclusa. I fatti del contesto sono aggiornati.",
+                           error: false)
+                }
+                refresh()
+            } catch {
+                report(error.localizedDescription, error: true)
+            }
         }
     }
 
@@ -250,6 +352,107 @@ final class WorkbenchModel: ObservableObject {
             } catch {
                 report(error.localizedDescription, error: true)
             }
+        }
+    }
+
+    func watchDirectory() {
+        if watchingDirectory {
+            Task {
+                await run("/api/watch-directory/stop", [:],
+                          success: "Osservazione ferma.")
+            }
+            return
+        }
+        let path = pathDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !path.isEmpty else { return }
+        pathDraft = ""
+        Task {
+            await run("/api/watch-directory", ["path": path, "interval": 1],
+                      success: "Cartella sotto osservazione. Il piano non parte.")
+        }
+    }
+
+    func noticeProcesses() {
+        Task {
+            await run("/api/notice-processes", [:],
+                      success: "Processi notati. Il piano non parte.")
+        }
+    }
+
+    func noticeTerminals() {
+        Task {
+            await run("/api/notice-terminals", [:],
+                      success: "Terminale notato. Il piano non parte.")
+        }
+    }
+
+    func noticeTerminalText() {
+        Task {
+            await run("/api/notice-terminal-text", [:],
+                      success: "Testo notato. Il piano non parte.")
+        }
+    }
+
+    func noticeTerminalScreen() {
+        Task {
+            await run("/api/notice-terminal-screen", [:],
+                      success: "Schermo notato. Il piano non parte.")
+        }
+    }
+
+    func watchTerminalScreen() {
+        if watchingTerminalScreen {
+            Task {
+                await run("/api/watch-terminal-screen/stop", [:],
+                          success: "Osservazione dello schermo ferma.")
+            }
+            return
+        }
+        Task {
+            await run("/api/watch-terminal-screen", ["interval": 1],
+                      success: "Schermo sotto osservazione. Il piano non parte.")
+        }
+    }
+
+    func watchTerminalText() {
+        if watchingTerminalText {
+            Task {
+                await run("/api/watch-terminal-text/stop", [:],
+                          success: "Osservazione del testo ferma.")
+            }
+            return
+        }
+        Task {
+            await run("/api/watch-terminal-text", ["interval": 1],
+                      success: "Testo sotto osservazione. Il piano non parte.")
+        }
+    }
+
+    func watchTerminals() {
+        if watchingTerminals {
+            Task {
+                await run("/api/watch-terminals/stop", [:],
+                          success: "Osservazione del terminale ferma.")
+            }
+            return
+        }
+        Task {
+            await run("/api/watch-terminals", ["interval": 1],
+                      success: "Terminale sotto osservazione. Il piano non parte.")
+        }
+    }
+
+    func watchProcesses() {
+        if watchingProcesses {
+            Task {
+                await run("/api/watch-processes/stop", [:],
+                          success: "Osservazione dei processi ferma.")
+            }
+            return
+        }
+        Task {
+            await run("/api/watch-processes", ["interval": 1],
+                      success: "Processi sotto osservazione. Il piano non parte.")
         }
     }
 
@@ -459,6 +662,60 @@ final class WorkbenchModel: ObservableObject {
         guard let meta = op["meta"] as? [String: Any] else { return 1 }
         let n = int(meta["examples"])
         return n == 0 ? 1 : n
+    }
+
+    private func executionSucceeded(_ body: [String: Any]) -> Bool {
+        guard let execution = body["execution"] as? [String: Any] else { return true }
+        return (execution["success"] as? Bool) ?? true
+    }
+
+    private func executionWithheld(_ body: [String: Any]) -> Bool {
+        guard let execution = body["execution"] as? [String: Any],
+              let steps = execution["steps"] as? [Any] else { return false }
+        return steps.contains { step in
+            guard let item = step as? [String: Any] else { return false }
+            return string(item["external"]) == ":WITHHELD"
+        }
+    }
+
+    private func externalActions(from plan: [String: Any], key: String) -> [ExternalAction] {
+        guard let rows = plan[key] as? [Any] else { return [] }
+        return rows.enumerated().compactMap { index, row in
+            guard let item = row as? [String: Any] else { return nil }
+            let name = string(item["operator"]) ?? ""
+            let adapter = plainSymbol(string(item["adapter"]))
+            let op = plainSymbol(string(item["op"]))
+            let args = argsLabel(item["args"])
+            let action = args.isEmpty ? "\(adapter) \(op)" : "\(adapter) \(op) · \(args)"
+            let label = name.isEmpty ? action : "\(name) · \(action)"
+            return ExternalAction(id: index, label: label)
+        }
+    }
+
+    private func plainSymbol(_ value: String?) -> String {
+        guard let text = value else { return "" }
+        guard text.hasPrefix(":") else { return text }
+        return String(text.dropFirst()).lowercased()
+    }
+
+    private func argsLabel(_ value: Any?) -> String {
+        guard let args = value as? [String: Any], !args.isEmpty else { return "" }
+        return args.keys.sorted().map { key in
+            "\(key) \(argumentText(args[key]))"
+        }.joined(separator: " · ")
+    }
+
+    private func argumentText(_ value: Any?) -> String {
+        switch value {
+        case let text as String:
+            return plainSymbol(text)
+        case let items as [Any]:
+            return items.map { argumentText($0) }.joined(separator: " ")
+        case let number as NSNumber:
+            return number.stringValue
+        default:
+            return ""
+        }
     }
 
     private func int(_ value: Any?) -> Int {

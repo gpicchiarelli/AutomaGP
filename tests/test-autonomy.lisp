@@ -136,3 +136,108 @@
     (is (eq t (getf body :ok)))
     (is (eq :done (getf (getf body :autonomy) :status)))
     (is-false (fact-p '(connection interface-01 computer) (gp-facts)))))
+
+(test autonomy-halts-when-the-external-action-is-refused
+  (gp-clear-memory)
+  (gp-reset)
+  (let* ((dir (uiop:ensure-directory-pathname
+               (merge-pathnames
+                (format nil "automa-gp-auto-halt-~A/" (get-universal-time))
+                (uiop:temporary-directory))))
+         (marker (merge-pathnames "marker.txt" dir))
+         (path (namestring marker))
+         (policy (make-autonomy-policy :authority :execute
+                                       :adapters t
+                                       :auto-confirm t
+                                       :learn nil
+                                       :prefer-archive nil)))
+    (unwind-protect
+         (progn
+           (ensure-directories-exist dir)
+           (gp-add-fact (list 'seen path))
+           (gp-add-goal (list 'noted path))
+           (gp-add-operator
+            (make-operator
+             :name 'note-file
+             :preconditions '((seen ?path))
+             :add-list '((noted ?path))
+             :meta (list :external
+                         (list :adapter :filesystem
+                               :op :write-string
+                               :args (list :path '?path
+                                           :content "noticed")))))
+           (unwind-protect
+                (progn
+                  (sb-impl::encapsulate
+                   'record-plan-episode! 'drop-support
+                   (lambda (next &rest args)
+                     (prog1 (apply next args)
+                       (gp-remove-fact (list 'seen path)))))
+                  (let ((summary (gp-autonomous-loop :policy policy :max-steps 3)))
+                    (is (eq :halted (getf summary :status)))
+                    (is (eq :external-unsupported (getf summary :halt)))
+                    (is (= 1 (getf summary :iterations)))
+                    (is (eq :plan (context-mode (gp-context))))
+                    (is (null (gp-last-execution)))
+                    (is-false (file-exists-p marker))
+                    (is (not (fact-p (list 'noted path) (gp-facts))))))
+             (sb-impl::unencapsulate 'record-plan-episode! 'drop-support))
+           (gp-add-fact (list 'seen path))
+           (unwind-protect
+                (progn
+                  (sb-impl::encapsulate
+                   'record-plan-episode! 'change-spec
+                   (lambda (next &rest args)
+                     (prog1 (apply next args)
+                       (setf (operator-meta
+                              (find-operator (gp-context) 'note-file))
+                             (list :external
+                                   (list :adapter :filesystem
+                                         :op :write-string
+                                         :args (list :path '?path
+                                                     :content "changed")))))))
+                  (let ((summary (gp-autonomous-step :policy policy)))
+                    (is (eq :halted (getf summary :status)))
+                    (is (eq :external-mismatch (getf summary :halt)))
+                    (is (eq :plan (context-mode (gp-context))))
+                    (is (null (getf summary :execution)))
+                    (is-false (file-exists-p marker))))
+             (sb-impl::unencapsulate 'record-plan-episode! 'change-spec))
+           (let ((quiet (make-autonomy-policy :authority :execute
+                                              :adapters nil
+                                              :auto-confirm t
+                                              :learn nil
+                                              :prefer-archive nil)))
+             (unwind-protect
+                  (progn
+                    (sb-impl::encapsulate
+                     'record-plan-episode! 'change-again
+                     (lambda (next &rest args)
+                       (prog1 (apply next args)
+                         (setf (operator-meta
+                                (find-operator (gp-context) 'note-file))
+                               (list :external
+                                     (list :adapter :filesystem
+                                           :op :write-string
+                                           :args (list :path '?path
+                                                       :content "other")))))))
+                    (let ((summary (gp-autonomous-step :policy quiet)))
+                      (is (eq :halted (getf summary :status)))
+                      (is (eq :external-mismatch (getf summary :halt)))
+                      (is (eq :plan (context-mode (gp-context))))
+                      (is (null (getf summary :execution)))
+                      (is (not (fact-p (list 'noted path) (gp-facts))))
+                      (is-false (file-exists-p marker))))
+               (sb-impl::unencapsulate 'record-plan-episode! 'change-again)))
+           (setf (operator-meta (find-operator (gp-context) 'note-file))
+                 (list :external
+                       (list :adapter :filesystem
+                             :op :write-string
+                             :args (list :path '?path
+                                         :content "changed"))))
+           (let ((summary (gp-autonomous-step :policy policy)))
+             (is (eq :done (getf summary :status)))
+             (is (eq :execute (context-mode (gp-context))))
+             (is (equal "changed" (adapter-read-file-string marker)))))
+      (gp-clear-memory)
+      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))

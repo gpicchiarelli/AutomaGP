@@ -1,0 +1,61 @@
+name: macOS Workbench
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "macos/**"
+      - ".github/workflows/macos-workbench.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "macos/**"
+      - ".github/workflows/macos-workbench.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workbench-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: macos/AutomaGPWorkbench
+
+jobs:
+  build:
+    name: swift build (macos-latest)
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Resolve package
+        run: swift package resolve
+
+      - name: Build (release, unsigned)
+        run: swift build -c release
+
+      - name: Smoke-check binary
+        run: |
+          BIN="$(swift build -c release --show-bin-path)/AutomaGPWorkbench"
+          test -x "$BIN"
+          file "$BIN"
+          mkdir -p "$RUNNER_TEMP/dist"
+          cp "$BIN" "$RUNNER_TEMP/dist/AutomaGPWorkbench"
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v7
+        with:
+          name: AutomaGPWorkbench-${{ github.sha }}
+          path: ${{ runner.temp }}/dist/AutomaGPWorkbench
+          if-no-files-found: error
+          retention-days: 14

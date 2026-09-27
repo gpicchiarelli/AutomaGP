@@ -187,6 +187,20 @@ Returns (VALUES NEW-FACTS STEP-RESULT) with status :RECORDED."
                                  (and (getf step :reversible) t)
                                  t)))
 
+(defun %external-action-withheld (result operator)
+  "Mark RESULT when a requested adapter action is not run.
+An effects-only step no longer has its preconditions, so the symbolic
+leftovers apply and the adapter is not invoked. When adapters are off,
+RESULT is unchanged."
+  (if (and *invoke-adapters*
+           (fboundp 'operator-external-spec)
+           (operator-p operator)
+           (operator-external-spec operator))
+      (let ((copy (copy-list result)))
+        (setf (getf copy :external) :withheld)
+        copy)
+      result))
+
 (defun project-operator-effects (facts operator bindings)
   "Apply OPERATOR's symbolic add and delete lists without checking
 preconditions and without invoking adapters.
@@ -371,15 +385,45 @@ Records a deliberative execution trace. Step restarts as in Phase 5."
                        :meta (list :note "symbolic simulation; restarts available; no adapters"
                                    :trace *current-trace*))))))
 
+(defun call-with-execution-mode (context mode thunk)
+  "Set CONTEXT's mode to MODE while THUNK runs.
+If THUNK signals, restore the mode from before this call and signal again.
+A refusal from EXECUTE-PLAN! therefore leaves the mode unchanged."
+  (let ((previous (context-mode context)))
+    (setf (context-mode context) mode)
+    (handler-case (funcall thunk)
+      (error (condition)
+        (setf (context-mode context) previous)
+        (error condition)))))
+
 (defun execute-plan! (context plan &key confirm (adapters nil adapters-p))
   "EXECUTE PLAN steps against live CONTEXT. Mutates context facts.
 Records a deliberative execution trace.
 When ADAPTERS is true, bind *INVOKE-ADAPTERS* for this run so operators with
-:EXTERNAL meta may perform OS side effects (Phase 8). Default is the current
-*INVOKE-ADAPTERS* value (normally NIL → symbolic only)."
+:EXTERNAL meta may perform OS side effects (Phase 8). When the plan
+recorded an external action that no longer matches, this signals before
+any fact changes, whether or not adapters were requested, so that
+step's symbolic effect is not applied and an earlier step is not
+applied. A plan that never recorded its actions is refused only when
+adapters were requested. When the facts no longer support an action
+that would be handed to an adapter, including through earlier steps,
+this signals before any fact changes whether or not adapters were
+requested, so an earlier step is not applied. An
+effects-only step, whose preconditions no longer hold, applies the
+symbolic leftovers and does not invoke the adapter. That step is marked
+:EXTERNAL :WITHHELD when adapters were requested. Default is the
+current *INVOKE-ADAPTERS* value (normally NIL → symbolic only)."
   (unless (plan-p plan)
     (error "EXECUTE-PLAN! requires a PLAN, got ~S" plan))
   (let ((*invoke-adapters* (if adapters-p adapters *invoke-adapters*)))
+    (when (and (fboundp 'plan-external-actions-match-p)
+               (not (funcall 'plan-external-actions-match-p plan :context context))
+               (or *invoke-adapters*
+                   (getf (plan-meta plan) :external-actions-recorded)))
+      (error "The external action no longer matches the plan."))
+    (when (and (fboundp 'plan-external-actions-supported-p)
+               (not (funcall 'plan-external-actions-supported-p plan :context context)))
+      (error "The facts no longer support the external action."))
   (with-trace (:execute :context-name (context-name context))
     (trace-record :context :name (context-name context))
     (trace-record :goals :goals (plan-goals plan))
@@ -447,7 +491,8 @@ When ADAPTERS is true, bind *INVOKE-ADAPTERS* for this run so operators with
                             (project-operator-effects
                              (context-all-facts context) op b0)
                           (commit-facts-to-context! context new)
-                          (values new result)))
+                          (values new
+                                  (%external-action-withheld result op))))
                        (t
                         (execute-operator! context op b0 :confirm confirm)))))
                  :operator (or op0 (getf step :operator))

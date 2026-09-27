@@ -1,0 +1,35 @@
+{
+  "name": "AUTOMA GP (SBCL + Quicklisp)",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": "..",
+    "target": "base"
+  },
+  "remoteUser": "dev",
+  "workspaceFolder": "/workspaces/automa-gp",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/automa-gp,type=bind,consistency=cached",
+  "forwardPorts": [47391],
+  "portsAttributes": {
+    "47391": {
+      "label": "AUTOMA GP console",
+      "onAutoForward": "notify"
+    }
+  },
+  "postCreateCommand": "./scripts/run-tests.sh",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rheller.alive",
+        "editorconfig.editorconfig",
+        "davidanson.vscode-markdownlint",
+        "timonwong.shellcheck",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "files.trimTrailingWhitespace": true,
+        "files.insertFinalNewline": true,
+        "editor.tabSize": 2
+      }
+    }
+  }
+}

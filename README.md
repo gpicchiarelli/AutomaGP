@@ -1,142 +1,217 @@
-# AUTOMA GP
+<p align="center">
+  <img src="assets/img/automa-gp-hero.png" alt="A quiet study with a backlit means-ends tree on the wall and a Lisp REPL open on the desk" width="100%">
+</p>
 
-Context-centric **symbolic deliberative automaton** in Common Lisp (SBCL /
-macOS). Not a chatbot.
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/img/automa-gp-logo-dark.svg">
+    <img src="assets/img/automa-gp-logo.svg" alt="AUTOMA GP" width="420">
+  </picture>
+</p>
 
-```text
-CONTEXT → REPRESENT → REASON → PLAN → ACT → OBSERVE → UPDATE
-```
+<p align="center">
+  <strong>A symbolic planner that lives on your own computer.</strong><br>
+  Means-Ends Analysis in Common Lisp, with memory, explanation, and a policy gate before anything runs.
+</p>
 
-Spec: [`docs/PROMPT.md`](docs/PROMPT.md) · Architecture:
-[`docs/architecture.md`](docs/architecture.md) · Roadmap: [`ROADMAP.md`](ROADMAP.md).
+<p align="center">
+  <a href="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/ci.yml"><img src="https://github.com/gpicchiarelli/AutomaGP/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-BSD--2--Clause-63735f.svg" alt="License: BSD-2-Clause"></a>
+  <a href="version.lisp"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgpicchiarelli%2FAutomaGP%2Fmain%2Fversion.lisp-expr&search=%22(%5B0-9.%5D%2B)%22&replace=%241&label=version&color=214237" alt="Version, read from version.lisp-expr on main"></a>
+  <a href="automa-gp.asd"><img src="https://img.shields.io/badge/Common%20Lisp-SBCL-3f5f72.svg" alt="Common Lisp on SBCL"></a>
+  <a href="adapters"><img src="https://img.shields.io/badge/target-macOS-111412.svg" alt="Target: macOS"></a>
+  <a href="tests"><img src="https://img.shields.io/badge/tests-372%20passing-63735f.svg" alt="372 tests passing"></a>
+  <a href="https://github.com/gpicchiarelli/AutomaGP/commits/main"><img src="https://img.shields.io/github/last-commit/gpicchiarelli/AutomaGP?color=3f5f72" alt="Last commit"></a>
+</p>
 
-## Status (v0.123.0)
+<p align="center">
+  <a href="#what-it-is">What it is</a> ·
+  <a href="#thirty-seconds">Thirty seconds</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="#memory-and-the-procedure-archive">Memory</a> ·
+  <a href="#events-and-autonomy">Autonomy</a> ·
+  <a href="#adapters-and-what-stays-out-of-reach">Limits</a> ·
+  <a href="#install-and-run">Install</a> ·
+  <a href="docs/architecture.md">Docs</a>
+</p>
 
-Working core through phase 12, plus a **persistent procedure archive**.
-`gp-plan` reuses a stored procedure whose goals include the request. An
-exact match comes first; extra goals of a larger procedure are applied
-when its steps still work. Otherwise procedures that each achieve part of
-the request are combined: no extra goals first, then procedures that also
-achieve something else. Steps whose extra goals cannot be restored are
-left aside. A search fills anything left. If a
-precondition is missing, stored procedures
-that achieve some of those facts restore it. A full cover comes first,
-then procedures with no extra goals, then procedures that also achieve
-something else. Steps whose extra goals cannot be restored are left aside.
-A search fills anything left. That repair may itself reuse a stored
-procedure, sixty-one levels deep. The stored steps then continue. A live
-`gp-run` updates the score.
+<br>
 
-Autonomy defaults to `:SIMULATE`.
+## What it is
 
-## Procedure archive (REPL)
+AUTOMA GP takes a context made of symbolic facts, a set of goals, and a set of operators with preconditions and effects. It finds the differences between what holds and what is wanted, picks operators that close those differences, and builds a plan. The plan can be simulated on a copy of the facts or executed on the live ones. Every decision is recorded in a trace that `gp-explain` reads back. Successful plans can be stored as procedures, scored over time, and reused instead of searching again.
 
-```lisp
-(gp-remember-procedure :name 'connect-iface)  ; also saves the archive
-(gp-archive)                                  ; highest score first
-(gp-plan :goals '((connection interface-01 computer))) ; archive, then MEA
-(gp-run)                                      ; live result updates the score
-(gp-score-procedure 'connect-iface :success t) ; manual score, still available
-```
+The system runs in an SBCL REPL and is complete there. A small Hunchentoot server exposes the same session as JSON, and a native macOS window sits on top of that server. Nothing in the project is a chatbot, a language model, or a script runner. It is a deliberative loop in the tradition of Newell and Simon's GPS and Norvig's *Paradigms of Artificial Intelligence Programming*, written for one person's machine.
 
-## Autonomy (REPL)
+## Thirty seconds
+
+Load the system, load a domain, plan, simulate, execute, and ask why.
 
 ```lisp
 (ql:quickload :automa-gp)
 (in-package :automa-gp)
 
 (gp-reset)
+(gp-load-domain :hardware :seed-demo t)          ; device interface-01, power off
+(gp-plan :goals '((device-configured interface-01)))
+;; => plan: power-on-device → connect-device → configure-device
+
+(gp-simulate)                                   ; runs on a copy; facts untouched
+(gp-run)                                        ; applies the effects to the context
+(gp-facts)                                      ; (device-configured interface-01) now holds
+(gp-explain)                                    ; what was tried, in which order, and why
+```
+
+`gp-run` changes symbolic facts only. Touching the computer needs `(gp-run :adapters t)`, and even then only operators that carry an explicit `:external` spec reach an adapter. See [Adapters and what stays out of reach](#adapters-and-what-stays-out-of-reach).
+
+## Architecture
+
+```mermaid
+flowchart LR
+    repl["SBCL REPL<br/>interface/repl.lisp"] --> core
+    web["Hunchentoot console<br/>automa-gp/web"] --> api["JSON façade<br/>interface/web-api.lisp"]
+    app["macOS Workbench<br/>Swift"] --> api
+    api --> core["core/<br/>matcher · MEA · planner · executor · events"]
+    core --> memory["memory/<br/>working · knowledge · episodic · procedural"]
+    core --> autonomy["core/autonomy<br/>:read · :simulate · :execute"]
+    autonomy -. "opt-in" .-> adapters["adapters/<br/>filesystem · processes · macos"]
+    domains["domains/<br/>software · documents · hardware · music · geometry"] --> core
+```
+
+The core is ANSI Common Lisp plus UIOP. Pattern matching and unification support rules and queries. Means-Ends Analysis turns goal differences into subgoals and operator applications. The executor applies a plan in `:SIMULATE` mode on a copy of the facts or in `:EXECUTE` mode on the live context, and signals conditions with restarts when a precondition fails. A deliberative trace records each phase and feeds `gp-explain` and the Italian narration in `gp-narrate`.
+
+Three surfaces reach the same session. The REPL is primary. The JSON façade in `interface/web-api.lisp` is pure Lisp and is tested without a socket. The optional `automa-gp/web` system puts Hunchentoot in front of it, and the Swift Workbench talks to that server.
+
+## Memory and the procedure archive
+
+Four memory layers sit beside the context. Working memory is a snapshot of the current facts, goals, and mode. Knowledge memory holds durable facts and rules that can be merged into a context. Episodic memory records plans and executions with their outcome. Procedural memory stores successful plans as named procedures with a success and failure count. `gp-save` and `gp-load` write and read the whole bundle as readable s-expressions.
+
+The procedure archive is the part that learns. `gp-remember-procedure` stores the last successful plan under a name and writes the archive to `~/.automa-gp/procedure-archive.sexp`. `gp-plan` consults that archive before searching: an exact goal match comes first, then a procedure whose goals include the request, then a combination of procedures that each cover a part of it. Steps whose extra goals cannot be restored are left aside and a search fills the gap. When a stored step meets a missing precondition, the planner repairs it with other archived procedures, up to sixty-one levels deep, and falls back to plain Means-Ends Analysis past that. A live `gp-run` of a reused procedure updates its score. Simulation leaves the score alone.
+
+```lisp
+(gp-remember-procedure :name 'configure-interface)   ; store and autosave
+(gp-archive)                                         ; highest score first
+(gp-plan :goals '((device-configured interface-01))) ; archive first, then MEA
+(gp-use-procedure :name 'configure-interface)        ; replay without search
+(gp-score-procedure 'configure-interface :success t) ; manual feedback
+```
+
+## Events and autonomy
+
+Events are facts with a lifecycle. `gp-emit` records an event on the context. `gp-react` matches pending events against registered reactions, which assert facts and add goals. Goal-directed planning and event-driven reaction coexist in the same loop.
+
+Autonomy is one controlled cycle: react to pending events, plan for open goals, then simulate or execute according to the policy. The policy has three authorities. `:READ` observes and plans. `:SIMULATE`, the default, also runs the plan on a copy of the facts. `:EXECUTE` changes the live context and still asks for confirmation on high-risk or irreversible operators unless the policy says `:auto-confirm t`. Adapters stay off until the policy enables them.
+
+```lisp
+(gp-reset)
 (gp-load-domain :documents)
-(gp-emit '(file-created "document.pdf"))   ; pending event
-(gp-policy :authority :simulate)           ; safe default
-(gp-autonomous-step)                       ; react → plan → simulate
+(gp-emit '(file-created "document.pdf"))    ; pending event
+(gp-policy :authority :simulate)            ; safe default
+(gp-autonomous-step)                        ; react → plan → simulate
 (gp-last-autonomy)
 
-;; Live mutation only with explicit policy:
+;; Live mutation needs an explicit policy:
 (gp-policy :authority :execute :auto-confirm t :adapters nil)
 (gp-autonomous-loop :max-steps 4)
 ```
 
-## Web console
+A family of *notice* functions brings observations from the machine into the context without running anything. `gp-notice-path` asserts one existing file as `(file-created path)` when a reaction already models that event. `gp-notice-directory` does the same for the files under a directory. `gp-notice-processes`, `gp-notice-terminals`, `gp-notice-terminal-text`, and `gp-notice-terminal-screen` look for processes, open ttys, text in a transcript file, and text on a Terminal.app tab that a reaction already names. Each has a `gp-watch-…` form that repeats the look on an interval until its `gp-stop-…` or `gp-reset`. `gp-plan-open-goals` then plans for whatever those reactions recorded.
 
-```bash
-./scripts/run-web.sh
-# → http://127.0.0.1:47391/
-```
+`gp-ask` reads a short Italian phrase such as `voglio power-state interface-01 on` and turns it into a goal when the shape already exists in the context, an operator, a reaction, or a rule. An operator can declare words it answers to (`accendi` on `power-on-device`), and `gp-name-operator` adds more. Anything the context does not already model is refused with the candidates named.
 
-Operator console includes Autonomy **Step** / **Loop** (authority selectable;
-default simulate).
+## Adapters and what stays out of reach
 
-## macOS workbench
+Three adapters exist. `filesystem` probes, reads, writes, and deletes files and creates directories. `processes` runs a program and checks whether a pid or a process name is alive. `macos` calls `open`, `hostname`, and `uname`. An operator reaches an adapter only through an `:external` spec in its meta, and only when `*invoke-adapters*` is true for that execute. Before anything runs, `plan-external-actions` names the actions a plan would hand to an adapter, and an execute refuses, with or without adapters, when those actions no longer ground the same way or the facts no longer support them. That refusal happens before any fact changes, so the symbolic effect is not applied and an earlier step is not applied. The goal stays open until a new plan records the action as it is now. An autonomous execute with adapters halts on that refusal instead of signaling, and the loop does not take another step.
 
-Native shell over the same server. The window leads with one next step:
-while a plan is incomplete, edit the facts and induce the rule; otherwise
-simulate, and confirm before execute. The full narration stays folded
-under the trace. **Nota il file** adds one existing file when a reaction
-already models it. **Chiedi** accepts a phrase such as
-`voglio power-state interface-01 on` only when that goal shape already
-exists. The same shape alone, without a leading verb, is enough.
-A fixed term at the end, such as `on`, can be left unsaid when only one
-goal fits. The operator's name can stand in for the predicate, and so can
-a word listed in that operator's `:ask` meta (`accendi` on the hardware
-operator `power-on-device`). The same stem counts, so `accendere` matches
-`accendi`. `gp-name-operator` declares a word on an operator, and on a
-reaction or a rule when that name is the only one. The workbench lists the operators already in the context, together with
-those reactions and rules, and declares the word on the one you choose,
-even when another of them has the same name. A phrase that fits two
-goals names both and records neither; the workbench can record the one
-you choose. An unknown first word does not get declared when the other words
-already fit a goal and that word is not a term of it: those goals are
-named and none is recorded.
-A word alone can name a goal that has no variables left when that word
-is a term of the goal, or the same stem of that term, including a
-superlative such as `prontissimo`, or an adverb such as
-`prontamente`, or an abstract noun such as `prontezza`. A noun such as `accensione`
-shares the stem of `accendi`, and so does `accendimento`. A word whose stem is exactly a name, such
-as `power-one` for `power-on`, is not offered as a new word. Or one exact
-piece of its name, and that goal is the only one. When several such
-goals contain the word, it names them and records none. The name itself
-is not stemmed. A reaction name or a
-rule name asks for that goal the same way an operator name does.
-**Senza variabili** records the ground operator. A second example joins it
-only when the constants stay the same.
+The rest is stated plainly so the README stays a faithful picture.
+
+- Watches are polling loops on an interval. There is no FSEvents, kqueue, or launchd hook, and a watch only records what a registered reaction already names.
+- The Terminal.app screen look reads tab text through `osascript` and stops there. Nothing types, clicks, or uses the Accessibility API. There is no GUI automation.
+- Domain packs are symbolic operator chains. `compile-project` in the software domain runs `true`; `archive-document` writes a marker file when a path is given. They exercise the planner and nothing else.
+- A replayed procedure runs its recorded external action only on a confirmed execute with adapters, and only when the operator is still the one recorded. A step whose operator is gone applies its stored effects and invents no command. A step whose preconditions no longer hold is withheld.
+- `gp-ask` knows a small vocabulary shaped by the goals already in the context. It is an entry point for a goal and nothing more.
+- The web server binds `127.0.0.1` and has no authentication. It is meant for the same machine.
+
+## Domains
+
+Each domain pack installs operators, rules, and sometimes reactions into the current context. `:seed-demo t` adds a starting fact or two so a plan can be built at once.
+
+| Domain | Chain | Notes |
+| --- | --- | --- |
+| `:hardware` | power on → connect → configure | `power-on-device` answers to `accendi` in `gp-ask` |
+| `:documents` | ingest → classify → archive | reaction on `(file-created ?path)`; optional `:archive-path` gives `archive-document` a real file to write |
+| `:software` | repository → compile → test | `compile-project` carries an `:external` spec that runs `true` |
+| `:music` | interface → MIDI route → session | symbolic only |
+| `:geometry` | points → segments → triangle | symbolic only |
+
+`(gp-load-domain :hardware :seed-demo t)` installs one; `(gp-domains)` lists what the context carries.
+
+## Web API and macOS Workbench
+
+`./scripts/run-web.sh` starts Hunchentoot on `http://127.0.0.1:47391/` with a small operator console. Every route is a thin call into the same session the REPL uses.
+
+| Method | Routes |
+| --- | --- |
+| `GET` | `/api/status` · `/api/context` · `/api/facts` · `/api/goals` · `/api/operators` · `/api/rules` · `/api/events` · `/api/reactions` · `/api/plan` · `/api/execution` · `/api/explain` · `/api/reaction` · `/api/autonomy` · `/api/archive` |
+| `POST` | `/api/reset` · `/api/add-fact` · `/api/remove-fact` · `/api/add-goal` · `/api/load-domain` · `/api/plan` · `/api/plan-open-goals` · `/api/simulate` · `/api/run` · `/api/emit` · `/api/react` · `/api/ask` · `/api/listen` · `/api/induce` · `/api/induce/rule` · `/api/induce/note` · `/api/operator/name` |
+| `POST` | `/api/notice-path` · `/api/notice-directory` · `/api/notice-processes` · `/api/notice-terminals` · `/api/notice-terminal-text` · `/api/notice-terminal-screen` · `/api/watch-*` · `/api/watch-*/stop` |
+| `POST` | `/api/archive/remember` · `/api/archive/use` · `/api/archive/score` · `/api/autonomy/policy` · `/api/autonomy/step` · `/api/autonomy/loop` |
+
+The Workbench in [`macos/AutomaGPWorkbench`](macos/AutomaGPWorkbench) is a SwiftPM app for macOS 13 and later. It leads with one next step: while a plan is incomplete, edit the facts and induce an operator from the before and after; otherwise simulate, and confirm before execute. The narrated trace stays folded under the plan. It shows the external actions a confirmed execute would run, and says which were withheld.
 
 ```bash
 ./scripts/run-web.sh
 cd macos/AutomaGPWorkbench && swift run
 ```
 
-```lisp
-(gp-narrate)
-(gp-add-fact '(device interface-01))
-(gp-add-fact '(power-state interface-01 off))
-(gp-plan :goals '((power-state interface-01 on))) ; no operator yet: listening
-(gp-remove-fact '(power-state interface-01 off))
-(gp-add-fact '(power-state interface-01 on))
-(gp-induce-rule 'power-on) ; INTERFACE-01 becomes ?X0
-;; a second fitting example merges; a different number is refused
-(gp-load-domain :documents :seed-demo t)
-(gp-notice-path "/path/to/an/existing/file") ; only if a reaction matches
-(gp-notice-directory "/path/to/a/directory") ; files only, one look, no run
-(gp-ask "voglio power-state interface-01 on") ; only if that shape exists
-```
+## Install and run
 
-## REPL (primary)
-
-```lisp
-(gp-reset)
-(gp-load-domain :hardware :seed-demo t)
-(gp-plan :goals '((device-configured interface-01)))
-(gp-simulate)
-(gp-explain)
-```
-
-## Tests
+You need SBCL and Quicklisp. On macOS, `brew install sbcl` and the [Quicklisp installer](https://www.quicklisp.org/beta/) are enough. The scripts symlink this checkout into `~/quicklisp/local-projects/automa-gp` on first run.
 
 ```bash
-./scripts/run-tests.sh
+git clone https://github.com/gpicchiarelli/AutomaGP.git
+cd AutomaGP
+./scripts/run-tests.sh      # FiveAM suite: 372 tests, 4806 checks
+./scripts/run-web.sh        # operator console on http://127.0.0.1:47391/
 ```
+
+From a REPL, or from SLIME or SLY:
+
+```lisp
+(ql:quickload :automa-gp)          ; core, no web dependency
+(ql:quickload :automa-gp/web)      ; adds Hunchentoot
+(in-package :automa-gp)
+(gp-reset)
+```
+
+Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The web system adds Hunchentoot. Tests add FiveAM. The Workbench needs Xcode command line tools for `swift run`. CI runs the same suite on Ubuntu, so the core is portable; the `macos` adapter and the Terminal.app look are the parts that need a Mac.
+
+## Repository layout
+
+| Path | Contents |
+| --- | --- |
+| [`core`](core) | Context, facts, matcher, unification, rules, queries, operators, MEA, planner, executor, conditions, trace, events, induction, autonomy |
+| [`memory`](memory) | Working, knowledge, episodic, procedural memory and the s-expression persistence service |
+| [`adapters`](adapters) | Filesystem, processes, and macOS adapters; external-action naming and refusal |
+| [`domains`](domains) | Five domain packs and the `gp-load-domain` registry |
+| [`interface`](interface) | REPL commands, notice and watch, `gp-ask`, narration, JSON, the web API façade, and the Hunchentoot console |
+| [`macos/AutomaGPWorkbench`](macos/AutomaGPWorkbench) | Native SwiftUI shell over the JSON API |
+| [`tests`](tests) | FiveAM suite, one file per component |
+| [`scripts`](scripts) | `run-tests.sh`, `run-tests.lisp`, `run-web.sh` |
+| [`docs`](docs) | [Architecture](docs/architecture.md), the [master prompt](docs/PROMPT.md), and two worked REPL setups |
+| [`examples`](examples) | Loadable versions of those worked setups |
+| [`assets/img`](assets/img) | Hero image and logo |
+
+## Roadmap and status
+
+The twelve phases in [`ROADMAP.md`](ROADMAP.md) are delivered: context, matching, Means-Ends Analysis, execution, conditions, explanation, memory, adapters, domains, events, web, and policy-gated autonomy. Everything after that is deepening, one small tested increment per version. The most recent series is about external actions: a plan names the adapter actions it would run before anything runs, and an execute refuses, without touching mode or facts, and with or without adapters, when those actions changed or the facts no longer support them. That refusal happens before an earlier step can apply, and the goal stays open. An autonomous execute halts on that refusal and does not run the adapter. `version.lisp` holds the current number and [`CHANGELOG.md`](CHANGELOG.md) has one entry per version.
+
+Priority is correctness, then clarity, then testability, then performance.
+
+## Contributing
+
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md). Keep the system loadable and the tests green, add a FiveAM test with each change, and keep the README, roadmap, and changelog faithful to what the code does. Announce a capability only when it is loadable and tested. Security reports go through [`.github/SECURITY.md`](.github/SECURITY.md). Italian and English are both welcome.
 
 ## License
 
-BSD-2-Clause. Copyright (c) 2026 Giacomo Picchiarelli.
+AUTOMA GP is released under the [BSD 2-Clause license](LICENSE). Copyright (c) 2026 Giacomo Picchiarelli.

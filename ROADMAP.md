@@ -1,7 +1,10 @@
-# ROADMAP
+# Roadmap
 
-Aligned to `docs/PROMPT.md` §25. Each phase must leave a loadable, tested
-system. Do not skip ahead with fake capabilities.
+Aligned to `docs/PROMPT.md` §25. Each phase leaves a loadable, tested
+system. A capability appears here once it is loadable and tested.
+Phases 1 to 12 are delivered; the list under
+[After the roadmap](#after-the-roadmap) records each later increment
+with the version that shipped it. `version.lisp` holds the current number.
 
 ## Phase 1 — Context foundation
 
@@ -62,8 +65,8 @@ system. Do not skip ahead with fake capabilities.
 - [x] Explicit policy gates (:READ / :SIMULATE / :EXECUTE + confirm)
 - [x] Web console autonomy status / step / loop
 
-**Roadmap status:** phases 1–12 delivered as scaffold + working core (v0.12.0).
-Further work is deepening domains, adapters, and autonomy policy — not missing phases.
+**Status:** phases 1 to 12 delivered as a working core (v0.12.0). Everything
+after that deepens memory, observation, adapters, and the autonomy policy.
 
 ## After the roadmap
 
@@ -179,7 +182,33 @@ Further work is deepening domains, adapters, and autonomy policy — not missing
 - [x] A word whose stem is exactly a name is not a new word (v0.121.0)
 - [x] An unknown word is not declared when the other words already fit (v0.122.0)
 - [x] One directory is noticed once, and its reactions update the context (v0.123.0)
+- [x] One directory stays under watch until stopped (v0.124.0)
+- [x] A directory notice enters subdirectories and skips a linked directory (v0.125.0)
+- [x] A named running process is noticed once (v0.126.0)
+- [x] A named process stays under watch until stopped (v0.127.0)
+- [x] A named open terminal is noticed once (v0.128.0)
+- [x] A named terminal stays under watch until stopped (v0.129.0)
+- [x] A named transcript text is noticed once (v0.130.0)
+- [x] A named transcript stays under watch until stopped (v0.131.0)
+- [x] A named Terminal tab text is noticed once (v0.132.0)
+- [x] A named Terminal tab stays under watch until stopped (v0.133.0)
+- [x] Notice watches share one lifecycle and stay independent (v0.134.0)
+- [x] A notice watch is reserved before its first look (v0.135.0)
+- [x] A stop ends a notice look before the next target (v0.136.0)
+- [x] A stop drops the notice read still open (v0.137.0)
+- [x] A stop drops a process check and a transcript read (v0.138.0)
+- [x] Plan the goals a notice already recorded (v0.139.0)
+- [x] A plan names its external action before anything runs (v0.140.0)
+- [x] An execute refuses an external action that changed (v0.141.0)
+- [x] A replay records the external action it would run again (v0.142.0)
+- [x] An effects-only replay withholds the external action (v0.143.0)
+- [x] A plan names only the external action it would run (v0.144.0)
+- [x] An external action refuses when the facts no longer support it (v0.145.0)
+- [x] A refused execute leaves the mode unchanged (v0.146.0)
+- [x] An autonomous execute halts when the external action is refused (v0.147.0)
+- [x] An unsupported external action refuses before earlier steps apply (v0.148.0)
+- [x] A changed external action refuses before earlier steps apply (v0.149.0)
 
 ---
 
-Priority: **correctness → clarity → testability → performance**.
+Priority: correctness, then clarity, then testability, then performance.

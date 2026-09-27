@@ -1,0 +1,58 @@
+name: Qualcosa non torna · Bug report
+description: Il programma si comporta in modo diverso da ciò che dichiara. / The program behaves differently from what it claims.
+title: "[difetto] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Italiano o English. Descrivi ciò che hai visto, con i simboli che hai dato all'agente.
+        Describe what you saw, with the symbols you gave the agent.
+  - type: input
+    id: version
+    attributes:
+      label: Versione · Version
+      description: Il valore di *version* in :automa-gp (è in version.lisp), e la versione di SBCL se la conosci.
+      placeholder: "0.146.0, SBCL 2.6"
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Dove · Where
+      description: La superficie da cui hai osservato il comportamento.
+      options:
+        - "REPL (SBCL)"
+        - "Console web (Hunchentoot)"
+        - "Workbench macOS"
+        - "Test suite (./scripts/run-tests.sh)"
+        - "Altro / Other"
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Sistema · System
+      description: macOS o Linux, e la versione.
+      placeholder: "macOS 15.6, Apple Silicon"
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passi · Steps
+      description: Il minimo Lisp che riproduce il caso, a partire da gp-reset. / The smallest Lisp that reproduces it, starting from gp-reset.
+      render: lisp
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Che cosa ti aspettavi · Expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Che cosa è successo · Actual
+      description: Incolla anche l'output di gp-explain o la traccia, se c'è. / Paste gp-explain output or the trace, if any.
+    validations:
+      required: true

@@ -145,7 +145,12 @@
 
 (defun %authorize-execution (policy plan context)
   "Return (VALUES OK REASON). OK means policy allows running the plan
-at the configured authority (simulate or execute)."
+at the configured authority (simulate or execute).
+When the plan recorded an external action that no longer matches,
+execution is not authorized, with or without adapters. When adapters
+are requested, a plan that never recorded its actions is not
+authorized either. An external action the facts no longer support is
+not authorized, with or without adapters."
   (let ((auth (policy-authority policy)))
     (cond
       ((eq auth :read)
@@ -157,16 +162,24 @@ at the configured authority (simulate or execute)."
       ((eq auth :simulate)
        (values t :simulate-authorized))
       ((eq auth :execute)
-       (let ((risky (plan-requires-confirmation-p plan context)))
-         (cond
-           ((and risky
-                 (not (policy-auto-confirm policy))
-                 (null (policy-confirm-fn policy)))
-            (values nil :confirmation-required))
-           ((and risky (policy-confirm-fn policy)
-                 (not (funcall (policy-confirm-fn policy) plan context)))
-            (values nil :confirmation-denied))
-           (t (values t :execute-authorized)))))
+       (cond
+         ((and (not (plan-external-actions-match-p plan :context context))
+               (or (policy-adapters policy)
+                   (getf (plan-meta plan) :external-actions-recorded)))
+          (values nil :external-mismatch))
+         ((not (plan-external-actions-supported-p plan :context context))
+          (values nil :external-unsupported))
+         (t
+          (let ((risky (plan-requires-confirmation-p plan context)))
+            (cond
+              ((and risky
+                    (not (policy-auto-confirm policy))
+                    (null (policy-confirm-fn policy)))
+               (values nil :confirmation-required))
+              ((and risky (policy-confirm-fn policy)
+                    (not (funcall (policy-confirm-fn policy) plan context)))
+               (values nil :confirmation-denied))
+              (t (values t :execute-authorized)))))))
       (t (values nil :unknown-authority)))))
 
 (defun %observe-context (context)
@@ -297,19 +310,37 @@ stored in *LAST-AUTONOMY*). Does not loop — see AUTONOMOUS-LOOP."
                   (note :execute :mode :simulate
                         :success (execution-success execution)))
                  ((eq auth :execute)
-                  (setf (context-mode ctx) :execute)
                   (let ((confirm (or (policy-auto-confirm pol)
                                      (and (policy-confirm-fn pol) t))))
-                    (setf execution
-                          (execute-plan! ctx plan
-                                         :confirm confirm
-                                         :adapters (policy-adapters pol)))
-                    (setf *last-execution* execution)
-                    (when remember
-                      (record-execution-episode! execution))
-                    (note :execute :mode :execute
-                          :success (execution-success execution)
-                          :adapters (policy-adapters pol))))
+                    (handler-case
+                        (progn
+                          (setf execution
+                                (call-with-execution-mode
+                                 ctx :execute
+                                 (lambda ()
+                                   (execute-plan! ctx plan
+                                                  :confirm confirm
+                                                  :adapters (policy-adapters pol)))))
+                          (setf *last-execution* execution)
+                          (when remember
+                            (record-execution-episode! execution))
+                          (note :execute :mode :execute
+                                :success (execution-success execution)
+                                :adapters (policy-adapters pol)))
+                      (error (condition)
+                        (let ((text (princ-to-string condition)))
+                          (cond
+                            ((search "no longer matches" text)
+                             (setf execution nil
+                                   halt :external-mismatch
+                                   status :halted)
+                             (note :refuse :reason :external-mismatch))
+                            ((search "no longer support" text)
+                             (setf execution nil
+                                   halt :external-unsupported
+                                   status :halted)
+                             (note :refuse :reason :external-unsupported))
+                            (t (error condition))))))))
                  (t
                   (setf halt :authority-read status :halted))))
 

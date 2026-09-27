@@ -1,9 +1,303 @@
 # Changelog
 
-All notable changes to AUTOMA GP are documented in this file.
+All notable changes to AUTOMA GP are documented in this file, one entry
+per version, newest first.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project follows the incremental phases in `docs/PROMPT.md` §25.
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Versions up to 0.12.0 track the phases in `docs/PROMPT.md` §25; later
+versions are the increments listed in `ROADMAP.md`.
+
+## [0.149.0] — 2026-09-27
+
+### Fixed
+
+- An execute refuses when the external action recorded with the plan
+  no longer matches, whether or not adapters were requested. The
+  refusal happens before any fact changes, so that step's symbolic
+  effect is not applied and an earlier step is not applied. The goal
+  stays open. The context mode stays as it was. A plan that never
+  recorded its actions is still refused only when adapters were
+  requested. Simulation still does not change facts. The workbench
+  does not offer Esegui in that case. Planning again records the
+  action as it is now; an execute without adapters then applies the
+  steps and leaves the computer alone.
+
+## [0.148.0] — 2026-09-27
+
+### Fixed
+
+- An execute refuses when the facts no longer support an external
+  action, whether or not adapters were requested. The refusal happens
+  before any fact changes, so an earlier step is not applied. The
+  context mode stays as it was. Simulation still does not change
+  facts. The workbench does not offer Esegui in that case. When the
+  facts support the action again, an execute without adapters applies
+  the steps and leaves the computer alone.
+
+## [0.147.0] — 2026-09-27
+
+### Fixed
+
+- An autonomous execute halts when the external action no longer
+  matches or the facts no longer support it. The cycle does not
+  signal, does not record an execution, and does not run the
+  adapter. The mode stays on plan. A later step is not started.
+  When the action is authorized, the execute still runs.
+
+## [0.146.0] — 2026-09-27
+
+### Fixed
+
+- A refused execute leaves the context mode as it was. The refusal
+  still happens before any fact changes and before any adapter runs,
+  whether the operator's action changed or the facts no longer support
+  it. No execution result is recorded. A run that starts still sets
+  the mode to execute.
+
+## [0.145.0] — 2026-09-27
+
+### Fixed
+
+- An execute that asks for adapters refuses when the facts no longer
+  support an action the plan would hand to an adapter. The refusal
+  happens before any fact changes and before any adapter runs. A
+  precondition produced by an earlier step still counts. The recorded
+  action stays the one named by the plan. An execute without adapters
+  does not use this refusal.
+
+## [0.144.0] — 2026-09-27
+
+### Fixed
+
+- A plan names only the external actions an execute would hand to an
+  adapter. An effects-only step is listed apart, as withheld, and is
+  not offered as an action that will run. Changing that step's
+  operator does not refuse the execute and does not run the command.
+  The action recorded at plan time stays the one shown as withheld.
+
+## [0.143.0] — 2026-09-27
+
+### Fixed
+
+- An effects-only replay, whose preconditions no longer hold, applies
+  the symbolic leftovers and does not run the external action, even
+  when adapters were requested and the operator is still registered.
+  That step is marked withheld. Simulation and an execute without
+  adapters leave the computer alone and do not mark the step.
+
+## [0.142.0] — 2026-09-27
+
+### Fixed
+
+- Rebuilding a plan from the procedure archive records the external
+  action that replay would run. It does not invoke the adapter.
+  A confirmed execute with adapters runs that action when the operator
+  is still the one recorded. Simulation and an execute without adapters
+  leave the computer alone. When the operator is gone, the stored
+  effects still apply and no command is invented.
+
+## [0.141.0] — 2026-09-27
+
+### Fixed
+
+- A plan records the external action it would run. An execute that asks
+  for adapters refuses when that action no longer grounds the same way.
+  The refusal happens before any fact changes and before any adapter
+  runs. An execute without adapters still applies the symbolic effects.
+  Planning again records the action as it is now.
+
+## [0.140.0] — 2026-09-27
+
+### Added
+
+- `plan-external-actions` names the adapter action a plan would run.
+  It does not invoke that action. Arguments are grounded from the step.
+  An operator removed after the plan contributes nothing.
+  `GET /api/plan` includes that list. Simulation leaves the computer
+  alone. The workbench runs the action on a confirmed execute only
+  when the list is not empty.
+
+## [0.139.0] — 2026-09-27
+
+### Added
+
+- `gp-plan-open-goals` plans the goals already in the context. It does
+  not change facts, simulate, or execute. No fact-like goal is an error.
+  `POST /api/plan-open-goals` returns that plan. The workbench button
+  Pianifica calls it.
+
+## [0.138.0] — 2026-09-27
+
+### Fixed
+
+- A stop during a process check or a transcript read does not record
+  that target. The check and the read use the same cancellable wait as
+  a Terminal.app read. A process check outside a notice look is
+  unchanged. A match split across two reads of a transcript is still
+  found when the look is not stopped.
+
+## [0.137.0] — 2026-09-27
+
+### Fixed
+
+- A stop during a directory walk leaves out every file not yet accepted.
+- A stop during a Terminal.app read returns no text. The osascript
+  process is stopped, and that tab is not recorded. A read that already
+  finished and was accepted stays.
+
+## [0.136.0] — 2026-09-27
+
+### Fixed
+
+- A stop during a notice look records nothing after the target already
+  accepted. The file, process, terminal, transcript line, or tab text
+  in progress still enters the context, together with that reaction.
+  The next one does not. The look does not hold its lock while it
+  reads, so the stop is visible before that next target. One call that
+  is not a watch still records every target.
+
+## [0.135.0] — 2026-09-27
+
+### Fixed
+
+- A notice watch takes its slot before the first look. A second start
+  of that same kind fails at once. `gp-reset` or a stop during that
+  look does not leave the repeat running. A first look that signals
+  leaves the slot empty. The look already running still finishes.
+  `gp-reset` also sees a directory watch before its path is known.
+
+## [0.134.0] — 2026-09-27
+
+### Changed
+
+- Directory, process, terminal, transcript, and Terminal.app screen watches
+  share one start, repeat, and stop. Each kind keeps its own lock, so one
+  can run while another runs. Stopping one leaves the others. `gp-reset`
+  stops whichever are running. A later look that fails keeps the last
+  facts. The screen watch still allows three extra seconds for a look to
+  finish; the others allow two. The public calls are unchanged.
+
+## [0.133.0] — 2026-09-27
+
+### Added
+
+- `gp-watch-terminal-screen` repeats `gp-notice-terminal-screen` until
+  `gp-stop-terminal-screen-watch`. A text that appears later is noticed
+  on a later look, when a reaction already names it and Terminal.app
+  answers. `gp-reset` stops the watch. The watch does not type, run a
+  command in the tab, return the rest of the screen, plan, or run
+  adapters. If Terminal.app does not answer within two seconds, that
+  look adds nothing. `POST /api/watch-terminal-screen` and
+  `POST /api/watch-terminal-screen/stop` are the same gate.
+  `GET /api/status` includes `terminal-screen-watch`.
+
+## [0.132.0] — 2026-09-27
+
+### Added
+
+- `gp-notice-terminal-screen` looks once at a Terminal.app tab a
+  `terminal-screen` reaction already names. The tty is `ttys012` or
+  `/dev/ttys012`, and the text is the exact characters that reaction
+  names. When that text is on the tab, it is asserted and the
+  reaction's facts and goals enter the context. The rest of the screen
+  is not returned. The look does not type and does not run a command
+  in the tab. If Terminal.app is closed or does not answer within two
+  seconds, that text is skipped. The call does not stay listening,
+  plan, or run adapters. `POST /api/notice-terminal-screen` is the
+  same gate.
+
+## [0.131.0] — 2026-09-27
+
+### Added
+
+- `gp-watch-terminal-text` repeats `gp-notice-terminal-text` until
+  `gp-stop-terminal-text-watch`. A text that appears later is noticed on
+  a later look, when a reaction already names that text and that
+  transcript. `gp-reset` stops the watch. The watch does not follow a
+  link, open a device, return the rest of the file, read the live
+  terminal screen, plan, or run adapters. `POST /api/watch-terminal-text`
+  and `POST /api/watch-terminal-text/stop` are the same gate.
+  `GET /api/status` includes `terminal-text-watch`.
+
+## [0.130.0] — 2026-09-27
+
+### Added
+
+- `gp-notice-terminal-text` looks once at each transcript a
+  `terminal-text` reaction already names. The path is a regular file,
+  such as a `script` transcript, and the text is the exact characters
+  that reaction names. When that text is present, it is asserted and
+  the reaction's facts and goals enter the context. A link is not
+  followed, and a device is not opened. A variable does not name a
+  path or a text. The rest of the file is not returned. The call does
+  not stay listening, plan, or run adapters.
+  `POST /api/notice-terminal-text` is the same gate.
+
+## [0.129.0] — 2026-09-27
+
+### Added
+
+- `gp-watch-terminals` repeats `gp-notice-terminals` until
+  `gp-stop-terminal-watch`. A terminal that opens later is noticed on a
+  later look, when a reaction already names it. `gp-reset` stops the
+  watch. The watch does not list the open terminals, read what is
+  written there, plan, or run adapters. `POST /api/watch-terminals` and
+  `POST /api/watch-terminals/stop` are the same gate. `GET /api/status`
+  includes `terminal-watch`.
+
+## [0.128.0] — 2026-09-27
+
+### Added
+
+- `gp-notice-terminals` looks once at each terminal a `terminal-open`
+  reaction already names. An open tty, such as `ttys000`, is asserted,
+  and that reaction's facts and goals enter the context. A terminal that
+  is not open is skipped. A variable does not name a terminal. The call
+  does not list the open terminals, read what is written there, plan, or
+  run adapters. `POST /api/notice-terminals` is the same gate.
+
+## [0.127.0] — 2026-09-27
+
+### Added
+
+- `gp-watch-processes` repeats `gp-notice-processes` until
+  `gp-stop-process-watch`. A process that appears later is noticed on a
+  later look, when a reaction already names it. `gp-reset` stops the
+  watch. The watch does not list the process table, watch the terminal,
+  plan, or run adapters. `POST /api/watch-processes` and
+  `POST /api/watch-processes/stop` are the same gate. `GET /api/status`
+  includes `process-watch`.
+
+## [0.126.0] — 2026-09-27
+
+### Added
+
+- `gp-notice-processes` looks once at each process a `process-running`
+  reaction already names. A running pid or name is asserted, and that
+  reaction's facts and goals enter the context. A process that is not
+  running is skipped. A variable does not name a process, and the
+  process table is not listed. The call does not plan, run adapters, or
+  watch the terminal. `POST /api/notice-processes` is the same gate.
+
+## [0.125.0] — 2026-09-27
+
+### Changed
+
+- `gp-notice-directory` and `gp-watch-directory` enter subdirectories.
+  A subdirectory that is a symbolic link is not entered, so a file
+  outside the tree is not noticed. The look still does not plan or run
+  adapters.
+
+## [0.124.0] — 2026-09-27
+
+### Added
+
+- `gp-watch-directory` repeats `gp-notice-directory` on one directory
+  until `gp-stop-directory-watch`. A file that appears later is noticed
+  on a later look. `gp-reset` stops the watch. The watch does not enter
+  subdirectories, watch processes, plan, or run adapters.
+  `POST /api/watch-directory` and `POST /api/watch-directory/stop` are
+  the same gate. `GET /api/status` includes `directory-watch`.
 
 ## [0.123.0] — 2026-09-27
 

@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Tests before release
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup-lisp
+      - name: Run test suite
+        run: ./scripts/run-tests.sh
+
+  release:
+    name: GitHub Release
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check that the tag matches version.lisp-expr
+        run: |
+          VERSION="$(tr -d '"[:space:]' < version.lisp-expr)"
+          echo "tag=$TAG  version.lisp-expr=$VERSION"
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error file=version.lisp-expr::Tag $TAG does not match version $VERSION in version.lisp-expr"
+            exit 1
+          fi
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Extract CHANGELOG section
+        run: |
+          awk -v v="$VERSION" '
+            /^## \[/ {
+              if (found) exit
+              if (index($0, "## [" v "]") == 1) { found = 1; next }
+            }
+            found { print }
+          ' CHANGELOG.md | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > "$RUNNER_TEMP/changelog-section.md"
+          if [ ! -s "$RUNNER_TEMP/changelog-section.md" ]; then
+            echo "::warning file=CHANGELOG.md::No section found for $VERSION; the release body will contain generated notes only"
+          fi
+          cat "$RUNNER_TEMP/changelog-section.md"
+
+      - name: Generate release notes from merged changes
+        run: |
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="$TAG" \
+            -f target_commitish="$GITHUB_SHA" \
+            --jq '.body' > "$RUNNER_TEMP/generated-notes.md" || : > "$RUNNER_TEMP/generated-notes.md"
+
+      - name: Assemble release body
+        run: |
+          {
+            if [ -s "$RUNNER_TEMP/changelog-section.md" ]; then
+              echo "## Changelog"
+              echo
+              cat "$RUNNER_TEMP/changelog-section.md"
+              echo
+            fi
+            if [ -s "$RUNNER_TEMP/generated-notes.md" ]; then
+              cat "$RUNNER_TEMP/generated-notes.md"
+              echo
+            fi
+            echo "---"
+            echo "Verify with SBCL: \`./scripts/run-tests.sh\` after linking the tree into \`~/quicklisp/local-projects/automa-gp\`."
+          } > "$RUNNER_TEMP/release-body.md"
+          cat "$RUNNER_TEMP/release-body.md"
+
+      - name: Build source tarball
+        run: |
+          git archive --format=tar.gz --prefix="automa-gp-${VERSION}/" \
+            -o "$RUNNER_TEMP/automa-gp-${VERSION}.tar.gz" "$TAG"
+          (cd "$RUNNER_TEMP" && shasum -a 256 "automa-gp-${VERSION}.tar.gz" > "automa-gp-${VERSION}.tar.gz.sha256")
+          cat "$RUNNER_TEMP/automa-gp-${VERSION}.tar.gz.sha256"
+
+      - name: Create or update the release
+        run: |
+          ASSETS=("$RUNNER_TEMP/automa-gp-${VERSION}.tar.gz" "$RUNNER_TEMP/automa-gp-${VERSION}.tar.gz.sha256")
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "AUTOMA GP ${VERSION}" \
+              --notes-file "$RUNNER_TEMP/release-body.md"
+            gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber "${ASSETS[@]}"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "AUTOMA GP ${VERSION}" \
+              --notes-file "$RUNNER_TEMP/release-body.md" \
+              --verify-tag \
+              "${ASSETS[@]}"
+          fi
