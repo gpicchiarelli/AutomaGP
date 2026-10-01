@@ -87,3 +87,6 @@ snapshots/
 .env
 .env.*
 !.env.example
+
+# Claude Code agent worktrees
+.claude/worktrees/

@@ -5,3 +5,4 @@ ignores:
   - "**/.build/**"
   - "**/node_modules/**"
   - "**/DerivedData/**"
+  - "**/.claude/**"
