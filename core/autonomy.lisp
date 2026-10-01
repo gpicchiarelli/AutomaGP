@@ -8,8 +8,9 @@
 ;;;;
 ;;;; Authority levels, in ascending order:
 ;;;;   :READ     — react to pending events (a reaction may assert facts and
-;;;;               add goals) and report the open differences; never plans,
-;;;;               simulates or executes
+;;;;               add goals, and a policy that infers adds derived facts)
+;;;;               and report the open differences; never plans, simulates
+;;;;               or executes
 ;;;;   :SIMULATE — plan, then simulate on a copy of the facts (default);
 ;;;;               no live fact changes except through reactions
 ;;;;   :EXECUTE  — plan, then change live facts, and only through
@@ -88,7 +89,9 @@ false that step halts with :EXECUTION-FAILED.")
     :initarg :remember-procedure
     :accessor policy-remember-procedure
     :initform nil
-    :documentation "When true and plan succeeds under :EXECUTE/:SIMULATE, store procedure.")
+    :documentation "When true, a fresh plan whose run achieved the goals, under
+:EXECUTE or :SIMULATE, is stored as a procedure. A plan replayed from the
+archive is never stored again, and a simulation never changes a score.")
    (prefer-archive
     :initarg :prefer-archive
     :accessor policy-prefer-archive
@@ -247,14 +250,21 @@ Returns (VALUES OK REASON CONFIRMED). CONFIRMED is true only when the
 policy confirms automatically or its CONFIRM-FN approved this plan; it is
 the only confirmation the run may carry. A CONFIRM-FN is asked exactly
 once, with (PLAN CONTEXT), when the plan has a step that needs
-confirmation, and its refusal stands even under auto-confirm."
+confirmation, and its refusal stands even under auto-confirm.
+A CONFIRM-FN is the caller's code and runs after the external actions of
+PLAN were checked, so they are checked again on the context it leaves
+behind: an approval never authorizes a plan the runner would refuse."
   (let ((risky (plan-requires-confirmation-p plan context))
         (confirm-fn (policy-confirm-fn policy)))
     (cond
       (confirm-fn
        (cond
          ((not risky) (values t :execute-authorized nil))
-         ((funcall confirm-fn plan context) (values t :execute-authorized t))
+         ((funcall confirm-fn plan context)
+          (let ((refusal (%external-refusal policy plan context)))
+            (if refusal
+                (values nil refusal nil)
+                (values t :execute-authorized t))))
          (t (values nil :confirmation-denied nil))))
       ((policy-auto-confirm policy) (values t :execute-authorized t))
       (risky (values nil :confirmation-required nil))
@@ -389,29 +399,33 @@ between; no step ran in that case."
             (list (getf step :operator) (getf step :bindings)))
           steps))
 
-(defun %remember-fresh-plan! (plan context)
-  "Archive the fresh successful PLAN and return the stored procedure.
+(defun %remember-fresh-plan! (plan context live)
+  "Archive the fresh successful PLAN. Return the procedure that was stored
+or scored, or NIL when the archive is left as it was.
 An archived procedure with the same goal set and the same steps is the
-same procedure seen again: it keeps its name and gains a success. Any
-other plan is stored under a name no procedure uses, PROC-<context>-<n>,
-so one goal set never overwrites another or inherits its successes."
+same procedure seen again: a LIVE run gives it one more success, and a
+simulation leaves its score alone. Any other plan is stored under a name
+no procedure uses, PROC-<context>-<n>, so one goal set never overwrites
+another or inherits its successes."
   (let ((twin (find (%step-signature (plan-steps plan))
                     (procedures-for-goals (plan-goals plan))
                     :key (lambda (procedure)
                            (%step-signature (procedure-steps procedure)))
                     :test #'equal)))
-    (remember-procedure-from-plan!
-     plan
-     :name (if twin
-               (procedure-name twin)
-               (loop for n from 1
-                     for name = (intern (format nil "PROC-~A-~D"
-                                                (or (context-name context)
-                                                    'unnamed)
-                                                n)
-                                        :automa-gp)
-                     unless (find-procedure name)
-                       return name)))))
+    (cond
+      ((null twin)
+       (remember-procedure-from-plan!
+        plan
+        :name (loop for n from 1
+                    for name = (intern (format nil "PROC-~A-~D"
+                                               (or (context-name context)
+                                                   'unnamed)
+                                               n)
+                                       :automa-gp)
+                    unless (find-procedure name)
+                      return name)))
+      (live
+       (score-procedure! (procedure-name twin) :success t)))))
 
 (defun %conclude-run (context policy plan execution goals note)
   "Observe EXECUTION of PLAN against GOALS, update what POLICY allows and
@@ -450,9 +464,11 @@ failed run halts with :EXECUTION-FAILED."
          (funcall note :update :knowledge t :goals goals))
        (when (and (policy-remember-procedure policy)
                   (null (plan-reused-procedure-names plan)))
-         (funcall note :update
-                  :procedure t
-                  :name (procedure-name (%remember-fresh-plan! plan context))))
+         (let ((procedure (%remember-fresh-plan! plan context live)))
+           (when procedure
+             (funcall note :update
+                      :procedure t
+                      :name (procedure-name procedure)))))
        (values :done :completed))
       (t
        (funcall note :discrepancy :remaining left :divergences divergences)

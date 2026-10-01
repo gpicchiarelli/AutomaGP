@@ -392,9 +392,9 @@ Returns the context."
   (gp-add-goal '(sealed x))
   (gp-context))
 
-(defun %auto-note-file (path)
-  "Fresh session whose open goal (NOTED PATH) needs NOTE-FILE, which
-writes PATH through the filesystem adapter."
+(defun %auto-note-file (path &key (risk :low))
+  "Fresh session whose open goal (NOTED PATH) needs NOTE-FILE, an operator
+of RISK that writes PATH through the filesystem adapter."
   (gp-clear-memory)
   (gp-reset)
   (gp-add-fact (list 'seen path))
@@ -403,6 +403,7 @@ writes PATH through the filesystem adapter."
     :name 'note-file
     :preconditions '((seen ?path))
     :add-list '((noted ?path))
+    :risk risk
     :meta (list :external
                 (list :adapter :filesystem
                       :op :write-string
@@ -622,6 +623,56 @@ then delete that directory tree."
                           "confirmation carried for ~S"
                           (list risky auto answer)))))
       (sb-impl::unencapsulate 'execute-plan! 'watch-confirm))))
+
+(test autonomy-gate-checks-external-actions-again-after-the-confirm-fn
+  ;; The confirm-fn is the caller's code and runs between the gate's
+  ;; external-action check and the run. When it leaves a context in which
+  ;; the runner would refuse the plan, the cycle halts as for any other
+  ;; refusal; it does not signal and its approval authorizes nothing.
+  (%call-with-auto-directory
+   (lambda (dir)
+     (let* ((marker (merge-pathnames "marker.txt" dir))
+            (path (namestring marker)))
+       (flet ((drop-support ()
+                (gp-remove-fact (list 'seen path)))
+              (change-action ()
+                (setf (operator-meta (find-operator (gp-context) 'note-file))
+                      (list :external
+                            (list :adapter :filesystem
+                                  :op :write-string
+                                  :args (list :path '?path
+                                              :content "changed"))))))
+         (loop for (change halt) in (list (list #'drop-support
+                                                :external-unsupported)
+                                          (list #'change-action
+                                                :external-mismatch))
+               do (dolist (adapters '(nil t))
+                    (%auto-note-file path :risk :high)
+                    (let* ((asked 0)
+                           (summary
+                             (gp-autonomous-step
+                              :policy (make-autonomy-policy
+                                       :authority :execute
+                                       :adapters adapters
+                                       :confirm-fn
+                                       (lambda (plan context)
+                                         (declare (ignore plan context))
+                                         (incf asked)
+                                         (funcall change)
+                                         t))))
+                           (row (list halt :adapters adapters)))
+                      (is (= 1 asked) "confirm-fn calls for ~S" row)
+                      (is (eq :halted (getf summary :status))
+                          "status for ~S" row)
+                      (is (eq halt (getf summary :halt)) "halt for ~S" row)
+                      (is-false (getf summary :authorized)
+                                "authorized for ~S" row)
+                      (is (null (getf summary :execution))
+                          "execution for ~S" row)
+                      (is (eq :plan (context-mode (gp-context))))
+                      (is-false (file-exists-p marker) "file for ~S" row)
+                      (is-false (fact-p (list 'noted path) (gp-facts))
+                                "live fact for ~S" row)))))))))
 
 (test autonomy-adapters-run-only-under-execute-with-the-adapters-flag
   (%call-with-auto-directory
@@ -934,19 +985,30 @@ then delete that directory tree."
                             (procedure-operators-used (first found))))
                  (is (= 1 (procedure-success-count (first found)))
                      "~S under ~S" goal authority))))
-    ;; The same fresh plan seen again is the same procedure: one more
-    ;; success, no second copy.
-    (chain)
-    (let ((policy (make-autonomy-policy :authority :execute
-                                        :remember-procedure t
-                                        :prefer-archive nil
-                                        :learn nil)))
-      (gp-add-goal '(b 1))
-      (gp-autonomous-step :policy policy)
-      (gp-remove-fact '(b 1))
-      (gp-autonomous-step :policy policy)
-      (is (= 1 (length (gp-procedures))))
-      (is (= 2 (procedure-success-count (first (gp-procedures))))))
+    ;; The same fresh plan seen again is the same procedure, never a
+    ;; second copy: a live run gives it one more success, a simulation
+    ;; leaves its score alone.
+    (loop for (authority successes) in '((:execute 2) (:simulate 1))
+          do (chain)
+             (let ((policy (make-autonomy-policy :authority authority
+                                                 :remember-procedure t
+                                                 :prefer-archive nil
+                                                 :learn nil)))
+               (gp-add-goal '(b 1))
+               (is (eq 'automa-gp::proc-default-1
+                       (getf (%auto-phase (gp-autonomous-step :policy policy)
+                                          :update)
+                             :name)))
+               (gp-remove-fact '(b 1))
+               (let ((again (gp-autonomous-step :policy policy)))
+                 (is (eq :done (getf again :status)))
+                 (is (eq (eq authority :execute)
+                         (and (%auto-phase again :update) t))
+                     "archive update noted under ~S" authority))
+               (is (= 1 (length (gp-procedures))) "under ~S" authority)
+               (is (= successes
+                      (procedure-success-count (first (gp-procedures))))
+                   "successes under ~S" authority)))
     ;; A plan assembled from archived procedures is not stored again;
     ;; the live run scores each procedure it replayed.
     (chain)
