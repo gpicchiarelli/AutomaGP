@@ -44,22 +44,26 @@
     :initarg :adapter
     :accessor action-adapter
     :initform nil
-    :documentation "Required adapter name (symbolic); unused in Phase 1.")
+    :documentation "Required adapter name (symbolic). Kept and persisted;
+neither the planner nor the executor reads it.")
    (authorization
     :initarg :authorization
     :accessor action-authorization
     :initform nil
-    :documentation "Authorization token/requirement; unused in Phase 1."))
+    :documentation "Authorization token/requirement. Kept and persisted;
+neither the planner nor the executor reads it."))
   (:documentation "Abstract symbolic action — not an external side effect."))
 
 (defun action-p (object)
+  "True if OBJECT is an ACTION."
   (typep object 'action))
 
 (defun make-action (&key name parameters preconditions effects
                       (cost 1) (risk :low) (reversible t)
                       adapter authorization)
-  (unless name
-    (error "make-action requires :NAME"))
+  "Construct an ACTION. NAME is required: without one the TYPE-ERROR of
+CHECK-TYPE is signaled, and its STORE-VALUE restart takes a name."
+  (check-type name (not null) "an action name")
   (make-instance 'action
                  :name name
                  :parameters parameters
@@ -87,25 +91,11 @@
   "List of ACTION objects registered on CONTEXT."
   (mapcar #'cdr (context-actions context)))
 
-(defun flatten-list (x)
-  "Flatten proper lists for variable detection; atoms become singleton."
-  (cond
-    ((null x) nil)
-    ((atom x) (list x))
-    (t (append (flatten-list (car x)) (flatten-list (cdr x))))))
-
-(defun pattern-has-variable-p (pattern)
-  (some #'variable-symbol-p (flatten-list pattern)))
-
 (defun action-applicable-p (context action)
-  "Phase-1 check: each precondition must hold against visible facts.
-Concrete facts use EQUAL; patterns with ? variables need ≥1 match.
-Does not execute or simulate (Phases 3–4)."
-  (let ((facts (context-all-facts context)))
-    (every (lambda (pre)
-             (cond
-               ((null pre) t)
-               ((pattern-has-variable-p pre)
-                (not (null (find-facts pre facts))))
-               (t (not (null (fact-p pre facts))))))
-           (action-preconditions action))))
+  "True if the preconditions of ACTION hold together in the facts visible in
+CONTEXT: one choice of bindings must satisfy every pattern, so a variable
+shared by two preconditions names the same thing in both. NIL preconditions
+are ignored. Does not execute or simulate (Phases 3–4)."
+  (and (match-all (remove nil (action-preconditions action))
+                  (context-all-facts context))
+       t))

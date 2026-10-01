@@ -10,6 +10,8 @@
    #:mode-p
    #:ensure-mode
    #:mode-allows-mutation-p
+   #:unknown-keyword
+   #:unknown-keyword-what
    ;; matcher / bindings
    #:*fail*
    #:*no-bindings*
@@ -54,6 +56,12 @@
    #:make-context
    #:create-context
    #:context-add-child!
+   #:context-lineage
+   #:context-cycle
+   #:context-cycle-context
+   #:context-cycle-parent
+   #:context-add-fact!
+   #:context-remove-fact!
    #:context-query
    #:context-modify!
    #:clone-context
