@@ -515,6 +515,15 @@ is touched, and no temporary file stays behind."
         (signals persistence-error
           (write-sexp-file (merge-pathnames "never.agp" dir) (list #'car)))
         (is (= 1 (length (uiop:directory-files dir))))
+        ;; The error is signalled where it can be reported: not under the
+        ;; printer settings of the write.
+        (is (null (block signalled
+                    (handler-bind ((persistence-error
+                                     (lambda (c)
+                                       (return-from signalled
+                                         (and *print-readably*
+                                              (princ-to-string c))))))
+                      (write-sexp-file path (list #'car))))))
         ;; A write that succeeds replaces the file and leaves only it.
         (write-sexp-file path '(:kept "after"))
         (is (equal '(:kept "after") (read-sexp-file path)))

@@ -73,10 +73,13 @@ writes. The CONTINUE restart loads it anyway."))
 
 (defun %persistence-failure (control &rest arguments)
   "Signal a PERSISTENCE-ERROR whose reason is CONTROL formatted with
-ARGUMENTS."
+ARGUMENTS. A large or circular argument is printed in brief."
   (error 'persistence-error
          :path *persistence-path*
-         :reason (apply #'format nil control arguments)))
+         :reason (let ((*print-length* 8)
+                       (*print-level* 3)
+                       (*print-circle* t))
+                   (apply #'format nil control arguments))))
 
 (defun call-with-persistence-errors (path thunk)
   "Call THUNK for the file PATH. An error it signals that is not a
@@ -116,6 +119,7 @@ original condition as its reason."
   "During a read: how many data enclose the one being read.")
 
 (defun %whitespace-p (char)
+  "True when CHAR is whitespace under standard syntax."
   (member char '(#\Space #\Tab #\Newline #\Return #\Page #\Rubout)))
 
 (defun %token-end-p (char)
@@ -233,9 +237,12 @@ values of %READ-TOKEN."
         ((null first)
          (cond (escaped (symbol-of text "AUTOMA-GP"))
                ((%number-token-p text)
-                (with-standard-io-syntax
-                  (let ((*read-eval* nil))
-                    (read-from-string text))))
+                (handler-case (with-standard-io-syntax
+                                (let ((*read-eval* nil))
+                                  (read-from-string text)))
+                  (error ()
+                    (%persistence-failure "~A is not a number this image holds"
+                                          text))))
                ((every (lambda (char) (char= char #\.)) text)
                 (%persistence-failure "a token made only of dots"))
                (t (symbol-of text "AUTOMA-GP"))))
@@ -367,11 +374,17 @@ values of %READ-TOKEN."
 (defun %print-data (form)
   "FORM printed as the text of a file. Signals when FORM holds an object
 that has no readable print or that %READ-DATA would not read back."
-  (let ((text (with-standard-io-syntax
-                (let ((*package* (find-package :automa-gp))
-                      (*print-pretty* t)
-                      (*print-circle* t))
-                  (prin1-to-string form)))))
+  (let ((text (handler-case
+                  (with-standard-io-syntax
+                    (let ((*package* (find-package :automa-gp))
+                          (*print-pretty* t)
+                          (*print-circle* t))
+                      (prin1-to-string form)))
+                ;; Signalled again from out here, so that whoever reports the
+                ;; error does not print it under *PRINT-READABLY*.
+                (error (c)
+                  (error 'persistence-error :path *persistence-path*
+                                            :reason c)))))
     (handler-case (with-input-from-string (in text)
                     (%read-data in))
       (persistence-error (c)
