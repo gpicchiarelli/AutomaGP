@@ -319,15 +319,15 @@ through an irreversible step of KIND. Returns (VALUES CONTEXT PLAN)."
                                         :goal '(connection d1 computer)))))
          (*plan-runner-default-abort* nil))
     (dolist (op (studio-ops)) (register-operator! ctx op))
-    (flet ((run (&key confirm)
+    (flet ((execute-with-alternative (&key confirm)
              (handler-bind ((precondition-failure
                               (lambda (c)
                                 (declare (ignore c))
                                 (invoke-restart :use-alternative force))))
                (execute-plan! ctx plan :confirm confirm))))
-      (signals confirmation-required (run))
+      (signals confirmation-required (execute-with-alternative))
       (is (equal '((device d1)) (context-facts ctx)))
-      (is-true (execution-success (run :confirm t)))
+      (is-true (execution-success (execute-with-alternative :confirm t)))
       (is (fact-p '(connection d1 computer) (context-facts ctx))))))
 
 (test a-recorded-step-carries-its-own-risk
@@ -504,18 +504,18 @@ through an irreversible step of KIND. Returns (VALUES CONTEXT PLAN)."
 
 (test an-abandoned-run-restores-the-mode
   (let ((ctx (create-context :mode :plan)))
-    (flet ((run (mode thunk)
+    (flet ((in-mode (mode thunk)
              (automa-gp::call-with-execution-mode ctx mode thunk)))
       ;; A run that returns keeps the mode and its values.
       (is (equal '(1 2) (multiple-value-list
-                         (run :execute (lambda () (values 1 2))))))
+                         (in-mode :execute (lambda () (values 1 2))))))
       (is (eq :execute (context-mode ctx)))
       (setf (context-mode ctx) :plan)
       ;; Any other way out restores it: a THROW, an error nobody handled.
       (dolist (mode *run-modes*)
-        (catch 'abandon (run mode (lambda () (throw 'abandon nil))))
+        (catch 'abandon (in-mode mode (lambda () (throw 'abandon nil))))
         (is (eq :plan (context-mode ctx)))
-        (signals error (run mode (lambda () (error "boom"))))
+        (signals error (in-mode mode (lambda () (error "boom"))))
         (is (eq :plan (context-mode ctx)))))))
 
 (test an-unhandled-step-failure-restores-the-session-mode
