@@ -10,7 +10,7 @@ WORKBENCH  := macos/AutomaGPWorkbench
 SWIFT_CONF ?= release
 AUTOMA_GP_WEB_PORT ?= 47391
 
-.PHONY: help test web load lint workbench clean
+.PHONY: help test coverage web load lint workbench clean
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "AUTOMA GP\n\nUsage: make <target>\n\nTargets:\n"} \
@@ -18,6 +18,10 @@ help: ## Show this help
 
 test: ## Run the FiveAM suite (scripts/run-tests.sh)
 	./scripts/run-tests.sh
+
+coverage: ## Run the suite under SB-COVER; HTML report in coverage/report/
+	@test -f "$(QL_SETUP)" || { echo "Quicklisp not found at $(QL_SETUP)" >&2; exit 1; }
+	$(SBCL) --non-interactive --load "$(QL_SETUP)" --load scripts/coverage.lisp
 
 web: ## Start the Hunchentoot console on http://127.0.0.1:$(AUTOMA_GP_WEB_PORT)/
 	AUTOMA_GP_WEB_PORT=$(AUTOMA_GP_WEB_PORT) ./scripts/run-web.sh
@@ -48,5 +52,5 @@ workbench: ## Build the macOS Workbench (swift build -c $(SWIFT_CONF))
 
 clean: ## Remove compiled Lisp output for this tree and the Swift .build directory
 	rm -rf "$(HOME)/.cache/common-lisp"/*/"$(CURDIR)"
-	rm -rf $(WORKBENCH)/.build
+	rm -rf $(WORKBENCH)/.build coverage
 	find . -name '*.fasl' -type f -delete
