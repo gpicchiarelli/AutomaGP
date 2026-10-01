@@ -296,6 +296,10 @@ by EMIT-EVENT! or REACT-TO-EVENT!, and then nothing is written."
        (format out "Goal:~%    ~A~%~%" (term :goal)))
       (:goals
        (format out "Goals:~%~A~%" (terms :goals)))
+      (:ignored-goals
+       ;; A goal that is a bare label names no fact, so the search has
+       ;; nothing to make true for it.
+       (format out "Goals left out (labels, not facts):~%~A~%" (terms :goals)))
       (:state
        (format out "Current state:~%~A~%" (terms :facts)))
       (:difference
@@ -333,12 +337,16 @@ by EMIT-EVENT! or REACT-TO-EVENT!, and then nothing is written."
        (format out "Action:~%    ~A~A~%~%"
                (getf entry :operator) (%fmt-bindings (getf entry :bindings))))
       (:result
-       (format out "Result:~%    ~A~@[ for ~A~]~%~%"
-               (getf entry :status) (and (getf entry :goal) (term :goal))))
+       ;; :GOAL-CLOBBERED carries the goals still open as :GOALS.
+       (format out "Result:~%    ~A~@[ for ~A~]~%~{    still open ~A~%~}~%"
+               (getf entry :status) (and (getf entry :goal) (term :goal))
+               (mapcar #'%fmt-term (getf entry :goals))))
       (:operator-failed
-       (format out "Operator failed:~%    ~A~@[ (~A)~]~%~{    missing ~A~%~}~%"
+       (format out "Operator failed:~%    ~A~@[ (~A)~]~%~
+                    ~{    missing ~A~%~}~{    cannot ground ~A~%~}~%"
                (getf entry :operator) (getf entry :reason)
-               (mapcar #'%fmt-term (getf entry :missing))))
+               (mapcar #'%fmt-term (getf entry :missing))
+               (mapcar #'%fmt-term (getf entry :patterns))))
       (:execution-step
        (format out "Execution step (~A):~%    ~A → ~A~%~%"
                (getf entry :mode) (getf entry :operator) (getf entry :status)))

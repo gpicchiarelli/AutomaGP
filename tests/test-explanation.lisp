@@ -458,3 +458,30 @@ Each entry is (KIND . PLIST), recorded with TRACE-RECORD."
       (is (eq later (resolve-explain-topic :execution))))
     (let ((*current-plan* plan))
       (is (eq (trace-of plan) (resolve-explain-topic :plan))))))
+
+(test explanation-says-why-the-search-gave-up
+  "A label left out of the goals, an effect the operator cannot ground and
+the goals still open after a clobber are written out, not printed as raw
+trace plists."
+  (let ((ctx (make-context
+              :name 'bench
+              :facts '((device d1))
+              :operators (list (make-operator
+                                :name 'tag
+                                :preconditions '((device ?d))
+                                :add-list '((tagged ?d ?who) (ready ?d)))))))
+    ;; (READY D1) binds ?D only: the other effect cannot be grounded.
+    (plan-from-context ctx :goals '(tidy (ready d1)))
+    (let ((text (format-explanation (last-trace))))
+      (is (search "Goals left out (labels, not facts):" text))
+      (is (search "TIDY" text))
+      (is (search "Operator failed:" text))
+      (is (search "cannot ground" text))
+      (is (not (search "IGNORED-GOALS:" text)))))
+  (let ((text (with-output-to-string (out)
+                (automa-gp::%explain-entry
+                 '(:kind :result :status :goal-clobbered :goals ((a 1) (b 2)))
+                 (make-trace :phase :plan) out))))
+    (is (search "GOAL-CLOBBERED" text))
+    (is (search "still open (A 1)" text))
+    (is (search "still open (B 2)" text))))
