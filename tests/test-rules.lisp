@@ -5,18 +5,6 @@
 (def-suite rules-suite :in automa-gp-suite)
 (in-suite rules-suite)
 
-(defun %collecting-warnings (type thunk)
-  "Call THUNK with every warning of TYPE muffled.
-Returns the values of THUNK as a list, then the warnings in the order they
-were signalled. Also used by tests/test-queries.lisp."
-  (let ((seen nil))
-    (values (handler-bind ((warning (lambda (w)
-                                      (when (typep w type)
-                                        (push w seen)
-                                        (muffle-warning w)))))
-              (multiple-value-list (funcall thunk)))
-            (nreverse seen))))
-
 (defun %rule-chain (length)
   "LENGTH rules where (STAGE k) derives (STAGE k+1). A round sees only the
 facts of the rounds before it, so closing the chain takes LENGTH rounds."

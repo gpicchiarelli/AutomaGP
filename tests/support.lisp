@@ -9,6 +9,18 @@ A regression that loops then fails one check instead of hanging the suite."
      (sb-ext:timeout () :timed-out)
      (storage-condition () :exhausted)))
 
+(defun %collecting-warnings (type thunk)
+  "Call THUNK with every warning of TYPE muffled.
+Returns the values of THUNK as a list, then the warnings in the order they
+were signalled. Also used by tests/test-queries.lisp."
+  (let ((seen nil))
+    (values (handler-bind ((warning (lambda (w)
+                                      (when (typep w type)
+                                        (push w seen)
+                                        (muffle-warning w)))))
+              (multiple-value-list (funcall thunk)))
+            (nreverse seen))))
+
 (defun %build-repair-chain (depth &key (package *package*))
   "Archive DEPTH procedures that each restore the precondition of the next,
 put CHARGE-THEN-USE on top of them, then remove every fact those procedures
