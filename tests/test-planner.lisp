@@ -40,3 +40,89 @@
 
 (test normalize-ignores-symbol-goals
   (is (equal '((f 1)) (normalize-planning-goals '(label (f 1) other)))))
+
+(test normalize-returns-the-labels-too
+  (multiple-value-bind (fact-goals labels)
+      (normalize-planning-goals '(label (f 1) other))
+    (is (equal '((f 1)) fact-goals))
+    (is (equal '(label other) labels))))
+
+(test plan-records-the-goals-it-does-not-plan
+  ;; Each case is (GOALS PLANNED IGNORED).
+  (dolist (case '(((audio-system-ready) nil (audio-system-ready))
+                  ((audio-system-ready (a 1) later) ((a 1)) (audio-system-ready later))
+                  (((a 1)) ((a 1)) nil)))
+    (destructuring-bind (goals planned ignored) case
+      (let* ((plan (plan-for '((a 1)) goals nil))
+             (entries (find-trace-entries :ignored-goals (trace-of plan))))
+        (is (equal planned (plan-goals plan)))
+        (is (equal ignored (getf (plan-meta plan) :ignored-goals)))
+        (is (equal ignored (getf (first entries) :goals)))
+        (is (= (if ignored 1 0) (length entries)))
+        ;; Success speaks for the fact goals alone, and (A 1) holds.
+        (is-true (plan-success plan))
+        (is (null (plan-remaining plan)))
+        (is (deliberative-trace-p (getf (plan-meta plan) :trace)))))))
+
+(test plan-for-keeps-the-meta-it-is-given
+  (let ((plan (plan-for '((a 1)) '((b 2) later) nil
+                        :meta '(:origin :test) :context-name 'studio)))
+    (is-false (plan-success plan))
+    (is (equal '((b 2)) (plan-remaining plan)))
+    (is (equal '((a 1)) (plan-initial-state plan)))
+    (is (equal '((a 1)) (plan-final-state plan)))
+    (is (eq :test (getf (plan-meta plan) :origin)))
+    (is (equal '(later) (getf (plan-meta plan) :ignored-goals)))
+    (is (eq 'studio (getf (first (find-trace-entries :context (trace-of plan)))
+                          :name)))))
+
+(test plan-from-context-takes-goals-and-operators
+  (let* ((ctx (create-context :name 'studio :facts '((x 0)) :goals '((a 1))))
+         (make-b (make-operator :name 'make-b :add-list '((b 1))))
+         (plan (plan-from-context ctx :goals '((b 1) someday)
+                                      :operators (list make-b))))
+    (is-true (plan-success plan))
+    (is (equal '((b 1)) (plan-goals plan)))
+    (is (equal '(make-b) (plan-operators-used plan)))
+    (is (equal '(someday) (getf (plan-meta plan) :ignored-goals)))
+    (is (equal (list make-b) (getf (plan-meta plan) :operators)))
+    ;; The context itself is not changed by planning.
+    (is (equal '((x 0)) (context-all-facts ctx)))))
+
+(test plan-from-context-records-context-labels
+  (let* ((ctx (create-context :name 'studio
+                              :facts '((a 1))
+                              :goals '(audio-system-ready (a 1))))
+         (plan (plan-from-context ctx)))
+    (is (equal '((a 1)) (plan-goals plan)))
+    (is (equal '(audio-system-ready) (getf (plan-meta plan) :ignored-goals)))
+    (is (eq 'studio (getf (plan-meta plan) :context)))))
+
+(test plan-from-an-empty-state
+  (let ((plan (plan-for nil nil nil)))
+    (is-true (plan-success plan))
+    (is (null (plan-final-state plan))))
+  (let ((plan (plan-for nil '((a 1))
+                        (list (make-operator :name 'make-a :add-list '((a 1)))))))
+    (is-true (plan-success plan))
+    (is (= 1 (plan-length plan)))
+    (is (= 1 (plan-cost plan)))
+    (is (equal '(make-a) (plan-operators-used plan)))
+    (is (equal '((a 1)) (plan-final-state plan)))))
+
+(test plan-cost-sums-step-costs
+  (let ((plan (plan-for '((x 0)) '((a 1) (b 1))
+                        (list (make-operator :name 'make-a :add-list '((a 1))
+                                             :cost 3)
+                              (make-operator :name 'make-b :add-list '((b 1))
+                                             :cost 4)))))
+    (is (= 2 (plan-length plan)))
+    (is (= 7 (plan-cost plan)))))
+
+(test exported-planner-functions-are-documented
+  (dolist (name '(plan-p plan-for plan-from-context plan-length plan-cost
+                  normalize-planning-goals))
+    (is (eq :external
+            (nth-value 1 (find-symbol (symbol-name name) :automa-gp))))
+    (is (documentation name 'function)))
+  (is (documentation 'plan 'type)))

@@ -1,4 +1,4 @@
-;;;; tests/suite.lisp — FiveAM suite for AUTOMA GP Phase 1
+;;;; tests/suite.lisp — root FiveAM suite and the entry point that runs it
 
 (defpackage #:automa-gp/tests
   (:use #:cl #:automa-gp #:fiveam)
@@ -8,14 +8,20 @@
 (in-package #:automa-gp/tests)
 
 (def-suite automa-gp-suite
-  :description "AUTOMA GP Phase 1 tests")
+  :description "Every AUTOMA GP test; each file adds its own child suite.")
 
-(defun run-tests ()
-  "Run all AUTOMA GP tests; return T if all pass.
+(defun run-tests (&key (verbose (uiop:getenvp "AUTOMA_GP_TEST_VERBOSE")))
+  "Run all AUTOMA GP tests; return T when every check passes, signal an
+error otherwise. Prints the totals and every failure; with VERBOSE (or the
+environment variable AUTOMA_GP_TEST_VERBOSE set) also one line per test.
 Archive autosave/autoload stay off so the suite does not touch ~/.automa-gp."
-  (let ((*procedure-archive-autosave* nil)
-        (*procedure-archive-autoload* nil))
-    (let ((result (run! 'automa-gp-suite)))
-      (unless result
-        (error "automa-gp tests failed"))
-      result)))
+  (let* ((*procedure-archive-autosave* nil)
+         (*procedure-archive-autoload* nil)
+         (results (let ((fiveam:*test-dribble* (if verbose
+                                                   *standard-output*
+                                                   (make-broadcast-stream))))
+                    (run 'automa-gp-suite))))
+    (explain! results)
+    (unless (results-status results)
+      (error "automa-gp tests failed"))
+    t))

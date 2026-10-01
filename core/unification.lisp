@@ -1,32 +1,21 @@
 ;;;; core/unification.lisp — first-order unification (Phase 2)
 ;;;;
-;;;; Classic Lisp unification with occur-check. Uses *FAIL* / *NO-BINDINGS*
-;;;; from the matcher.
+;;;; Classic Lisp unification with occur-check. Uses *FAIL* / *NO-BINDINGS*,
+;;;; DEREFERENCE and OCCURS-CHECK-P from the matcher.
 
 (in-package #:automa-gp)
 
-(defun occurs-check-p (var x bindings)
-  "True if VAR occurs in X under BINDINGS (prevents infinite structures)."
-  (cond
-    ((eq var x) t)
-    ((and (variable-symbol-p x) (lookup-binding x bindings))
-     (occurs-check-p var (cdr (lookup-binding x bindings)) bindings))
-    ((consp x)
-     (or (occurs-check-p var (car x) bindings)
-         (occurs-check-p var (cdr x) bindings)))
-    (t nil)))
-
 (defun unify-variable (var x bindings)
-  "Unify VAR with X under BINDINGS (with occur-check)."
-  (cond
-    ((lookup-binding var bindings)
-     (unify (cdr (lookup-binding var bindings)) x bindings))
-    ((and (variable-symbol-p x) (lookup-binding x bindings))
-     (unify var (cdr (lookup-binding x bindings)) bindings))
-    ((and (not (anonymous-variable-p var))
-          (occurs-check-p var x bindings))
-     *fail*)
-    (t (extend-bindings var x bindings))))
+  "Unify the named variable VAR with X under BINDINGS (with occur-check).
+UNIFY calls this once it has dealt with the anonymous variable and with VAR
+and X being the same object."
+  (let ((term (dereference var bindings))
+        (other (dereference x bindings)))
+    (cond
+      ((not (and (eq term var) (eq other x)))
+       (unify term other bindings))
+      ((occurs-check-p var x bindings) *fail*)
+      (t (extend-bindings var x bindings)))))
 
 (defun unify (x y &optional (bindings *no-bindings*))
   "Unify X and Y. Returns bindings alist, *NO-BINDINGS*, or *FAIL*.

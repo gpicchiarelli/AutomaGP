@@ -82,7 +82,7 @@ jobs:
               echo
             fi
             echo "---"
-            echo "Verify with SBCL: \`./scripts/run-tests.sh\` after linking the tree into \`~/quicklisp/local-projects/automa-gp\`."
+            echo "Verify with SBCL and Quicklisp installed: \`./scripts/run-tests.sh\` from the unpacked tree."
           } > "$RUNNER_TEMP/release-body.md"
           cat "$RUNNER_TEMP/release-body.md"
 

@@ -54,18 +54,20 @@
    (meta
     :initarg :meta
     :accessor operator-meta
-    :initform nil))
+    :initform nil
+    :documentation "Metadata plist, e.g. :INDUCED :EXAMPLES :ASK :EXTERNAL."))
   (:documentation "Abstract MEA/planning operator."))
 
 (defun operator-p (object)
+  "True if OBJECT is an OPERATOR."
   (typep object 'operator))
 
 (defun make-operator (&key name parameters preconditions add-list delete-list
                         (cost 1) action (reversible t) (risk :low) meta)
   "Construct an OPERATOR. ADD-LIST / DELETE-LIST / PRECONDITIONS accept
-a single pattern or a list of patterns."
-  (unless name
-    (error "make-operator requires :NAME"))
+a single pattern or a list of patterns. NAME is required: without one a
+TYPE-ERROR is signalled, and its STORE-VALUE restart takes the name."
+  (check-type name (not null) "an operator name")
   (make-instance 'operator
                  :name name
                  :parameters parameters
@@ -91,7 +93,10 @@ a single pattern or a list of patterns."
                  :risk (action-risk action)))
 
 (defun find-operator (context name)
-  "Find operator named NAME among planning operators for CONTEXT."
+  "Find operator named NAME among planning operators for CONTEXT.
+While CONTEXT has no operator of its own or inherited, those are its
+actions lifted by ACTION->OPERATOR: the result is then a fresh object on
+every call, and changing it changes nothing in CONTEXT."
   (find name (context-planning-operators context)
         :key #'operator-name :test #'equal))
 
@@ -117,38 +122,34 @@ a single pattern or a list of patterns."
 
 (defun context-all-operators (context)
   "Operators visible along the parent chain (local name wins)."
-  (let ((chain nil)
-        (result nil)
-        (seen nil))
-    (loop for c = context then (context-parent c)
-          while c
-          do (push c chain))
-    (dolist (c (reverse chain))
-      (dolist (op (context-operators c))
-        (let ((n (operator-name op)))
-          (unless (member n seen :test #'equal)
-            (push n seen)
-            (push op result)))))
-    (nreverse result)))
+  (visible-by-name context #'context-operators #'operator-name))
 
 (defun context-planning-operators (context)
   "Operators for planning: explicit operators, else actions lifted."
-  (let ((ops (context-all-operators context)))
-    (if ops
-        ops
-        (mapcar #'action->operator (actions-of context)))))
+  (or (context-all-operators context)
+      (mapcar #'action->operator (actions-of context))))
+
+(defun %achieving-bindings (operator goal)
+  "The distinct binding sets under which an add-list pattern of OPERATOR
+unifies with GOAL, in add-list order."
+  (remove-duplicates
+   (loop for add in (operator-add-list operator)
+         for b = (unify goal add *no-bindings*)
+         unless (fail-p b)
+           collect b)
+   :test #'equal :from-end t))
 
 (defun operator-achieves (operator goal)
-  "If OPERATOR can achieve GOAL via some add-list pattern, return bindings
-(possibly *NO-BINDINGS*); otherwise return *FAIL*."
-  (dolist (add (operator-add-list operator) *fail*)
-    (let ((b (unify goal add *no-bindings*)))
-      (unless (eq b *fail*)
-        (return b)))))
+  "If OPERATOR can achieve GOAL via some add-list pattern, return the
+bindings of the first such pattern (possibly *NO-BINDINGS*); otherwise
+return *FAIL*. OPERATORS-FOR-GOAL gives every such pattern."
+  (let ((ways (%achieving-bindings operator goal)))
+    (if ways (first ways) *fail*)))
 
 (defun operators-for-goal (goal operators)
-  "Operators that can achieve GOAL, as alist (OPERATOR . BINDINGS)."
+  "Every way OPERATORS can achieve GOAL, as a list of (OPERATOR . BINDINGS).
+An operator appears once for each add-list pattern that unifies with GOAL
+under different bindings, so a planner can try each of them."
   (loop for op in operators
-        for b = (operator-achieves op goal)
-        unless (eq b *fail*)
-          collect (cons op b)))
+        nconc (loop for b in (%achieving-bindings op goal)
+                    collect (cons op b))))

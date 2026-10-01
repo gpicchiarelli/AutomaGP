@@ -10,6 +10,8 @@
    #:mode-p
    #:ensure-mode
    #:mode-allows-mutation-p
+   #:unknown-keyword
+   #:unknown-keyword-what
    ;; matcher / bindings
    #:*fail*
    #:*no-bindings*
@@ -54,6 +56,12 @@
    #:make-context
    #:create-context
    #:context-add-child!
+   #:context-lineage
+   #:context-cycle
+   #:context-cycle-context
+   #:context-cycle-parent
+   #:context-add-fact!
+   #:context-remove-fact!
    #:context-query
    #:context-modify!
    #:clone-context
@@ -112,6 +120,12 @@
    #:rule-conclusions
    #:forward-chain
    #:*forward-chain-limit*
+   #:forward-chain-incomplete
+   #:forward-chain-incomplete-limit
+   #:unsafe-rule
+   #:unsafe-rule-name
+   #:unsafe-rule-variables
+   #:variables-in
    ;; queries
    #:query
    #:query-facts
@@ -119,6 +133,11 @@
    #:prove
    #:prove-all
    #:*query-depth-limit*
+   #:*query-step-limit*
+   #:query-incomplete
+   #:query-incomplete-goal
+   #:query-incomplete-limit
+   #:instantiate-bindings
    ;; operators
    #:operator
    #:operator-p
@@ -139,6 +158,10 @@
    #:observation-active-p
    #:gp-observation
    #:induce-operator
+   #:merge-induced-operators
+   #:induction-error
+   #:induction-error-name
+   #:induction-error-reason
    #:gp-listen
    #:gp-note-state
    #:gp-learn-action
@@ -155,7 +178,14 @@
    #:goal-holds-p
    #:differences
    #:apply-operator
+   #:apply-stored-effects
+   #:retract-slot-conflicts
+   #:ground-pattern
+   #:ungrounded-adds
+   #:extend-bindings-from-state
    #:precondition-subgoals
+   #:missing-stored-preconditions
+   #:make-plan-step
    #:achieve
    #:achieve-all
    #:means-ends-analyze
@@ -229,6 +259,9 @@
    #:execution-meta
    #:*last-execution*
    #:*execution-confirm*
+   #:plan-refused
+   #:plan-refused-reason
+   #:plan-refused-facts
    #:expected-state-from-plan
    #:operator-needs-confirmation-p
    #:simulate-operator
@@ -254,6 +287,7 @@
    #:trace-record
    #:finalize-trace
    #:with-trace
+   #:call-with-trace
    #:last-trace
    #:trace-of
    #:find-trace-entries
@@ -358,6 +392,17 @@
    #:replay-procedure
    #:plan-from-procedure
    #:plan-consulting-archive
+   #:plan-from-ranked-procedures
+   #:plan-reused-procedure-names
+   #:unknown-procedure
+   #:unknown-procedure-name
+   #:unsuccessful-plan
+   #:unsuccessful-plan-plan
+   #:procedure-archive-error
+   #:procedure-archive-error-path
+   #:procedure-archive-error-action
+   #:procedure-archive-error-cause
+   #:*procedure-repair-archive-depth*
    #:*procedure-archive-path*
    #:*procedure-archive-autosave*
    #:*procedure-archive-autoload*
@@ -366,6 +411,16 @@
    ;; persistence service (Phase 7)
    #:*persistence-format-version*
    #:*default-snapshot-directory*
+   #:*procedure-archive-format*
+   #:*persistence-symbol-packages*
+   #:*persistence-symbol-limit*
+   #:*persistence-depth-limit*
+   #:persistence-error
+   #:persistence-error-path
+   #:persistence-error-reason
+   #:persistence-version-error
+   #:persistence-version-error-found
+   #:persistence-version-error-expected
    #:serialize-rule
    #:deserialize-rule
    #:serialize-operator

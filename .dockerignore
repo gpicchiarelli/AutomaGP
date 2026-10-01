@@ -1,7 +1,0 @@
-# Keep the Docker build context small; the test stage copies the tree.
-.git
-.DS_Store
-**/.DS_Store
-**/*.fasl
-macos/AutomaGPWorkbench/.build
-assets/img

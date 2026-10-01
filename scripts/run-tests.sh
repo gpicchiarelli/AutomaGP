@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Run the AUTOMA GP test suite with SBCL + Quicklisp.
+# The checkout this script lives in is the one under test.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
@@ -12,12 +13,8 @@ fi
 QL_SETUP="${HOME}/quicklisp/setup.lisp"
 if [[ ! -f "$QL_SETUP" ]]; then
   echo "Quicklisp not found at $QL_SETUP" >&2
-  echo "Install Quicklisp, then symlink this repo into ~/quicklisp/local-projects/" >&2
+  echo "Install Quicklisp first; see CONTRIBUTING.md." >&2
   exit 1
 fi
 
-# Ensure local-projects sees this tree
-mkdir -p "${HOME}/quicklisp/local-projects"
-ln -sfn "$ROOT" "${HOME}/quicklisp/local-projects/automa-gp"
-
-exec sbcl --non-interactive --load "$ROOT/scripts/run-tests.lisp"
+exec sbcl --non-interactive --load "$QL_SETUP" --load "$ROOT/scripts/run-tests.lisp"

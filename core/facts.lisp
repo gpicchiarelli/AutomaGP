@@ -20,15 +20,17 @@ as Phase 1: (VALUES T BINDINGS) or (VALUES NIL NIL)."
   (find fact facts :test #'fact-equal))
 
 (defun fact-same-names-p (a b)
-  "True when two facts use the same names, whatever their packages."
-  (and (consp a) (consp b)
-       (= (length a) (length b))
-       (every (lambda (x y)
-                (cond
-                  ((and (symbolp x) (symbolp y))
-                   (string= (symbol-name x) (symbol-name y)))
-                  (t (equal x y))))
-              a b)))
+  "True when two facts use the same names, whatever their packages.
+Symbols are compared by name at every depth; anything else with EQUAL."
+  (labels ((same-p (x y)
+             (cond
+               ((and (consp x) (consp y))
+                (and (same-p (car x) (car y))
+                     (same-p (cdr x) (cdr y))))
+               ((and (symbolp x) (symbolp y))
+                (string= (symbol-name x) (symbol-name y)))
+               (t (equal x y)))))
+    (and (consp a) (consp b) (same-p a b))))
 
 (defun find-fact-by-names (fact facts)
   "The stored fact whose names match FACT, or NIL."
@@ -43,11 +45,16 @@ Each result is (FACT . BINDINGS) where BINDINGS is an alist (possibly NIL)."
           collect (cons fact binds)))
 
 (defun add-fact! (facts fact)
-  "Return a new fact list with FACT asserted (idempotent)."
+  "Return FACTS with FACT asserted (idempotent).
+Despite the name nothing is modified: the result is FACTS itself when FACT
+is already there and a new list otherwise, and the caller stores it.
+CONTEXT-ADD-FACT! does that for the facts of a context."
   (if (fact-p fact facts)
       facts
       (append facts (list fact))))
 
 (defun remove-fact! (facts fact)
-  "Return a new fact list with FACT retracted."
+  "Return a fact list without FACT.
+Despite the name FACTS is not modified; the caller stores the result.
+CONTEXT-REMOVE-FACT! does that for the facts of a context."
   (remove fact facts :test #'fact-equal))

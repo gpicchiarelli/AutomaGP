@@ -9,6 +9,125 @@ versions are the increments listed in `ROADMAP.md`.
 
 ## [Unreleased]
 
+## [0.195.0] — 2026-10-01
+
+An engineering pass over the core and the memory layers: every defect found
+by a full audit was reproduced with a failing test before it was fixed.
+The suite goes from 5160 to 19669 checks while the test tree shrinks from
+about 52,000 lines to about 13,800. The web console, the JSON façade, the
+notices, the phrase interpreter, the adapters and the Workbench are not
+part of this version.
+
+### Added
+
+- Typed conditions in place of bare errors, each with a restart where a
+  caller can recover: `context-cycle`, `unknown-keyword` (`use-value`),
+  `unsafe-rule` (`continue`), `induction-error`, `plan-refused` (reasons
+  `:external-mismatch`, `:external-unsupported`, `:inherited-retraction`),
+  `procedure-archive-error` (`:retry`, `:skip`), `unknown-procedure`,
+  `unsuccessful-plan`, `persistence-error` and `persistence-version-error`.
+  The warnings `query-incomplete` and `forward-chain-incomplete` say when a
+  limit cut an answer short.
+- `context-add-fact!`, `context-remove-fact!` and `context-lineage`;
+  `call-with-trace`; `*query-step-limit*`; `*procedure-repair-archive-depth*`
+  is exported and is the one place that states the repair bound.
+- `make coverage` runs the suite under SB-COVER and prints expression and
+  branch totals; the HTML report is written to `coverage/report/`.
+- `tests/support.lisp` holds the fixtures more than one test file uses.
+
+### Changed
+
+- Tests: the 59 + 59 hand-unrolled "N levels deep" tests are one sweep over
+  every depth up to `*procedure-repair-archive-depth*` plus the refusal one
+  level past it. `test-workbench.lisp` is split by subject (narration,
+  induction, notices, phrases, external actions). No test file exceeds
+  1500 lines. `run-tests` prints totals and failures only;
+  `AUTOMA_GP_TEST_VERBOSE` restores one line per test.
+- Scripts load the checkout they live in through `asdf:*central-registry*`
+  and no longer repoint `~/quicklisp/local-projects/automa-gp`. The system
+  definition requires `sb-posix`, so a bare SBCL with ASDF loads the system.
+  The Lint workflow fails on any compiler warning or style warning.
+- Contexts: a parent link that would make a context its own ancestor is
+  refused; `context-add-child!` moves a child between parents; visible
+  facts are the union of the chain with one copy of each fact.
+  `action-applicable-p` needs one set of bindings that satisfies every
+  precondition.
+- Matching: `match` and `unify` never return bindings in which a variable
+  contains itself, and every walk over bindings ends on a circular alist.
+- Rules and queries: `prove` and `query` rename rule variables apart, check
+  for a repeated goal on the path and stop at `*query-step-limit*`; they,
+  and `forward-chain`, return a further value that says whether the answer
+  is complete. `make-rule` signals `unsafe-rule` for a consequent variable
+  no antecedent binds. `operators-for-goal` lists an operator once per add
+  pattern that fits.
+- Induction: a precondition is a removed fact or a before-fact about an
+  object of the change; a second example aligns by role, lifts as few
+  constants as fit, and keeps risk, action and meta.
+- Planning: Means-Ends Analysis detects a goal that recurs on its own
+  stack (`:goal-cycle`) and a search that returns to a state it has seen
+  (`:goal-clobbered`), keeps the variables of different operators apart,
+  binds the free variables of a precondition list together, and refuses an
+  operator whose effects it cannot ground. A plan lists goal labels it
+  left out under `:ignored-goals`.
+- Failure strategies: the retry limit counts one step; a run reports its
+  own strategy events; with `:signal` the condition reaches the caller's
+  handlers; `use-value` takes a fact list; an invalid policy is a
+  `type-error`.
+- Execution: `gp-simulate` starts from the facts visible now; an execute
+  in a child context refuses, before any step, a plan that would retract a
+  fact the child only inherits; an unknown operator refuses the whole plan
+  before the first step; the step restarts and `confirm` stay reachable
+  from a handler around `gp-run`; the mode is restored on any non-local
+  exit.
+- Events: a restored id is never issued again; posting an event already in
+  the log is an error; a reaction summary reports only what it added.
+- Autonomy: a refusal by the runner halts the step with its reason instead
+  of signalling; `:max-steps` must be a positive integer; a confirm
+  function is asked once per risky plan; a simulation never changes a
+  score.
+- Explanation: the text no longer depends on `*package*` or printer
+  settings, renders events, ignored goal labels, effects that could not be
+  grounded and the goals a clobber left open, and shows unknown entry
+  kinds as recorded. With `*trace-enabled*` false no trace is opened.
+- Procedure archive: autosave merges with the file and never drops a
+  procedure the session does not hold; a damaged file is reported on every
+  access, read with `*read-eval*` off, and never overwritten; a combined
+  plan is returned only when every requested goal holds in its final
+  state.
+- Persistence: files are read with a bound on symbols and depth and a
+  checked format version, and written to a temporary file that is then
+  renamed.
+
+### Removed
+
+- The `Dockerfile`, `.dockerignore` and `.devcontainer/`: the project is
+  built and tested with SBCL and Quicklisp on the host.
+
+### Fixed
+
+- A fact that held a variable could bind that variable to itself and hang
+  the matcher, forward chaining and the planner.
+- A loop of parent links exhausted the heap in `context-all-facts`.
+- A recursive rule gave wrong answers past one level because its variables
+  were shared between applications; a rule with two recursive antecedents
+  made `query` run without end.
+- A plan could succeed with a non-ground fact in its final state.
+- `use-alternative` could run an operator with an external action the plan
+  never recorded.
+- A simulated autonomous cycle could raise the score of an archived
+  procedure.
+- `gp-plan` could return a successful combined plan whose final state
+  lacked a requested goal.
+
+### Limits
+
+- Trace history and the other session globals are not locked: a front end
+  with several threads must serialise deliberation.
+- Without tabling, a left-recursive rule ends `query` with an incomplete
+  answer; `gp-infer` closes such rule sets.
+- A three-element fact `(predicate object value)` replaces every other
+  three-element fact with the same predicate and object.
+
 ## [0.194.0] — 2026-09-27
 
 ### Changed

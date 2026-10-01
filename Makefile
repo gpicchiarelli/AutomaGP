@@ -10,7 +10,7 @@ WORKBENCH  := macos/AutomaGPWorkbench
 SWIFT_CONF ?= release
 AUTOMA_GP_WEB_PORT ?= 47391
 
-.PHONY: help test web load lint workbench clean
+.PHONY: help test coverage web load lint workbench clean
 
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "AUTOMA GP\n\nUsage: make <target>\n\nTargets:\n"} \
@@ -19,14 +19,17 @@ help: ## Show this help
 test: ## Run the FiveAM suite (scripts/run-tests.sh)
 	./scripts/run-tests.sh
 
+coverage: ## Run the suite under SB-COVER; HTML report in coverage/report/
+	@test -f "$(QL_SETUP)" || { echo "Quicklisp not found at $(QL_SETUP)" >&2; exit 1; }
+	$(SBCL) --non-interactive --load "$(QL_SETUP)" --load scripts/coverage.lisp
+
 web: ## Start the Hunchentoot console on http://127.0.0.1:$(AUTOMA_GP_WEB_PORT)/
 	AUTOMA_GP_WEB_PORT=$(AUTOMA_GP_WEB_PORT) ./scripts/run-web.sh
 
-load: ## Quickload automa-gp, automa-gp/web and automa-gp/tests; fail on any error
+load: ## Load automa-gp, automa-gp/web and automa-gp/tests from this checkout; fail on any error
 	@test -f "$(QL_SETUP)" || { echo "Quicklisp not found at $(QL_SETUP)" >&2; exit 1; }
-	@mkdir -p "$(HOME)/quicklisp/local-projects"
-	@ln -sfn "$(CURDIR)" "$(HOME)/quicklisp/local-projects/automa-gp"
 	$(SBCL) --non-interactive --load "$(QL_SETUP)" \
+	  --eval '(push (uiop:getcwd) asdf:*central-registry*)' \
 	  --eval '(handler-bind ((warning (function muffle-warning))) (ql:quickload (list :automa-gp :automa-gp/web :automa-gp/tests) :silent t))' \
 	  --eval '(format t "~&automa-gp ~A loaded~%" (symbol-value (find-symbol "*VERSION*" :automa-gp)))'
 
@@ -35,7 +38,7 @@ lint: ## markdownlint, yamllint, actionlint, shellcheck — each skipped when no
 	  echo ">> markdownlint-cli2"; markdownlint-cli2 "**/*.md"; \
 	else echo ">> markdownlint-cli2 not installed, skipping (brew install markdownlint-cli2)"; fi
 	@if command -v yamllint >/dev/null 2>&1; then \
-	  echo ">> yamllint"; yamllint -c .yamllint.yaml .github .devcontainer .pre-commit-config.yaml CITATION.cff; \
+	  echo ">> yamllint"; yamllint -c .yamllint.yaml --strict .github .markdownlint.yaml .markdownlint-cli2.yaml .yamllint.yaml .pre-commit-config.yaml CITATION.cff; \
 	else echo ">> yamllint not installed, skipping (brew install yamllint)"; fi
 	@if command -v actionlint >/dev/null 2>&1; then \
 	  echo ">> actionlint"; actionlint; \
@@ -49,5 +52,5 @@ workbench: ## Build the macOS Workbench (swift build -c $(SWIFT_CONF))
 
 clean: ## Remove compiled Lisp output for this tree and the Swift .build directory
 	rm -rf "$(HOME)/.cache/common-lisp"/*/"$(CURDIR)"
-	rm -rf $(WORKBENCH)/.build
+	rm -rf $(WORKBENCH)/.build coverage
 	find . -name '*.fasl' -type f -delete

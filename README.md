@@ -24,7 +24,7 @@
   <a href="version.lisp"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgpicchiarelli%2FAutomaGP%2Fmain%2Fversion.lisp-expr&search=%22(%5B0-9.%5D%2B)%22&replace=%241&label=version&color=214237" alt="Version, read from version.lisp-expr on main"></a>
   <a href="automa-gp.asd"><img src="https://img.shields.io/badge/Common%20Lisp-SBCL-3f5f72.svg" alt="Common Lisp on SBCL"></a>
   <a href="adapters"><img src="https://img.shields.io/badge/target-macOS-111412.svg" alt="Target: macOS"></a>
-  <a href="tests"><img src="https://img.shields.io/badge/tests-359%20passing-63735f.svg" alt="359 tests passing"></a>
+  <a href="tests"><img src="https://img.shields.io/badge/tests-489%20passing-63735f.svg" alt="489 tests passing"></a>
   <a href="https://github.com/gpicchiarelli/AutomaGP/commits/main"><img src="https://img.shields.io/github/last-commit/gpicchiarelli/AutomaGP?color=3f5f72" alt="Last commit"></a>
 </p>
 
@@ -90,7 +90,7 @@ Three surfaces reach the same session. The REPL is primary. The JSON façade in 
 
 Four memory layers sit beside the context. Working memory is a snapshot of the current facts, goals, and mode. Knowledge memory holds durable facts and rules that can be merged into a context. Episodic memory records plans and executions with their outcome. Procedural memory stores successful plans as named procedures with a success and failure count. `gp-save` and `gp-load` write and read the whole bundle as readable s-expressions in `.agp` files (the default type when a path has no extension).
 
-The procedure archive is the part that learns. `gp-remember-procedure` stores the last successful plan under a name and writes the archive to `~/.automa-gp/procedure-archive.agp`. An unsuccessful plan is refused before the archive is touched. `gp-plan` consults that archive before searching: an exact goal match comes first, then a procedure whose goals include the request, then a combination of procedures that each cover a part of it. Steps whose extra goals cannot be restored are left aside and a search fills the gap. When a stored step meets a missing precondition, the planner repairs it with other archived procedures, up to sixty-one levels deep, and falls back to plain Means-Ends Analysis past that. A live `gp-run` of a reused procedure updates its score. Simulation leaves the score alone.
+The procedure archive is the part that learns. `gp-remember-procedure` stores the last successful plan under a name and writes the archive to `~/.automa-gp/procedure-archive.agp`. An unsuccessful plan is refused before the archive is touched. `gp-plan` consults that archive before searching: an exact goal match comes first, then a procedure whose goals include the request, then a combination of procedures that each cover a part of it. Steps whose extra goals cannot be restored are left aside and a search fills the gap. When a stored step meets a missing precondition, the planner repairs it with other archived procedures, up to sixty-one levels deep (`*procedure-repair-archive-depth*`), and falls back to plain Means-Ends Analysis past that. A live `gp-run` of a reused procedure updates its score. Simulation leaves the score alone.
 
 ```lisp
 (gp-remember-procedure :name 'configure-interface)   ; store and autosave
@@ -104,7 +104,7 @@ The procedure archive is the part that learns. `gp-remember-procedure` stores th
 
 Events are facts with a lifecycle. `gp-emit` records an event on the context. `gp-react` matches pending events against registered reactions, which assert facts and add goals. Goal-directed planning and event-driven reaction coexist in the same loop.
 
-Autonomy is one controlled cycle: react to pending events, plan for open goals, then simulate or execute according to the policy. The policy has three authorities. `:READ` observes and plans. `:SIMULATE`, the default, also runs the plan on a copy of the facts. `:EXECUTE` changes the live context and still asks for confirmation on high-risk or irreversible operators unless the policy says `:auto-confirm t`. Adapters stay off until the policy enables them.
+Autonomy is one controlled cycle: react to pending events, plan for open goals, then simulate or execute according to the policy. The policy has three authorities. `:READ` reacts to pending events and reports what is still open; it never plans. `:SIMULATE`, the default, also runs the plan on a copy of the facts. `:EXECUTE` changes the live context and still asks for confirmation on high-risk or irreversible operators unless the policy says `:auto-confirm t`. Adapters stay off until the policy enables them.
 
 ```lisp
 (gp-reset)
@@ -173,12 +173,12 @@ cd macos/AutomaGPWorkbench && swift run
 
 ## Install and run
 
-You need SBCL and Quicklisp. On macOS, `brew install sbcl` and the [Quicklisp installer](https://www.quicklisp.org/beta/) are enough. The scripts symlink this checkout into `~/quicklisp/local-projects/automa-gp` on first run.
+You need SBCL and Quicklisp. On macOS, `brew install sbcl` and the [Quicklisp installer](https://www.quicklisp.org/beta/) are enough. The scripts load the checkout they live in and change nothing outside it. To `ql:quickload` the system from your own REPL, link the checkout once: `ln -sfn "$PWD" ~/quicklisp/local-projects/automa-gp`.
 
 ```bash
 git clone https://github.com/gpicchiarelli/AutomaGP.git
 cd AutomaGP
-./scripts/run-tests.sh      # FiveAM suite: 359 tests, 5160 checks
+./scripts/run-tests.sh      # FiveAM suite: 489 tests, 19669 checks
 ./scripts/run-web.sh        # operator console on http://127.0.0.1:47391/
 ```
 
