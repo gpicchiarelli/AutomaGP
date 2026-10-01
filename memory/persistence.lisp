@@ -110,7 +110,7 @@ original condition as its reason."
   "During a read: how many symbols the read has created so far.")
 
 (defvar *read-labels* nil
-  "During a read: alist from the n of each #n= read so far to its datum.")
+  "During a read: table from the n of each #n= read so far to its datum.")
 
 (defvar *read-depth* 0
   "During a read: how many data enclose the one being read.")
@@ -303,16 +303,17 @@ values of %READ-TOKEN."
          (char (%next-char stream)))
     (cond
       ((and label (char= char #\=))
-       (when (assoc label *read-labels*)
-         (%persistence-failure "the label #~D= is defined twice" label))
        (let ((datum (%read-datum stream)))
-         (push (cons label datum) *read-labels*)
-         datum))
+         (when (nth-value 1 (gethash label *read-labels*))
+           (%persistence-failure "the label #~D= is defined twice" label))
+         (setf (gethash label *read-labels*) datum)))
       ((and label (char= char #\#))
-       (cdr (or (assoc label *read-labels*)
-                (%persistence-failure
-                 "#~D# comes before the end of #~D=; circular data is not read"
-                 label label))))
+       (multiple-value-bind (datum found) (gethash label *read-labels*)
+         (unless found
+           (%persistence-failure
+            "#~D# comes before the end of #~D=; circular data is not read"
+            label label))
+         datum))
       (label
        (%persistence-failure "#~D~C is not read as data" label char))
       (t
@@ -355,7 +356,7 @@ values of %READ-TOKEN."
                     (remove nil (mapcar #'find-package
                                         *persistence-symbol-packages*)))))
         (*read-symbols-created* 0)
-        (*read-labels* nil)
+        (*read-labels* (make-hash-table))
         (*read-depth* 0)
         ;; FIND-PACKAGE may consult the local nicknames of *PACKAGE*.
         (*package* (find-package :automa-gp)))
@@ -382,14 +383,20 @@ that has no readable print or that %READ-DATA would not read back."
 ;;; Files
 ;;; ---------------------------------------------------------------------------
 
+(defun %typeless-p (pathname)
+  "True when PATHNAME has no type. UIOP gives a string without a dot the
+type :UNSPECIFIC, not NIL."
+  (member (pathname-type pathname) '(nil :unspecific)))
+
 (defun ensure-snapshot-path (path &key (ensure-directory t))
   "PATH as a pathname, with the type agp when it has none. A relative PATH
 is placed under *DEFAULT-SNAPSHOT-DIRECTORY* when that is set and is left
-relative otherwise. Creates its directory unless ENSURE-DIRECTORY is NIL."
+relative otherwise. Creates its directory unless ENSURE-DIRECTORY is NIL.
+Every function here that takes a path resolves it this way, once."
   (let* ((p (uiop:ensure-pathname path :want-pathname t))
-         (p (if (pathname-type p)
-                p
-                (make-pathname :defaults p :type "agp")))
+         (p (if (%typeless-p p)
+                (make-pathname :defaults p :type "agp")
+                p))
          (p (if *default-snapshot-directory*
                 (uiop:merge-pathnames*
                  p (uiop:ensure-directory-pathname *default-snapshot-directory*))
@@ -397,6 +404,17 @@ relative otherwise. Creates its directory unless ENSURE-DIRECTORY is NIL."
     (when ensure-directory
       (ensure-directories-exist p))
     p))
+
+(defun %write-target (pathname)
+  "The absolute pathname of the file that writing PATHNAME replaces: the
+file a symbolic link at PATHNAME leads to, else PATHNAME under the true name
+of its directory, which exists. The temporary file is made beside it, and
+the rename needs both names absolute."
+  (or (probe-file pathname)
+      (make-pathname
+       :name (pathname-name pathname)
+       :type (pathname-type pathname)
+       :defaults (truename (uiop:pathname-directory-pathname pathname)))))
 
 (defun write-sexp-file (path form)
   "Write FORM to PATH as one readable s-expression in UTF-8. Returns the
@@ -410,14 +428,31 @@ Signals PERSISTENCE-ERROR."
     (with-persistence-errors (p)
       (let ((text (%print-data form)))
         (ensure-directories-exist p)
-        ;; Through a symbolic link, replace the file it leads to.
-        (uiop:with-staging-pathname (staged (or (probe-file p) p))
+        (uiop:with-staging-pathname (staged (%write-target p))
           (with-open-file (out staged :direction :output
                                       :if-exists :supersede
                                       :external-format :utf-8)
             (write-string text out)
             (terpri out)))))
     p))
+
+(defun %read-path (path)
+  "The file to read for PATH: the one ENSURE-SNAPSHOT-PATH names or, when
+that one does not exist and PATH has no type, the file of the bare name if
+there is one. A string without a type was once written under its bare name,
+and those files are still found."
+  (let ((typed (ensure-snapshot-path path :ensure-directory nil)))
+    (or (and (%typeless-p (uiop:ensure-pathname path :want-pathname t))
+             (not (probe-file typed))
+             (probe-file (make-pathname :type nil :defaults typed)))
+        typed)))
+
+(defun %read-file (pathname)
+  "The one datum in the file PATHNAME, which is opened as it stands: the
+callers have resolved it with %READ-PATH."
+  (with-persistence-errors (pathname)
+    (with-open-file (in pathname :direction :input :external-format :utf-8)
+      (%read-data in))))
 
 (defun read-sexp-file (path)
   "Read the one s-expression in the UTF-8 file PATH, as data.
@@ -428,20 +463,24 @@ that does not exist yet is created only in a package of
 *PERSISTENCE-SYMBOL-LIMIT* of them are; no package is created.
 Signals PERSISTENCE-ERROR for a file that is missing, is not such data,
 or breaks one of those limits."
-  (let ((p (ensure-snapshot-path path :ensure-directory nil)))
-    (with-persistence-errors (p)
-      (with-open-file (in p :direction :input :external-format :utf-8)
-        (%read-data in)))))
+  (%read-file (%read-path path)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Serialization (objects → readable plists and back)
 ;;; ---------------------------------------------------------------------------
 
+(defun %plist-p (object)
+  "True when OBJECT is a proper list of even length."
+  (let ((length (and (listp object) (ignore-errors (list-length object)))))
+    (and length (evenp length))))
+
 (defun %form-plist (form tag)
-  "The property list of FORM, which must be a list that begins with TAG."
+  "The property list of FORM, which must be TAG followed by a property list."
   (unless (and (consp form) (eq (car form) tag))
     (%persistence-failure "expected a (~S ...) form, found ~S"
                           tag (if (consp form) (car form) form)))
+  (unless (%plist-p (cdr form))
+    (%persistence-failure "the (~S ...) form is not a property list" tag))
   (cdr form))
 
 (defun %check-format-version (found expected)
@@ -710,11 +749,13 @@ the reader of the file; it is computed again from the counts on load."
 
 (defun deserialize-episodic-memory (form)
   "The episodic memory that an (:EPISODIC ...) form describes, cut to its
-limit. A form without a limit gets *EPISODIC-MEMORY-LIMIT*."
-  (destructuring-bind (&key limit episodes &allow-other-keys)
+limit. A form that names no limit gets *EPISODIC-MEMORY-LIMIT*; the limit
+NIL, which keeps every episode, is restored as it was saved."
+  (destructuring-bind (&key (limit *episodic-memory-limit*) episodes
+                       &allow-other-keys)
       (%form-plist form :episodic)
     (make-episodic-memory
-     :limit (or limit *episodic-memory-limit*)
+     :limit limit
      :episodes (mapcar #'deserialize-episode episodes))))
 
 (defun serialize-procedural-memory (pm)
@@ -755,7 +796,7 @@ to the session procedural memory. Returns PATH."
   "The file to read for the archive PATH: PATH, with the type agp when it
 has none, if that file exists; else its sibling of type sexp, the type
 archives had before agp, if that one exists; else PATH."
-  (let ((p (ensure-snapshot-path path :ensure-directory nil)))
+  (let ((p (%read-path path)))
     (or (probe-file p)
         (when (equalp (pathname-type p) "agp")
           (probe-file (make-pathname :defaults p :type "sexp")))
@@ -764,7 +805,7 @@ archives had before agp, if that one exists; else PATH."
 (defun %archive-procedures (form)
   "The procedure forms of FORM, a procedure archive of the format this
 image writes."
-  (unless (and (consp form)
+  (unless (and (%plist-p form)
                (eq (getf form :kind) :automa-gp-procedure-archive))
     (%persistence-failure "the file is not an AUTOMA GP procedure archive"))
   (%check-format-version (getf form :format) *procedure-archive-format*)
@@ -776,12 +817,13 @@ The merged procedures keep the order they have in the file. Returns the
 memory store. When no file is at PATH, a sibling of type sexp is read
 instead: archives had that type before agp. A PATH with no type means agp.
 Signals PERSISTENCE-ERROR, and merges nothing, when the file cannot be
-read as a procedure archive."
+read as a procedure archive, and the continuable PERSISTENCE-VERSION-ERROR
+when it carries another format number than *PROCEDURE-ARCHIVE-FORMAT*."
   (let ((resolved (%procedure-archive-read-path path)))
     (with-persistence-errors (resolved)
       (let* ((*loading-procedure-archive* t)
              (procedures (mapcar #'deserialize-procedure
-                                 (%archive-procedures (read-sexp-file resolved))))
+                                 (%archive-procedures (%read-file resolved))))
              (memory (ensure-procedural-memory)))
         ;; INSTALL-PROCEDURE! puts each procedure first.
         (dolist (procedure (reverse procedures))
@@ -798,7 +840,8 @@ read as a procedure archive."
   (serialize-context context))
 
 (defun resume-context (form)
-  "Rebuild a CONTEXT from a suspend/serialize form."
+  "Rebuild a CONTEXT from a suspend/serialize form. Signals
+PERSISTENCE-ERROR when FORM is not a (:CONTEXT ...) property list."
   (deserialize-context form))
 
 ;;; ---------------------------------------------------------------------------
@@ -846,11 +889,11 @@ Objects are reconstituted; missing sections are NIL.
 Signals PERSISTENCE-ERROR when the file cannot be read as a snapshot, and
 the continuable PERSISTENCE-VERSION-ERROR when it carries another format
 version than *PERSISTENCE-FORMAT-VERSION*."
-  (let ((p (ensure-snapshot-path path :ensure-directory nil)))
+  (let ((p (%read-path path)))
     (with-persistence-errors (p)
       (destructuring-bind (&key format-version saved-at meta context knowledge
                              episodic procedural &allow-other-keys)
-          (%snapshot-plist (read-sexp-file p))
+          (%snapshot-plist (%read-file p))
         (list :format-version format-version
               :saved-at saved-at
               :meta meta
@@ -869,9 +912,9 @@ version than *PERSISTENCE-FORMAT-VERSION*."
 (defun restore-context (path)
   "Load a CONTEXT from PATH (a :CONTEXT file or a :SNAPSHOT with :CONTEXT).
 Signals PERSISTENCE-ERROR when the file holds neither."
-  (let ((p (ensure-snapshot-path path :ensure-directory nil)))
+  (let ((p (%read-path path)))
     (with-persistence-errors (p)
-      (let ((form (read-sexp-file p)))
+      (let ((form (%read-file p)))
         (case (and (consp form) (car form))
           (:context (deserialize-context form))
           (:snapshot
