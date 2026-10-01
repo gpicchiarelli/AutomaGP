@@ -88,6 +88,16 @@ test instead of hanging the suite."
                   (((p a 1 2) (p a 1) (p a))
                    (p a 2)
                    ((p a 1 2) (p a)))
+                  ;; A slot needs a predicate and an object.
+                  (((nil d1 off) (p nil 1))
+                   (nil d1 on)
+                   ((nil d1 off) (p nil 1)))
+                  (((nil d1 off) (p nil 1))
+                   (p nil 2)
+                   ((nil d1 off) (p nil 1)))
+                  (((p a 1))
+                   p
+                   ((p a 1)))
                   (((power-state d1 off) (power-state d2 off) (device d1))
                    (power-state d1 on)
                    ((power-state d2 off) (device d1)))))
@@ -128,8 +138,31 @@ test instead of hanging the suite."
     ;; The delete that did not ground removed nothing.
     (is (fact-p '(mode d1 slow) next))
     (is (notany #'automa-gp::pattern-has-variable-p next))
-    ;; A recorded effect that still holds a variable is not asserted either.
-    (is (equal facts (apply-stored-effects facts '((mode d1 ?m)) nil)))))
+    ;; A recorded effect that still holds a variable is not asserted either,
+    ;; and one that is not a fact at all changes nothing.
+    (is (equal facts (apply-stored-effects facts '((mode d1 ?m)) nil)))
+    (is (equal facts (apply-stored-effects facts '(ready (seen d1 ?))
+                                           '(idle (mode d1 ?old) (mode ? slow)))))
+    ;; Failed bindings ground nothing.
+    (is (equal facts (apply-operator facts op *fail*)))
+    (is (equal (operator-add-list op) (ungrounded-adds op *fail*)))
+    (is (fail-p (extend-bindings-from-state (operator-preconditions op)
+                                            *fail* facts)))))
+
+(test recorded-preconditions-are-checked-against-the-facts
+  (let ((facts '((a 1) (b 2))))
+    ;; Each case is (RECORDED-PRECONDITIONS MISSING).
+    (dolist (case '((nil nil)
+                    (((a 1) (b 2)) nil)
+                    (((a 1) (c 3)) ((c 3)))
+                    ;; The anonymous variable is recorded as it is.
+                    (((b ?) (c ?)) ((c ?)))
+                    ;; Something that is not a fact cannot hold.
+                    ((a (a 1)) (a))))
+      (destructuring-bind (recorded missing) case
+        (is (equal missing
+                   (missing-stored-preconditions (list :preconditions recorded)
+                                                 facts)))))))
 
 (test operator-with-an-ungrounded-add-is-refused
   (let* ((op (%op 'ready
@@ -257,6 +290,66 @@ test instead of hanging the suite."
     (when (plan-p plan)
       (is-false (plan-success plan))
       (is (member :goal-clobbered (%trace-statuses plan))))))
+
+(test precondition-undone-by-a-subgoal-is-achieved-again
+  ;; BUILD needs A and B. A holds at the start and MAKE-B removes it.
+  (let ((operators (list (%op 'build :pre '((a 1) (b 1)) :add '((built 1)))
+                         (%op 'make-b :add '((b 1)) :del '((a 1)))
+                         (%op 'make-a :add '((a 1))))))
+    (multiple-value-bind (ok final steps left)
+        (within-seconds (10)
+          (means-ends-analyze '((a 1)) '((built 1)) operators))
+      (is-true ok)
+      (is (null left))
+      (is (equal '(make-b make-a build) (%planned-operators steps)))
+      (is (null (differences final '((a 1) (b 1) (built 1)))))
+      ;; The step still names the subgoals that were missing when BUILD was
+      ;; chosen.
+      (is (equal '((b 1)) (getf (third steps) :subgoals))))))
+
+(test operator-is-refused-when-its-preconditions-do-not-hold-together
+  ;; CUT needs one thing that is both held and sharp. The two subgoals
+  ;; share a variable but are achieved one at a time, and here they are
+  ;; answered with different things: CUT must not be applied.
+  (let* ((operators (list (%op 'cut
+                               :pre '((holding ?p) (sharp ?p))
+                               :add '((cut 1)))
+                          (%op 'grab :pre '((tool ?q)) :add '((holding ?q)))
+                          (%op 'sharpen :pre '((blade ?q)) :add '((sharp ?q)))))
+         (plan (plan-for '((tool hammer) (blade knife)) '((cut 1)) operators))
+         (failed (find-trace-entries :operator-failed (trace-of plan))))
+    (is-false (plan-success plan))
+    (is (null (plan-steps plan)))
+    (is (= 1 (length failed)))
+    (is (eq :preconditions-unmet (getf (first failed) :reason)))
+    (is (equal '((sharp hammer)) (getf (first failed) :missing)))
+    (is (member :missing
+                (mapcar (lambda (entry) (getf entry :status))
+                        (find-trace-entries :precondition (trace-of plan)))))))
+
+(test operator-whose-effects-undo-the-goal-is-refused
+  ;; The second add takes the slot the first one filled.
+  (let* ((operators (list (%op 'switch
+                               :pre '((device ?d))
+                               :add '((state ?d on) (state ?d ready)))))
+         (plan (plan-for '((device d1)) '((state d1 on)) operators)))
+    (is-false (plan-success plan))
+    (is (null (plan-steps plan)))
+    (is (equal '((state d1 on)) (plan-remaining plan)))
+    (is (member :goal-not-achieved (%trace-statuses plan)))))
+
+(test achieve-returns-the-state-when-the-goal-already-holds
+  (let ((state '((a 1)))
+        (plan '(:earlier-step)))
+    (is (equal (list state plan t)
+               (multiple-value-list (achieve '(a 1) state nil plan 0))))
+    ;; A goal that holds is not a cycle, even when it is being pursued.
+    (is (equal (list state plan t)
+               (multiple-value-list
+                (achieve '(a 1) state nil plan 0 '((a 1))))))
+    (is-true (goal-holds-p nil state))
+    (is-true (goal-holds-p '(a ?x) state))
+    (is-false (goal-holds-p '(b ?x) state))))
 
 (defun %cycle-operators (&rest more)
   "Two ways to G that need P and two ways to P that need G, then MORE."

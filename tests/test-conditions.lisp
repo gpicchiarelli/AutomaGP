@@ -291,8 +291,59 @@ Returns (VALUES PLAN CONTEXT)."
 
 (test strategy-policy-is-checked
   (signals type-error (make-strategy :policy :bogus))
+  (signals type-error (make-strategy :policy nil))
+  (dolist (limit '(-1 1.5 :many nil))
+    (signals type-error (make-strategy :policy :retry :retry-limit limit)))
   (dolist (policy '(:signal :skip :retry :abort :ask))
-    (is (eq policy (strategy-policy (make-strategy :policy policy))))))
+    (is (eq policy (strategy-policy (make-strategy :policy policy)))))
+  (is (zerop (strategy-retry-limit (make-strategy :policy :retry
+                                                  :retry-limit 0)))))
+
+(test exhausted-retry-limit-without-default-abort-reaches-the-caller
+  ;; Each case is (RETRY-LIMIT ATTEMPTS).
+  (dolist (case '((0 1) (1 2) (3 4)))
+    (destructuring-bind (limit expected) case
+      (with-failure-strategy (:retry :retry-limit limit)
+        (let* ((attempts 0)
+               (*plan-runner-default-abort* nil)
+               (failure
+                 (handler-case
+                     (handler-bind ((gp-error #'plan-runner-condition-handler))
+                       (call-with-gp-restarts
+                        (lambda ()
+                          (incf attempts)
+                          (error 'action-failed :reason "permanent"))))
+                   (action-failed (c) c))))
+          (is (typep failure 'action-failed))
+          (is (= expected attempts))
+          (is (eq :retry-exhausted
+                  (getf (first (strategy-events-of)) :kind))))))))
+
+(test strategy-declines-outside-a-step
+  ;; No restart is active here, so every policy leaves the condition alone.
+  (let ((failure (make-condition 'action-failed :reason "nowhere")))
+    (is (null (let ((*deliberative-strategy* nil))
+                (maybe-invoke-strategy failure))))
+    (dolist (policy '(:signal :skip :retry :abort :ask))
+      (with-failure-strategy (policy)
+        (is (null (maybe-invoke-strategy failure)))
+        (is (null (plan-runner-condition-handler failure)))
+        (is (null (strategy-events-of)))))))
+
+(test strategy-events-are-recorded-only-on-a-strategy
+  (let ((*deliberative-strategy* nil))
+    (is (eq :skip (record-strategy-event :skip :operator 'connect)))
+    (is (null (strategy-events-of))))
+  (let ((strategy (make-strategy :policy :skip)))
+    (let ((*deliberative-strategy* strategy))
+      (is (eq :skip (record-strategy-event :skip :operator 'connect)))
+      (is (eq :retry (record-strategy-event :retry :operator 'connect))))
+    ;; The strategy can be read when it is no longer the current one.
+    (is (equal '(:skip :retry) (%event-kinds (strategy-events-of strategy))))
+    (is (not (eq (strategy-events strategy) (strategy-events-of strategy))))
+    (is (equal '(connect) (strategy-skipped strategy)))
+    (is (= 1 (strategy-retry-count strategy)))
+    (is (null (getf (first (strategy-events strategy)) :trace-id)))))
 
 ;;; --- Recoveries ---
 
@@ -368,7 +419,11 @@ Returns what the step returned and the events recorded, :ASK-USER aside."
   (let ((op (failing-connect-op))
         (step '(:operator connect)))
     (dolist (case '(((:use-alternative) nil)
+                    ((:use-alternative 42) nil)
+                    ((:use-value 42) nil)
                     ((:ask-user) :use-alternative)
+                    ((:ask-user) (:use-alternative . 42))
+                    ((:ask-user) (:use-value . 42))
                     ((:ask-user) :bogus)
                     ((:ask-user) (:bogus . 1))
                     ((:ask-user) 42)))
@@ -445,6 +500,122 @@ Returns what the step returned and the events recorded, :ASK-USER aside."
       (is (equal '(((a 1)))
                  (typed "((a 1))" #'automa-gp::read-form-prompt "USE-VALUE"))))))
 
+(test alternatives-are-tried-once-each-in-order
+  (let* ((bad (failing-connect-op))
+         (first-alternative (make-operator :name 'first-alternative))
+         (second-alternative (make-operator :name 'second-alternative))
+         (tried nil))
+    (with-failure-strategy (:signal)
+      (signals action-failed
+        (handler-bind ((precondition-failure
+                         (lambda (c)
+                           (declare (ignore c))
+                           (invoke-restart :use-alternative))))
+          (call-with-gp-restarts
+           (lambda ()
+             (push (and *gp-alternative-operator*
+                        (operator-name *gp-alternative-operator*))
+                   tried)
+             (error 'precondition-failure :operator bad))
+           :operator bad
+           :alternatives (list first-alternative second-alternative))))
+      (is (equal '(nil first-alternative second-alternative) (reverse tried)))
+      (is (equal '((first-alternative connect) (second-alternative connect))
+                 (loop for event in (reverse (strategy-events-of))
+                       collect (list (getf event :operator)
+                                     (getf event :replaced))))))
+    ;; The alternative is bound only while the step runs.
+    (is (null *gp-alternative-operator*))))
+
+(defun %fail-then-recover-interactively (restart-name typed alternatives)
+  "Fail a CONNECT step and take RESTART-NAME the way the debugger does,
+with TYPED as what is read from *QUERY-IO*. The step succeeds once an
+alternative is bound. Returns the values of the step in a list."
+  (let* ((bad (failing-connect-op))
+         (facts '((device d1)))
+         (*ask-user-fn* nil)
+         (*query-io* (make-two-way-stream (make-string-input-stream typed)
+                                          (make-broadcast-stream))))
+    (multiple-value-list
+     (handler-bind ((precondition-failure
+                      (lambda (c)
+                        (invoke-restart-interactively
+                         (find-restart restart-name c)))))
+       (call-with-gp-restarts
+        (lambda ()
+          (if *gp-alternative-operator*
+              (values '((done 1)) :alternative)
+              (simulate-operator facts bad '((?d . d1)))))
+        :operator bad :alternatives alternatives :facts-on-skip facts)))))
+
+(test restarts-can-be-taken-interactively
+  ;; Each case is (RESTART TYPED EXPECTED-FACTS EXPECTED-FLAG).
+  (dolist (case '((:use-value "((a 1))" ((a 1)) :use-value)
+                  (:skip "" ((device d1)) :skip)
+                  (:abort-execution "" ((device d1)) :abort)
+                  ;; ASK-USER reads the choice, and for a bare :USE-VALUE
+                  ;; the value after it.
+                  (:ask-user ":skip" ((device d1)) :skip)
+                  (:ask-user ":nonsense :abort-execution" ((device d1)) :abort)
+                  (:ask-user ":use-value ((b 2))" ((b 2)) :use-value)
+                  (:ask-user "(:use-value (c 3))" ((c 3)) :use-value)))
+    (destructuring-bind (restart typed facts flag) case
+      (let ((values (%fail-then-recover-interactively restart typed nil)))
+        (is (equal facts (first values)) "~S typed ~S" restart typed)
+        (is (eq flag (third values)) "~S typed ~S" restart typed))))
+  ;; USE-ALTERNATIVE asks nothing: it takes the next alternative.
+  (dolist (case '((:use-alternative "") (:ask-user ":use-alternative")))
+    (destructuring-bind (restart typed) case
+      (is (equal '(((done 1)) :alternative)
+                 (%fail-then-recover-interactively
+                  restart typed (list (force-connect-op))))))))
+
+(test restart-reports-name-the-step
+  (let ((reports nil))
+    (handler-bind ((action-failed
+                     (lambda (c)
+                       (setf reports
+                             (loop for name in '(:retry :skip :abort-execution
+                                                 :use-value :use-alternative
+                                                 :ask-user)
+                                   collect (princ-to-string
+                                            (find-restart name c))))
+                       (invoke-restart :skip))))
+      (call-with-gp-restarts
+       (lambda () (error 'action-failed :reason "transient"))
+       :operator (power-on-op)))
+    (is (= 6 (length reports)))
+    (is (every (lambda (report) (plusp (length report))) reports))
+    (is (search "POWER-ON" (first reports)))
+    (is (search "POWER-ON" (second reports)))))
+
+(test step-result-records-the-step
+  (let* ((before (list '(a 1)))
+         (after (list '(a 1) '(b 2)))
+         (result (make-step-result (power-on-op) *no-bindings* before after
+                                   :status :ok :missing '((c 3))
+                                   :external :none)))
+    (is (eq 'power-on (getf result :operator)))
+    (is (null (getf result :bindings)))
+    (is (eq :ok (getf result :status)))
+    (is (equal '((c 3)) (getf result :missing)))
+    (is (eq :none (getf result :external)))
+    (is (equal before (getf result :before)))
+    (is (not (eq before (getf result :before))))
+    (is (equal after (getf result :after)))
+    (is (not (eq after (getf result :after)))))
+  ;; Each case is (OPERATOR NAME-SHOWN).
+  (dolist (case (list (list (power-on-op) "POWER-ON")
+                      (list 'connect "CONNECT")
+                      (list nil "?")
+                      (list 42 "?")))
+    (destructuring-bind (operator name) case
+      (is (string= name (getf (make-step-result operator '((?d . d1)) nil nil)
+                              :operator)))
+      (is (equal '((?d . d1))
+                 (getf (make-step-result operator '((?d . d1)) nil nil)
+                       :bindings))))))
+
 ;;; --- Conditions ---
 
 (test condition-readers-and-reports
@@ -467,7 +638,18 @@ Returns what the step returned and the events recorded, :ASK-USER aside."
           (is (equal b (funcall bindings-of c)))
           (is (search "POWER-ON" (princ-to-string c))))))
     (is (search "NO-SUCH" (princ-to-string
-                           (make-condition 'unknown-operator :name 'no-such))))))
+                           (make-condition 'unknown-operator :name 'no-such))))
+    (is (search "transient"
+                (princ-to-string
+                 (make-condition 'action-failed :reason "transient"))))
+    (is (search "(P 1)"
+                (princ-to-string
+                 (make-condition 'precondition-failure
+                                 :operator op :missing '((p 1))))))
+    (is (search "IRREVERSIBLE"
+                (princ-to-string
+                 (make-condition 'confirmation-required
+                                 :operator op :reason :irreversible))))))
 
 (test exported-condition-functions-are-documented
   (dolist (name '(make-strategy record-strategy-event strategy-events-of

@@ -58,7 +58,36 @@
         (is (equal planned (plan-goals plan)))
         (is (equal ignored (getf (plan-meta plan) :ignored-goals)))
         (is (equal ignored (getf (first entries) :goals)))
-        (is (= (if ignored 1 0) (length entries)))))))
+        (is (= (if ignored 1 0) (length entries)))
+        ;; Success speaks for the fact goals alone, and (A 1) holds.
+        (is-true (plan-success plan))
+        (is (null (plan-remaining plan)))
+        (is (deliberative-trace-p (getf (plan-meta plan) :trace)))))))
+
+(test plan-for-keeps-the-meta-it-is-given
+  (let ((plan (plan-for '((a 1)) '((b 2) later) nil
+                        :meta '(:origin :test) :context-name 'studio)))
+    (is-false (plan-success plan))
+    (is (equal '((b 2)) (plan-remaining plan)))
+    (is (equal '((a 1)) (plan-initial-state plan)))
+    (is (equal '((a 1)) (plan-final-state plan)))
+    (is (eq :test (getf (plan-meta plan) :origin)))
+    (is (equal '(later) (getf (plan-meta plan) :ignored-goals)))
+    (is (eq 'studio (getf (first (find-trace-entries :context (trace-of plan)))
+                          :name)))))
+
+(test plan-from-context-takes-goals-and-operators
+  (let* ((ctx (create-context :name 'studio :facts '((x 0)) :goals '((a 1))))
+         (make-b (make-operator :name 'make-b :add-list '((b 1))))
+         (plan (plan-from-context ctx :goals '((b 1) someday)
+                                      :operators (list make-b))))
+    (is-true (plan-success plan))
+    (is (equal '((b 1)) (plan-goals plan)))
+    (is (equal '(make-b) (plan-operators-used plan)))
+    (is (equal '(someday) (getf (plan-meta plan) :ignored-goals)))
+    (is (equal (list make-b) (getf (plan-meta plan) :operators)))
+    ;; The context itself is not changed by planning.
+    (is (equal '((x 0)) (context-all-facts ctx)))))
 
 (test plan-from-context-records-context-labels
   (let* ((ctx (create-context :name 'studio

@@ -178,13 +178,18 @@ tried."
                   (setf b (first solutions))))))
           joint))))
 
+(defun %instantiated-preconditions (operator bindings)
+  "Preconditions of OPERATOR with BINDINGS substituted. One whose variables
+are not all bound stays a pattern. None when BINDINGS is *FAIL*."
+  (loop for pre in (operator-preconditions operator)
+        for instance = (substitute-bindings pre bindings)
+        unless (fail-p instance)
+          collect instance))
+
 (defun precondition-subgoals (operator bindings facts)
   "Preconditions of OPERATOR, instantiated by BINDINGS, that do not hold in
 FACTS. One that still has a variable holds when some fact matches it."
-  (loop for pre in (operator-preconditions operator)
-        for g = (substitute-bindings pre bindings)
-        unless (or (fail-p g) (goal-holds-p g facts))
-          collect g))
+  (differences facts (%instantiated-preconditions operator bindings)))
 
 (defun %operator-bindings (operator bindings)
   "Alist from the variables of OPERATOR's preconditions and add list to
@@ -275,6 +280,9 @@ NEW-STATE can be the empty list, so test the third value."
 (defun try-operator (operator goal bindings state operators plan depth
                      &optional goal-stack)
   "Try OPERATOR to achieve GOAL: satisfy precondition subgoals, then apply.
+The subgoals are the preconditions that do not hold in STATE. A precondition
+that held and is undone while a subgoal is achieved is achieved again, as
+ACHIEVE-ALL does for any goals.
 Returns (VALUES NEW-STATE NEW-PLAN T). Returns (VALUES NIL NIL NIL) when a
 subgoal cannot be achieved, a precondition is still missing afterwards, an
 add pattern is left with a variable, or GOAL does not hold after the
@@ -282,7 +290,8 @@ effects."
   (let* ((name (operator-name operator))
          (preconditions (operator-preconditions operator))
          (b (extend-bindings-from-state preconditions bindings state))
-         (subs (precondition-subgoals operator b state)))
+         (wanted (%instantiated-preconditions operator b))
+         (subs (differences state wanted)))
     (trace-record :selected-operator
                   :operator name
                   :goal goal
@@ -291,22 +300,20 @@ effects."
     (dolist (sg subs)
       (trace-record :subgoal :goal sg :for-operator name))
     (multiple-value-bind (state2 plan2 ok)
-        (achieve-all subs state operators plan (1+ depth)
+        (achieve-all wanted state operators plan (1+ depth)
                      (cons goal goal-stack))
       (if (not ok)
           (values nil nil nil)
           (let* ((b2 (extend-bindings-from-state preconditions b state2))
                  (still-missing (precondition-subgoals operator b2 state2))
                  (ungrounded (ungrounded-adds operator b2)))
-            (dolist (pre preconditions)
-              (let ((g (substitute-bindings pre b2)))
-                (unless (fail-p g)
-                  (trace-record :precondition
-                                :goal g
-                                :status (if (goal-holds-p g state2)
-                                            :satisfied
-                                            :missing)
-                                :operator name))))
+            (dolist (g (%instantiated-preconditions operator b2))
+              (trace-record :precondition
+                            :goal g
+                            :status (if (goal-holds-p g state2)
+                                        :satisfied
+                                        :missing)
+                            :operator name))
             (cond
               (still-missing
                (trace-record :operator-failed

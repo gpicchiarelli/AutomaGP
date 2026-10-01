@@ -64,10 +64,10 @@ make it true, so there is nothing to plan for it."
 (defun plan-for (state goals operators &key meta context-name)
   "Construct a PLAN to achieve GOALS from STATE using OPERATORS.
 Records deliberative decisions into a fresh trace attached to plan meta.
-Only the fact goals among GOALS are planned (NORMALIZE-PLANNING-GOALS).
-PLAN-SUCCESS speaks for those alone. The labels left out are recorded
-under :IGNORED-GOALS in the plan meta and in the trace, so a plan never
-passes for an answer to a goal it did not consider."
+Only the fact goals among GOALS are planned (NORMALIZE-PLANNING-GOALS),
+and PLAN-SUCCESS speaks for those alone. The labels left out are recorded
+under :IGNORED-GOALS in the plan meta and in the trace, so the plan itself
+says which of the requested goals it did not consider."
   (multiple-value-bind (fact-goals labels) (normalize-planning-goals goals)
     (with-trace (:plan :context-name context-name)
       (when context-name
