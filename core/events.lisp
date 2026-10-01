@@ -162,21 +162,7 @@ no later event is issued the same id."
 
 (defun context-all-event-reactions (context)
   "Event reactions along the parent chain (local names win)."
-  (let ((chain nil)
-        (result nil)
-        (seen nil))
-    (loop for c = context then (context-parent c)
-          while c
-          do (push c chain))
-    (dolist (c (reverse chain))
-      (dolist (r (context-event-reactions c))
-        (let ((n (event-reaction-name r)))
-          (cond
-            ((and n (member n seen :test #'equal)) nil)
-            (t
-             (when n (push n seen))
-             (push r result))))))
-    (nreverse result)))
+  (visible-by-name context #'context-event-reactions #'event-reaction-name))
 
 (defun match-event-reaction (reaction event)
   "Match REACTION :WHEN against EVENT. Returns bindings or *FAIL*."
@@ -234,8 +220,7 @@ Returns the GP-EVENT (status :PENDING)."
           (append (context-events context) (list event)))
     (when assert-fact
       (let ((fact (event-form event)))
-        (setf (context-facts context)
-              (add-fact! (context-facts context) fact))))
+        (context-add-fact! context fact)))
     (trace-record :event
                   :action :emit
                   :type (event-type event)
@@ -282,8 +267,7 @@ therefore neither asserted nor added."
               (%apply-reaction-bindings reaction bindings)
             (dolist (fact facts)
               (unless (fact-p fact (context-facts context))
-                (setf (context-facts context)
-                      (add-fact! (context-facts context) fact))
+                (context-add-fact! context fact)
                 (push fact facts-added)))
             (dolist (goal goals)
               (unless (goal-active-p context goal)
@@ -314,8 +298,7 @@ Returns the new facts, in the order they were derived."
   (let ((new (nth-value 1 (forward-chain (context-all-facts context)
                                          (context-all-rules context)))))
     (dolist (fact new)
-      (setf (context-facts context)
-            (add-fact! (context-facts context) fact)))
+      (context-add-fact! context fact))
     new))
 
 (defun process-pending-events! (context &key (plan nil) (infer nil))

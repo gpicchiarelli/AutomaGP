@@ -651,3 +651,13 @@ through an irreversible step of KIND. Returns (VALUES CONTEXT PLAN)."
       (is (equal '(connect)
                  (mapcar (lambda (entry) (getf entry :operator))
                          (find-trace-entries :action (trace-of result))))))))
+
+(test an-alternative-is-offered-once-however-many-add-patterns-fit
+  (let* ((planned (make-operator :name 'planned :add-list '((p b a))))
+         (other (make-operator :name 'other
+                               :add-list '((p ?x a) (p b ?y)))))
+    (is (equal '(other)
+               (mapcar #'operator-name
+                       (automa-gp::alternatives-for-step
+                        '(:goal (p b a) :operator planned)
+                        (list planned other)))))))

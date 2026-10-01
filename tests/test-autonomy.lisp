@@ -888,7 +888,8 @@ then delete that directory tree."
 (test autonomy-does-not-run-a-plan-the-runner-refuses-after-the-gate
   ;; The gate and the runner ask the same question about external
   ;; actions. Should the answer change between the two, the runner's
-  ;; refusal reaches the caller: no step ran and the mode is restored.
+  ;; refusal halts the step with its reason: no step ran, nothing is
+  ;; signalled, and the mode is restored.
   (%call-with-auto-directory
    (lambda (dir)
      (let* ((marker (merge-pathnames "marker.txt" dir))
@@ -908,13 +909,12 @@ then delete that directory tree."
                                       'changed-since-the-gate #'supported)
                 (dolist (authority '(:simulate :execute))
                   (%auto-note-file path)
-                  (let ((marker-summary (list :marker t)))
-                    (setf *last-autonomy* marker-summary)
-                    (signals error
-                      (gp-autonomous-step
-                       :policy (make-autonomy-policy :authority authority
-                                                     :adapters t)))
-                    (is (eq marker-summary *last-autonomy*)))
+                  (gp-autonomous-step
+                   :policy (make-autonomy-policy :authority authority
+                                                 :adapters t))
+                  (is (eq :halted (getf (gp-last-autonomy) :status)))
+                  (is (eq :external-unsupported
+                          (getf (gp-last-autonomy) :halt)))
                   (is (eq :plan (context-mode (gp-context))))
                   (is (null (gp-last-execution)))
                   (is-false (file-exists-p marker))
@@ -1051,3 +1051,20 @@ then delete that directory tree."
       (is (= 2 (length (gp-procedures))))
       (dolist (name '(make-b make-d))
         (is (= 2 (procedure-success-count (gp-find-procedure name))))))))
+
+(test autonomy-halts-when-the-runner-refuses-to-retract-an-inherited-fact
+  "An execute that would retract a fact the context only inherits is refused
+by the runner before any step; the autonomous step halts with that reason
+and signals nothing."
+  (multiple-value-bind (child parent) (child-of-powered-off-room)
+    (add-goal! child '(power-state interface-01 on))
+    (let ((inherited (copy-list (context-facts parent)))
+          (summary (autonomous-step
+                    :context child
+                    :policy (make-autonomy-policy :authority :execute
+                                                  :auto-confirm t)
+                    :remember nil)))
+      (is (eq :halted (getf summary :status)))
+      (is (eq :inherited-retraction (getf summary :halt)))
+      (is (equal inherited (context-facts parent)))
+      (is (null (context-facts child))))))

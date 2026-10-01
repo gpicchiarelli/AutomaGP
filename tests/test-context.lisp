@@ -5,14 +5,6 @@
 (def-suite context-suite :in automa-gp-suite)
 (in-suite context-suite)
 
-(defmacro %bounded (&body body)
-  "The value of BODY, or :TIMED-OUT / :EXHAUSTED when BODY does not end.
-A regression that loops then fails one check instead of hanging the suite.
-The matcher and unification suites use it too."
-  `(handler-case (sb-ext:with-timeout 5 ,@body)
-     (sb-ext:timeout () :timed-out)
-     (storage-condition () :exhausted)))
-
 (test create-and-query-context
   (let ((ctx (create-context :name 'studio
                              :facts '((device interface-01)
@@ -99,7 +91,9 @@ The matcher and unification suites use it too."
   (let* ((a (create-context :name 'a))
          (b (create-context :name 'b :parent a)))
     (setf (slot-value a 'automa-gp::parent) b)
-    (dolist (walk (list #'context-lineage #'context-all-facts))
+    (dolist (walk (list #'context-lineage #'context-all-facts
+                        #'context-all-rules #'context-all-operators
+                        #'context-all-event-reactions))
       (is (eq :loop (%bounded (handler-case (funcall walk b)
                                 (context-cycle (c)
                                   (and (eq b (context-cycle-context c))

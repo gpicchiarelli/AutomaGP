@@ -2,6 +2,13 @@
 
 (in-package #:automa-gp/tests)
 
+(defmacro %bounded (&body body)
+  "The value of BODY, or :TIMED-OUT / :EXHAUSTED when BODY does not end.
+A regression that loops then fails one check instead of hanging the suite."
+  `(handler-case (sb-ext:with-timeout 5 ,@body)
+     (sb-ext:timeout () :timed-out)
+     (storage-condition () :exhausted)))
+
 (defun %build-repair-chain (depth &key (package *package*))
   "Archive DEPTH procedures that each restore the precondition of the next,
 put CHARGE-THEN-USE on top of them, then remove every fact those procedures

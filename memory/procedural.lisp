@@ -640,8 +640,9 @@ Returns (VALUES NEW-STATE STEPS NIL) or NIL."
   (let ((*trace-enabled* nil))
     (multiple-value-bind (ok final steps left)
         (means-ends-analyze state missing operators)
+      ;; FINAL is the state after the steps; an empty one is still a state.
       (when (and ok (null left))
-        (values (or final state) steps nil)))))
+        (values final steps nil)))))
 
 (defun %facts-still-missing (facts state)
   "The members of FACTS that do not hold in STATE.
@@ -1233,4 +1234,8 @@ request has no fact-like goal, Means-Ends Analysis."
                   :operators ops))
        reused)
       (t
-       (plan-from-context context :goals g :operators ops)))))
+       ;; The goals go in as given: PLAN-FROM-CONTEXT normalizes them itself
+       ;; and records the labels it leaves out under :IGNORED-GOALS.
+       (plan-from-context context
+                          :goals (or goals (goals-of context))
+                          :operators ops)))))

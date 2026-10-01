@@ -199,9 +199,9 @@ and a run reports its own events. With no trace open, every event.
 NIL when STRATEGY is NIL."
   (when strategy
     (if (deliberative-trace-p *current-trace*)
-        (remove (trace-id *current-trace*) (strategy-events strategy)
-                :key (lambda (event) (getf event :trace-id))
-                :test-not #'eq)
+        (let ((id (trace-id *current-trace*)))
+          (remove-if-not (lambda (event) (eq id (getf event :trace-id)))
+                         (strategy-events strategy)))
         (copy-list (strategy-events strategy)))))
 
 (defmacro with-failure-strategy ((policy &key (retry-limit 3)) &body body)

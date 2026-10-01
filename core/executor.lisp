@@ -334,14 +334,17 @@ Returns (VALUES NEW-FACTS STEP-RESULT). Signals GP-ERROR on failure."
 ;;; --- Plan steps ---
 
 (defun alternatives-for-step (step operators)
-  "Other operators that achieve the step's goal (excluding the planned one)."
+  "Other operators that achieve the step's goal (excluding the planned one),
+each listed once however many of its add patterns fit the goal."
   (let* ((goal (getf step :goal))
          (planned (getf step :operator)))
     (when (and goal operators)
-      (loop for pair in (operators-for-goal goal operators)
-            for op = (car pair)
-            unless (equal (operator-name op) planned)
-              collect op))))
+      (remove-duplicates
+       (loop for pair in (operators-for-goal goal operators)
+             for op = (car pair)
+             unless (equal (operator-name op) planned)
+               collect op)
+       :test #'eq :from-end t))))
 
 (defun %resolve-plan-steps (plan &key context operators)
   "Pair each step of PLAN with the operator that runs it: (STEP . OPERATOR).
@@ -560,8 +563,7 @@ PLAN-REFUSED when a recorded external action no longer matches, or when
 the facts of CONTEXT no longer support an action that would be handed to
 an adapter, including through earlier steps; UNKNOWN-OPERATOR when a step
 names an operator that is gone and carries no record to run from."
-  (unless (plan-p plan)
-    (error "SIMULATE-PLAN requires a PLAN, got ~S" plan))
+  (check-type plan plan "a PLAN")
   (%refuse-unrunnable-external-actions plan
                                        :context context
                                        :operators operators)
@@ -638,8 +640,7 @@ failure leads to an inherited fact after all, or when adapters are on and
 USE-ALTERNATIVE names an operator whose :EXTERNAL action the plan never
 recorded. A USE-VALUE fact list that would retract an inherited fact
 signals PLAN-REFUSED as well and is not written."
-  (unless (plan-p plan)
-    (error "EXECUTE-PLAN! requires a PLAN, got ~S" plan))
+  (check-type plan plan "a PLAN")
   (let* ((*invoke-adapters* (if adapters-p adapters *invoke-adapters*))
          (ops (context-planning-operators context)))
     (%refuse-unrunnable-external-actions plan

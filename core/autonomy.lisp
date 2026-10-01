@@ -362,9 +362,10 @@ episode. No condition is handled here: what the runner signals reaches
 the caller's handlers with the step restarts (RETRY, SKIP,
 ABORT-EXECUTION, …) still available. If the run is left by a non-local
 exit instead, the context mode is put back as it was. That includes the
-runner's own refusal of a plan on the external-action checks the gate
-made a moment before, which can only differ if the context changed in
-between; no step ran in that case."
+runner's PLAN-REFUSED: the external-action checks the gate made a moment
+before, which can only differ if the context changed in between, and the
+retraction of a fact the context only inherits. No step ran in that case,
+and AUTONOMOUS-STEP turns the refusal into a halt with its reason."
   (let ((authority (policy-authority policy))
         (previous (context-mode context))
         (execution nil))
@@ -563,7 +564,14 @@ Does not loop — see AUTONOMOUS-LOOP."
                 (unless ok
                   (return-from cycle (values :halted why)))
                 (setf execution
-                      (%run-authorized-plan ctx pol plan confirmed remember)))
+                      (handler-case
+                          (%run-authorized-plan ctx pol plan confirmed remember)
+                        ;; The runner refuses before its first step, so
+                        ;; nothing ran and nothing needs a restart.
+                        (plan-refused (refusal)
+                          (let ((refused (plan-refused-reason refusal)))
+                            (note :execute :refused refused)
+                            (return-from cycle (values :halted refused)))))))
               (if (eq authority :execute)
                   (note :execute :mode :execute
                                  :success (execution-success execution)

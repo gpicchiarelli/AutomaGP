@@ -141,8 +141,7 @@ A rule with a name replaces the local rule of that name."
 An object whose NAME a nearer context already used is shadowed and left
 out. An object without a name is never shadowed."
   (let ((seen nil))
-    (loop for c = context then (context-parent c)
-          while c
+    (loop for c in (context-lineage context)
           nconc (loop for object in (funcall local c)
                       for n = (funcall name object)
                       unless (and n (member n seen :test #'equal))
