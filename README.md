@@ -194,7 +194,7 @@ From a REPL, or from SLIME or SLY:
 (gp-reset)
 ```
 
-Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The web system adds Hunchentoot. Tests add FiveAM. The Workbench needs Xcode command line tools for `swift run`. CI runs the same suite on Ubuntu, macOS, and FreeBSD 14.x, so the core is portable; the `macos` adapter and the Terminal.app look are the parts that need a Mac. Day-to-day wrappers live in the root `Makefile` (`make test`, `make load`, `make web`, `make lint`).
+Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The web system adds Hunchentoot. Tests add FiveAM. The Workbench needs Xcode command line tools for `swift run`. CI runs the same suite on Ubuntu, macOS, and FreeBSD 14.x, so the core is portable; the `macos` adapter and the Terminal.app look are the parts that need a Mac. Day-to-day wrappers live in the root `Makefile` (`make test`, `make coverage`, `make load`, `make web`, `make lint`).
 
 ## Repository layout
 
@@ -206,15 +206,17 @@ Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The 
 | [`domains`](domains) | Five domain packs and the `gp-load-domain` registry |
 | [`interface`](interface) | REPL commands, notice and watch, `gp-ask`, narration, JSON, the web API façade, and the Hunchentoot console |
 | [`macos/AutomaGPWorkbench`](macos/AutomaGPWorkbench) | Native SwiftUI shell over the JSON API |
-| [`tests`](tests) | FiveAM suite, one file per component |
-| [`scripts`](scripts) | `run-tests.sh`, `run-tests.lisp`, `run-web.sh` |
-| [`docs`](docs) | [Architecture](docs/architecture.md), the [master prompt](docs/PROMPT.md), and two worked REPL setups |
+| [`tests`](tests) | FiveAM suite, one file per component; `support.lisp` holds the shared fixtures and `test-docs.lisp` runs the examples in this README |
+| [`scripts`](scripts) | `run-tests.sh` and `run-web.sh` with the Lisp files they load, and `coverage.lisp` for `make coverage` |
+| [`docs`](docs) | [Architecture](docs/architecture.md), the [master prompt](docs/PROMPT.md), the [phase 2 prompt](docs/PROMPT-FASE-2.md), and two worked REPL setups |
 | [`examples`](examples) | Loadable versions of those worked setups |
 | [`assets/img`](assets/img) | Hero image and logo |
 
 ## Roadmap and status
 
 The twelve phases in [`ROADMAP.md`](ROADMAP.md) are delivered: context, matching, Means-Ends Analysis, execution, conditions, explanation, memory, adapters, domains, events, web, and policy-gated autonomy. Everything after that is deepening, one small tested increment per version. The most recent series is about external actions and the workbench gate around them: a plan names the adapter actions it would run, execute and simulate refuse when those actions changed or the facts no longer support them, and the workbench can take one autonomous step or a bounded loop, set that bound, keep showing the last outcome, read open goals and pending events from status, keep Passo and Ciclo idle when neither remains, refuse the same idle call from the REPL and HTTP API, refuse Pianifica and `gp-plan` when no goal is still open, keep Simula and Esegui idle until a successful plan exists, end plan-failed listening when archive use rebuilds a successful plan, refuse Ask or add-goal when the goal already holds, refuse induce without an active listening session, refuse remember without a successful plan, keep the HTML operator console’s Simulate and Run idle under the same external-match and support rules as the workbench (from status, before the plan GET), keep Remember, Step, and Loop idle under the same readiness rules, keep Plan idle until an open goal exists or Goals JSON is typed, keep Plan idle when that typed JSON is invalid or already holds, keep Use/Score idle without a matching archived procedure and during archive refresh, keep React idle without a pending event, keep Use idle when an archived procedure does not apply to the current facts, keep Emit and Add fact idle until Event/Fact JSON is a non-empty array, and request archive `applies` only when gating Use so listing stays cheap, with applies probes cached across identical fact snapshots and cleared on reset. `POST /api/simulate` and `/api/run` refuse the same plan-success and external gates before calling the core; workbench help follows `externalSupported` even while the external list is cleared at status; Esegui stays idle until that refresh's plan GET returns, like HTML Run; the HTML console idles its mutation controls when a refresh fails, like the workbench when disconnected; the workbench autonomy picker keeps `:read` (Leggi) instead of upgrading it to simulate, and Leggi captions name react-then-halt for pending events; Esegui confirm and HTML execute Step/Loop confirm match fact-update vs adapters-only-if-needed. `version.lisp` holds the current number and [`CHANGELOG.md`](CHANGELOG.md) has one entry per version.
+
+Version 0.195.0 was an engineering pass over the core and the memory layers: every audited defect was reproduced by a test before its fix, conditions are typed and carry restarts, and the tests are parametric. [`docs/architecture.md`](docs/architecture.md) states the resulting contract. The work that comes next is described in [`docs/PROMPT-FASE-2.md`](docs/PROMPT-FASE-2.md).
 
 Priority is correctness, then clarity, then testability, then performance.
 
