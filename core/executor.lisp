@@ -83,8 +83,10 @@ hold in the final state.")
   ((reason
     :initarg :reason
     :reader plan-refused-reason
-    :documentation ":EXTERNAL-MISMATCH, :EXTERNAL-UNSUPPORTED or
-:INHERITED-RETRACTION.")
+    :documentation ":EXTERNAL-MISMATCH (an external action is not the one
+the plan recorded), :EXTERNAL-UNSUPPORTED (the facts no longer reach an
+external action) or :INHERITED-RETRACTION (a fact the context only inherits
+would be retracted).")
    (facts
     :initarg :facts
     :reader plan-refused-facts
@@ -374,16 +376,40 @@ PRECONDITION-FAILURE. Returns (VALUES NEW-FACTS STEP-RESULT)."
     (t
      (project-stored-effects facts step))))
 
+(defun %refuse-unrecorded-external-action (context step operator)
+  "Signal PLAN-REFUSED when OPERATOR would hand an adapter an action the
+plan never recorded for STEP. The pre-flight match covers the operator
+CONTEXT registers under the step's name. An operator chosen in its place
+through USE-ALTERNATIVE was not part of that match, so its :EXTERNAL action
+is one nobody was shown. With adapters off nothing is refused: the
+alternative applies its symbolic effects like any other operator."
+  (when (and *invoke-adapters*
+             (operator-external-spec operator)
+             (not (eq operator (lookup-operator (getf step :operator)
+                                                :context context))))
+    (error 'plan-refused
+           :reason :external-mismatch
+           :operator operator
+           :bindings (bindings-from-step step)
+           :step step
+           :mode :execute
+           :context context)))
+
 (defun %execute-plan-step! (context step operator &key confirm)
   "EXECUTE plan STEP against live CONTEXT, in the order EXECUTE-OPERATOR!
 documents: outcome, confirmation, adapter, commit. Only an ordinary step
-reaches an adapter. An :EFFECTS-ONLY step and a step that runs from its
-record apply symbolic effects only, and are confirmed against the risk of
-the operator, or the risk recorded on the step when the operator is gone.
+reaches an adapter, and only with the operator the plan was matched
+against: an alternative operator with an :EXTERNAL action signals
+PLAN-REFUSED while adapters are on. An :EFFECTS-ONLY step and a step that
+runs from its record apply symbolic effects only, and are confirmed against
+the risk of the operator, or the risk recorded on the step when the
+operator is gone.
 Returns (VALUES NEW-FACTS STEP-RESULT)."
   (if (and (operator-p operator) (not (getf step :effects-only)))
-      (execute-operator! context operator (bindings-from-step step)
-                         :confirm confirm)
+      (progn
+        (%refuse-unrecorded-external-action context step operator)
+        (execute-operator! context operator (bindings-from-step step)
+                           :confirm confirm))
       (let ((bindings (bindings-from-step step)))
         (multiple-value-bind (new result)
             (%apply-plan-step (context-all-facts context) step operator
@@ -453,8 +479,9 @@ STEPS comes from %RESOLVE-PLAN-STEPS. RUN-STEP is called with (FACTS STEP
 OPERATOR) and returns (VALUES NEW-FACTS STEP-RESULT); OPERATOR is the
 alternative chosen through USE-ALTERNATIVE while one is bound. A GP-ERROR
 goes to the deliberative strategy and then, by default, aborts the run.
-In :EXECUTE mode a USE-VALUE fact list is committed to CONTEXT, and the
-trace records an :ACTION only for a step that actually ran.
+In :EXECUTE mode a USE-VALUE fact list is committed to CONTEXT (one that
+CONTEXT cannot hold signals PLAN-REFUSED and is not written), and the trace
+records an :ACTION only for a step that actually ran.
 Returns (VALUES FINAL-FACTS STEP-RESULTS ABORTED-P)."
   (let ((results nil)
         (aborted nil))
@@ -604,7 +631,13 @@ context cannot record. UNKNOWN-OPERATOR is signalled when a step names an
 operator that is gone and carries no record to run from.
 An effects-only step, whose preconditions no longer hold, applies the
 symbolic leftovers and does not invoke the adapter. That step is marked
-:EXTERNAL :WITHHELD when adapters were requested."
+:EXTERNAL :WITHHELD when adapters were requested.
+Once the run has started, a refusal concerns one step and is signalled
+under that step's restarts: PLAN-REFUSED when recovery from an earlier
+failure leads to an inherited fact after all, or when adapters are on and
+USE-ALTERNATIVE names an operator whose :EXTERNAL action the plan never
+recorded. A USE-VALUE fact list that would retract an inherited fact
+signals PLAN-REFUSED as well and is not written."
   (unless (plan-p plan)
     (error "EXECUTE-PLAN! requires a PLAN, got ~S" plan))
   (let* ((*invoke-adapters* (if adapters-p adapters *invoke-adapters*))

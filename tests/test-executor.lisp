@@ -425,6 +425,44 @@ through an irreversible step of KIND. Returns (VALUES CONTEXT PLAN)."
       (is (not (fact-p '(power-state interface-01 on)
                        (context-all-facts child)))))))
 
+(test a-supplied-state-cannot-retract-an-inherited-fact
+  ;; CONNECT fails in the powered-off room; USE-VALUE supplies the outcome.
+  (multiple-value-bind (child parent) (child-of-powered-off-room)
+    (let ((inherited (copy-list (context-facts parent)))
+          (plan (manual-plan
+                 '((connection interface-01 computer))
+                 (list (list :operator 'connect
+                             :bindings '((?d . interface-01))
+                             :goal '(connection interface-01 computer)))))
+          (*plan-runner-default-abort* nil))
+      (flet ((execute-supplying (facts)
+               (handler-case
+                   (handler-bind ((precondition-failure
+                                    (lambda (c)
+                                      (declare (ignore c))
+                                      (invoke-restart :use-value facts))))
+                     (execute-plan! child plan))
+                 (plan-refused (c) c))))
+        ;; A state without the inherited facts is refused and not written.
+        (let ((refusal (execute-supplying
+                        '((connection interface-01 computer)))))
+          (is (typep refusal 'plan-refused))
+          (when (typep refusal 'plan-refused)
+            (is (eq :inherited-retraction (plan-refused-reason refusal)))
+            (is (same-facts-p inherited (plan-refused-facts refusal)))))
+        (is (null (context-facts child)))
+        (is (equal inherited (context-facts parent)))
+        ;; A state that keeps them is written, and only its local part.
+        (let ((result (execute-supplying
+                       (append inherited
+                               '((connection interface-01 computer))))))
+          (is (execution-result-p result))
+          (when (execution-result-p result)
+            (is-true (execution-success result))))
+        (is (equal '((connection interface-01 computer))
+                   (context-facts child)))
+        (is (equal inherited (context-facts parent)))))))
+
 (test execute-in-a-child-context-stores-only-what-is-local
   (let* ((parent (create-context
                   :name 'room
