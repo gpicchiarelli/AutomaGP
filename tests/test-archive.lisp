@@ -21,6 +21,61 @@
                   :add-list '((connection ?d computer))))
   (gp-plan :goals '((connection interface-01 computer))))
 
+(defun %recorded-step (operator needs adds &optional deletes)
+  "A plan step that replays from its record alone: OPERATOR need not be
+registered. Its goal is the first of ADDS."
+  (list :operator operator
+        :goal (first adds)
+        :adds adds
+        :deletes deletes
+        :effects-stored t
+        :preconditions needs
+        :preconditions-stored t))
+
+(defun %install-recorded (name goals &rest steps)
+  "Archive a procedure called NAME that achieves GOALS by STEPS."
+  (install-procedure! (make-procedure :name name :goals goals :steps steps)))
+
+(defun %step-operators (plan)
+  (mapcar (lambda (step) (getf step :operator)) (plan-steps plan)))
+
+(defun %procedure-names (&optional (procedures (gp-procedures)))
+  "Names of PROCEDURES as strings, sorted."
+  (sort (mapcar (lambda (procedure) (symbol-name (procedure-name procedure)))
+                procedures)
+        #'string<))
+
+(defvar *archive-file-count* 0
+  "Makes the archive files of one test run distinct.")
+
+(defun %call-with-archive-file (function &key autoload)
+  "Call FUNCTION on the path of an archive file that does not exist yet.
+While it runs autosave is on, the session store is empty and has not read
+the file, and autoload is AUTOLOAD. The file is deleted afterwards."
+  (let* ((path (merge-pathnames
+                (format nil "automa-gp-archive-~D-~D.agp"
+                        (get-universal-time) (incf *archive-file-count*))
+                (uiop:temporary-directory)))
+         (*procedure-archive-path* path)
+         (*procedure-archive-autosave* t)
+         (*procedure-archive-autoload* autoload)
+         (*procedural-memory* nil)
+         (automa-gp::*procedure-archive-loaded* nil))
+    (unwind-protect (funcall function path)
+      (ignore-errors (delete-file path)))))
+
+(defmacro with-archive-file ((path &key autoload) &body body)
+  "Run BODY with PATH bound as %CALL-WITH-ARCHIVE-FILE describes."
+  `(%call-with-archive-file (lambda (,path) ,@body) :autoload ,autoload))
+
+(defun %write-archive-text (path text)
+  (with-open-file (out path :direction :output :if-exists :supersede)
+    (write-string text out)))
+
+(defun %skip-archive (condition)
+  (declare (ignore condition))
+  (invoke-restart :skip))
+
 (test archive-scores-repeat-success-above-a-failure
   (gp-clear-memory)
   (%archive-studio)
@@ -350,6 +405,23 @@
     (is (null (getf (second steps) :stored-apply)))
     (is (fact-p '(cable interface-01 connected) (plan-final-state plan))))
   (is (search "FILL-EMPTY" (gp-explain :plan nil))))
+
+(test archive-plan-rejects-a-search-that-undoes-a-reused-goal
+  "MAKE-A achieves (A). The search for (B) finds only OP-B, which deletes
+(A). Those pieces do not achieve the request: no plan may claim they do."
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-fact '(device d1))
+  (%install-recorded 'make-a '((a d1 yes))
+                     (%recorded-step 'op-a '((device d1)) '((a d1 yes))))
+  (gp-add-operator
+   (make-operator :name 'op-b
+                  :preconditions '((device ?d))
+                  :add-list '((b ?d yes))
+                  :delete-list '((a ?d yes))))
+  (let ((plan (gp-plan :goals '((a d1 yes) (b d1 yes)))))
+    (is-false (plan-success plan))
+    (is (null (plan-reused-procedure-names plan)))))
 
 (test archive-plan-combines-a-procedure-that-also-achieves-something-else
   (gp-clear-memory)
@@ -711,3 +783,239 @@
     (is (= 1 (count-if (lambda (p)
                          (eq 'once (procedure-name p)))
                        (gp-procedures))))))
+
+;;; --- The archive file ---
+
+(test archive-autosave-keeps-procedures-the-session-no-longer-holds
+  "Neither clearing memory nor starting with autoload off lets the next
+autosave drop what the file already holds."
+  (dolist (forget (list #'gp-clear-memory
+                        (lambda ()
+                          (setf *procedural-memory* nil
+                                automa-gp::*procedure-archive-loaded* nil))))
+    (with-archive-file (path)
+      (%archive-studio)
+      (gp-remember-procedure :name 'first)
+      (gp-remember-procedure :name 'second)
+      (funcall forget)
+      (%archive-studio)
+      (gp-remember-procedure :name 'third)
+      (is (equal '("THIRD") (%procedure-names)))
+      (gp-score-procedure 'third)
+      (gp-clear-memory)
+      (gp-archive-load path)
+      (is (equal '("FIRST" "SECOND" "THIRD") (%procedure-names)))
+      (is (= 2 (procedure-success-count (gp-find-procedure 'third)))))))
+
+(test remembering-into-another-store-leaves-the-archive-file-alone
+  (with-archive-file (path)
+    (let ((other (make-procedural-memory)))
+      (remember-procedure! (make-procedure :name 'elsewhere :goals '((a b c)))
+                           other)
+      (score-procedure! 'elsewhere :success nil :memory other)
+      (is (= 1 (procedure-failure-count (find-procedure 'elsewhere other))))
+      (is (null (probe-file path)))
+      (is (null (gp-find-procedure 'elsewhere))))))
+
+(test archive-autosave-failure-is-typed-and-keeps-the-change
+  (with-archive-file (blocker)
+    ;; A regular file stands where the archive's directory should be.
+    (%write-archive-text blocker "not a directory")
+    (let ((*procedure-archive-path*
+            (format nil "~A/archive.agp" (namestring blocker))))
+      (%archive-studio)
+      (handler-case (progn (gp-remember-procedure :name 'kept)
+                           (fail "the autosave did not signal"))
+        (procedure-archive-error (c)
+          (is (eq :write (procedure-archive-error-action c)))
+          (is (equal *procedure-archive-path* (procedure-archive-error-path c)))
+          (is (typep (procedure-archive-error-cause c) 'file-error))))
+      (is (procedure-p (gp-find-procedure 'kept)))
+      (is (procedure-p (handler-bind ((procedure-archive-error #'%skip-archive))
+                         (gp-score-procedure 'kept))))
+      (is (= 2 (procedure-success-count (gp-find-procedure 'kept)))))))
+
+(defvar *archive-code-ran* nil
+  "Set by code smuggled into an archive file, if the reader evaluates it.")
+
+(test unreadable-archive-file-is-reported-and-never-overwritten
+  "A damaged archive is reported on every access until someone decides, is
+never half loaded, runs no code, and is not replaced by a later autosave."
+  (dolist (text '("(:kind :automa-gp-procedure-archive :procedures ((:procedure :name"
+                  "(:kind :not-an-archive)"
+                  "(:kind :automa-gp-procedure-archive
+                    :procedures ((:procedure :name good :goals ((a))) 17))"
+                  "(:kind :automa-gp-procedure-archive
+                    :procedures #.(setf automa-gp/tests::*archive-code-ran* t))"))
+    (with-archive-file (path :autoload t)
+      (%write-archive-text path text)
+      (setf *archive-code-ran* nil)
+      (handler-case (progn (gp-procedures)
+                           (fail "the autoload did not signal"))
+        (procedure-archive-error (c)
+          (is (eq :read (procedure-archive-error-action c)))
+          (is (equal path (procedure-archive-error-path c)))))
+      (signals procedure-archive-error (gp-find-procedure 'good))
+      (is (null (handler-bind ((procedure-archive-error #'%skip-archive))
+                  (gp-procedures))))
+      (is (null (gp-procedures)))
+      (is (null *archive-code-ran*))
+      (%archive-studio)
+      (signals procedure-archive-error (gp-remember-procedure :name 'new))
+      (is (procedure-p (gp-find-procedure 'new)))
+      (is (string= text (uiop:read-file-string path))))))
+
+(test archive-error-handler-sees-session-memory
+  "The file is read into a scratch store. A handler must find the session
+store in its place, without the procedures read before the damage."
+  (with-archive-file (path :autoload t)
+    (%write-archive-text path "(:kind :automa-gp-procedure-archive
+                                :procedures ((:procedure :name good :goals ((a))) 17))")
+    (let ((seen :not-called))
+      (handler-bind ((procedure-archive-error
+                       (lambda (c)
+                         (setf seen (list (procedural-memory-procedures
+                                           *procedural-memory*)
+                                          *read-eval*))
+                         (%skip-archive c))))
+        (is (null (gp-procedures))))
+      (is (equal '(nil t) seen)))))
+
+(test repaired-archive-file-is-read-on-retry
+  (with-archive-file (path :autoload t)
+    (%write-archive-text path "(")
+    (let ((attempts 0))
+      (is (equal '("MENDED")
+                 (handler-bind
+                     ((procedure-archive-error
+                        (lambda (c)
+                          (declare (ignore c))
+                          (incf attempts)
+                          (save-procedure-archive
+                           :path path
+                           :memory (make-procedural-memory
+                                    :procedures (list (make-procedure
+                                                       :name 'mended
+                                                       :goals '((a))))))
+                          (invoke-restart :retry))))
+                   (%procedure-names))))
+      (is (= 1 attempts)))))
+
+;;; --- Names, counts and ranking ---
+
+(test archive-is-not-consulted-when-nothing-is-requested
+  "No fact-like goal means no request: no procedure is replayed."
+  (dolist (goals '(nil (tidy-up)))
+    (gp-clear-memory)
+    (%archive-studio)
+    (gp-remember-procedure :name 'once)
+    (let ((plan (gp-plan :goals goals)))
+      (is (null (plan-steps plan)) "goals ~S: the plan has steps" goals)
+      (is (null (plan-reused-procedure-names plan))
+          "goals ~S: a procedure was replayed" goals))
+    (is (null (plan-from-ranked-procedures (gp-context) nil (gp-operators))))
+    (signals error (gp-use-procedure :goals goals))))
+
+(test default-procedure-name-ignores-package-and-print-case
+  (gp-clear-memory)
+  (let* ((plan (%archive-studio))
+         (names (loop for package in '(:cl-user :automa-gp :automa-gp/tests :keyword)
+                      append (loop for print-case in '(:upcase :downcase :capitalize)
+                                   collect (let ((*package* (find-package package))
+                                                 (*print-case* print-case))
+                                             (procedure-name
+                                              (procedure-from-plan plan)))))))
+    (is (every (lambda (name) (eq name (first names))) names))
+    (is (string= "PROC-DEFAULT" (symbol-name (first names))))
+    (is (eq (find-package :automa-gp) (symbol-package (first names))))))
+
+(test remembering-other-goals-under-a-name-starts-a-fresh-count
+  (gp-clear-memory)
+  (%archive-studio)
+  (gp-remember-procedure :name 'shared)
+  (gp-score-procedure 'shared :success nil)
+  (is (= 2 (procedure-success-count (gp-remember-procedure :name 'shared))))
+  (is (= 1 (procedure-failure-count (gp-find-procedure 'shared))))
+  (gp-plan :goals '((power-state interface-01 on)) :archive nil)
+  (let ((replaced (gp-remember-procedure :name 'shared)))
+    (is (equal '((power-state interface-01 on)) (procedure-goals replaced)))
+    (is (= 1 (procedure-success-count replaced)))
+    (is (= 0 (procedure-failure-count replaced)))
+    (is (= 1 (length (gp-procedures))))))
+
+(test unnamed-plans-for-different-goals-do-not-replace-each-other
+  (gp-clear-memory)
+  (%archive-studio)
+  (let ((connect (gp-remember-procedure)))
+    (gp-plan :goals '((power-state interface-01 on)) :archive nil)
+    (let ((power (gp-remember-procedure)))
+      (is (not (eq (procedure-name connect) (procedure-name power))))
+      (is (eq connect (gp-find-procedure (procedure-name connect))))
+      (is (eq (procedure-name power) (procedure-name (gp-remember-procedure))))
+      (is (= 2 (procedure-success-count
+                (gp-find-procedure (procedure-name power)))))
+      (is (= 2 (length (gp-procedures)))))))
+
+(test ranking-does-not-depend-on-the-order-procedures-arrive
+  (let ((procedures (loop for name in '(zeta alpha mid)
+                          collect (make-procedure :name name :goals '((a))))))
+    (dolist (order (list procedures (reverse procedures)))
+      (is (equal '(alpha mid zeta)
+                 (mapcar #'procedure-name (rank-procedures order)))))))
+
+(test outcome-of-a-combined-plan-scores-each-procedure-in-plan-order
+  (with-archive-file (path)
+    (install-procedure! (make-procedure :name 'zulu :goals '((a))))
+    (install-procedure! (make-procedure :name 'alpha :goals '((b))))
+    (multiple-value-bind (first all)
+        (record-procedure-outcome!
+         (make-instance 'plan :success t
+                              :meta (list :from-procedures '(zulu gone alpha)))
+         :success nil)
+      (is (eq 'zulu (procedure-name first)))
+      (is (equal '(zulu alpha) (mapcar #'procedure-name all))))
+    (is (null (record-procedure-outcome! (make-instance 'plan :success t))))
+    (gp-clear-memory)
+    (gp-archive-load path)
+    (dolist (name '(zulu alpha))
+      (is (= 1 (procedure-failure-count (gp-find-procedure name)))))))
+
+(test archive-misuse-signals-typed-conditions
+  (gp-clear-memory)
+  (install-procedure! (make-procedure :name 'known :goals '((a))))
+  (handler-case (progn (score-procedure! 'missing)
+                       (fail "scoring an unknown procedure did not signal"))
+    (unknown-procedure (c)
+      (is (eq 'missing (unknown-procedure-name c)))))
+  (is (eq 'known
+          (procedure-name
+           (handler-bind ((unknown-procedure
+                            (lambda (c)
+                              (declare (ignore c))
+                              (invoke-restart :use-value 'known))))
+             (score-procedure! 'missing)))))
+  (is (= 2 (procedure-success-count (gp-find-procedure 'known))))
+  (%archive-studio)
+  (let ((failed (gp-plan :goals '((ready interface-01)) :archive nil)))
+    (signals unsuccessful-plan (procedure-from-plan failed))
+    (signals unsuccessful-plan (remember-procedure-from-plan! failed :name 'nope)))
+  (signals type-error (procedure-from-plan :not-a-plan))
+  (is (null (gp-find-procedure 'nope))))
+
+(test unchecked-plan-expects-the-state-its-procedure-recorded
+  (gp-clear-memory)
+  (%archive-studio)
+  (gp-remember-procedure :name 'once)
+  (let ((plan (gp-use-procedure :name 'once :unchecked t)))
+    (is (fact-p '(connection interface-01 computer) (plan-final-state plan)))
+    (is (fact-p '(power-state interface-01 on) (plan-final-state plan)))
+    (is (not (fact-p '(power-state interface-01 off) (plan-final-state plan)))))
+  (let ((sim (gp-simulate)))
+    (is-true (execution-success sim))
+    (is-true (getf (execution-divergences sim) :equal)))
+  (is (null (plan-final-state
+             (procedure->plan
+              (make-procedure :name 'by-hand
+                              :goals '((a))
+                              :initial-state '((b))
+                              :steps (list (list :operator 'op :goal '(a)))))))))

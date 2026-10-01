@@ -392,6 +392,16 @@
    #:replay-procedure
    #:plan-from-procedure
    #:plan-consulting-archive
+   #:plan-from-ranked-procedures
+   #:plan-reused-procedure-names
+   #:unknown-procedure
+   #:unknown-procedure-name
+   #:unsuccessful-plan
+   #:unsuccessful-plan-plan
+   #:procedure-archive-error
+   #:procedure-archive-error-path
+   #:procedure-archive-error-action
+   #:procedure-archive-error-cause
    #:*procedure-repair-archive-depth*
    #:*procedure-archive-path*
    #:*procedure-archive-autosave*
