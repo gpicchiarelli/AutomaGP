@@ -358,6 +358,7 @@
    #:replay-procedure
    #:plan-from-procedure
    #:plan-consulting-archive
+   #:*procedure-repair-archive-depth*
    #:*procedure-archive-path*
    #:*procedure-archive-autosave*
    #:*procedure-archive-autoload*

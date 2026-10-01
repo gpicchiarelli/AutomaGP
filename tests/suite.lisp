@@ -1,4 +1,4 @@
-;;;; tests/suite.lisp — FiveAM suite for AUTOMA GP Phase 1
+;;;; tests/suite.lisp — root FiveAM suite and the entry point that runs it
 
 (defpackage #:automa-gp/tests
   (:use #:cl #:automa-gp #:fiveam)
@@ -8,7 +8,7 @@
 (in-package #:automa-gp/tests)
 
 (def-suite automa-gp-suite
-  :description "AUTOMA GP Phase 1 tests")
+  :description "Every AUTOMA GP test; each file adds its own child suite.")
 
 (defun run-tests ()
   "Run all AUTOMA GP tests; return T if all pass.

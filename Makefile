@@ -22,11 +22,10 @@ test: ## Run the FiveAM suite (scripts/run-tests.sh)
 web: ## Start the Hunchentoot console on http://127.0.0.1:$(AUTOMA_GP_WEB_PORT)/
 	AUTOMA_GP_WEB_PORT=$(AUTOMA_GP_WEB_PORT) ./scripts/run-web.sh
 
-load: ## Quickload automa-gp, automa-gp/web and automa-gp/tests; fail on any error
+load: ## Load automa-gp, automa-gp/web and automa-gp/tests from this checkout; fail on any error
 	@test -f "$(QL_SETUP)" || { echo "Quicklisp not found at $(QL_SETUP)" >&2; exit 1; }
-	@mkdir -p "$(HOME)/quicklisp/local-projects"
-	@ln -sfn "$(CURDIR)" "$(HOME)/quicklisp/local-projects/automa-gp"
 	$(SBCL) --non-interactive --load "$(QL_SETUP)" \
+	  --eval '(push (uiop:getcwd) asdf:*central-registry*)' \
 	  --eval '(handler-bind ((warning (function muffle-warning))) (ql:quickload (list :automa-gp :automa-gp/web :automa-gp/tests) :silent t))' \
 	  --eval '(format t "~&automa-gp ~A loaded~%" (symbol-value (find-symbol "*VERSION*" :automa-gp)))'
 
