@@ -95,6 +95,9 @@ The procedure archive is the part that learns. `gp-remember-procedure` stores th
 ```lisp
 (gp-remember-procedure :name 'configure-interface)   ; store and autosave
 (gp-archive)                                         ; highest score first
+
+(gp-reset)                                           ; the archive outlives a reset
+(gp-load-domain :hardware :seed-demo t)              ; the device is off again
 (gp-plan :goals '((device-configured interface-01))) ; archive first, then MEA
 (gp-use-procedure :name 'configure-interface)        ; replay without search
 (gp-score-procedure 'configure-interface :success t) ; manual feedback

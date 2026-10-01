@@ -134,6 +134,7 @@
                              (:file "test-web")
                              (:file "test-workbench")
                              (:file "test-tavolo")
-                             (:file "test-framework-pipeline"))))
+                             (:file "test-framework-pipeline")
+                             (:file "test-docs"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))
