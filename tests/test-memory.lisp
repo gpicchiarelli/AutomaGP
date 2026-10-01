@@ -123,3 +123,150 @@
            (is (eq 'solo (context-name (gp-context))))
            (is (fact-p '(x 1) (gp-facts))))
       (ignore-errors (delete-file path)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Episodic memory
+;;; ---------------------------------------------------------------------------
+
+(test episode-ids-are-integers-whatever-the-current-package
+  "Recording an episode interns nothing, so a long session leaks no symbol."
+  (let ((package (make-package "AUTOMA-GP-EPISODE-SCRATCH" :use nil))
+        (memory (make-episodic-memory)))
+    (unwind-protect
+         (let ((ids (loop for current in (list package
+                                               (find-package :cl-user)
+                                               (find-package :keyword)
+                                               *package*)
+                          collect (let ((*package* current))
+                                    (episode-id
+                                     (record-episode! :memory memory))))))
+           (is (every #'integerp ids))
+           (is (apply #'< ids))
+           (is (zerop (let ((count 0))
+                        (do-symbols (symbol package count)
+                          (incf count))))))
+      (delete-package package))))
+
+(test episodes-recorded-after-a-restore-get-fresh-ids
+  "A restored episode keeps its id, integer or symbol, and no later episode
+is given an integer already in use."
+  (let* ((automa-gp::*episode-counter* 0)
+         (memory (deserialize-episodic-memory
+                  '(:episodic :limit 10
+                    :episodes ((:episode :id 7 :kind :plan)
+                               (:episode :id legacy-id :kind :plan)
+                               (:episode :kind :plan)))))
+         (restored (mapcar #'episode-id (episodic-memory-episodes memory)))
+         (fresh (episode-id (record-episode! :memory memory))))
+    (is (eql 7 (first restored)))
+    (is (eq 'legacy-id (second restored)))
+    (is (integerp (third restored)))
+    (is (integerp fresh))
+    (is (not (member fresh restored)))
+    (is (equal (cons fresh restored)
+               (mapcar #'episode-id (episodic-memory-episodes memory))))))
+
+(test find-episodes-filters
+  ":SUCCESS T selects what succeeded, :FAILED what did not, NIL everything."
+  (let ((memory (make-episodic-memory)))
+    (loop for (kind success context) in '((:plan t studio) (:plan nil studio)
+                                          (:execute t studio) (:execute nil lab)
+                                          (:simulate :partly lab))
+          do (record-episode! :kind kind :success success
+                              :context-name context :memory memory))
+    (loop for (filters expected)
+            in '((() 5)
+                 ((:success nil) 5)
+                 ((:success t) 3)
+                 ((:success :failed) 2)
+                 ((:kind :plan) 2)
+                 ((:kind :plan :success :failed) 1)
+                 ((:kind :event) 0)
+                 ((:context-name lab) 2)
+                 ((:context-name lab :success t) 1)
+                 ((:kind :execute :success :failed :context-name lab) 1)
+                 ((:kind :execute :success :failed :context-name studio) 0))
+          do (is (= expected
+                    (length (apply #'find-episodes :memory memory filters)))
+                 "Filters ~S" filters))
+    (is (equal '(:simulate :execute :execute :plan :plan)
+               (mapcar #'episode-kind (find-episodes :memory memory))))
+    (let ((*episodic-memory* memory))
+      (is (= 2 (length (gp-episodes :success :failed))))
+      (is (= 1 (length (gp-episodes :kind :plan :success :failed)))))))
+
+(test episodic-memory-keeps-its-newest-within-the-limit
+  "The limit holds for a memory that is made, restored or recorded into, and
+a limit of NIL keeps everything, also across a save."
+  (flet ((episodes (count)
+           (loop for id from count downto 1
+                 collect (make-instance 'episode :id id)))
+         (ids (memory)
+           (mapcar #'episode-id (episodic-memory-episodes memory))))
+    (loop for (limit count kept) in '((3 5 3) (5 3 3) (0 4 0) (nil 300 300))
+          do (let* ((automa-gp::*episode-counter* count)
+                    (memory (make-episodic-memory :limit limit
+                                                  :episodes (episodes count)))
+                    (newest (loop for id from count above (- count kept)
+                                  collect id)))
+               (is (equal newest (ids memory)) "Limit ~S of ~D" limit count)
+               (let ((back (deserialize-episodic-memory
+                            (serialize-episodic-memory memory))))
+                 (is (eql limit (episodic-memory-limit back)))
+                 (is (equal newest (ids back))))
+               (record-episode! :memory memory)
+               (is (equal (let ((grown (cons (1+ count) newest)))
+                            (if limit
+                                (subseq grown 0 (min limit (length grown)))
+                                grown))
+                          (ids memory)))))
+    ;; A file that holds more episodes than its limit is cut on the way in.
+    (is (equal '(3) (ids (deserialize-episodic-memory
+                          '(:episodic :limit 1
+                            :episodes ((:episode :id 3) (:episode :id 2)))))))
+    (is (eql *episodic-memory-limit*
+             (episodic-memory-limit
+              (deserialize-episodic-memory '(:episodic :episodes nil)))))
+    (dolist (limit '(-1 1.5 "3" :all))
+      (signals type-error (make-episodic-memory :limit limit)))))
+
+(test an-episode-shares-no-list-with-its-caller
+  (let* ((summary (list :goals (list (list 'a 1))))
+         (payload (list :steps (list (list :operator 'x))))
+         (episode (record-episode! :summary summary :payload payload
+                                   :memory (make-episodic-memory))))
+    (setf (second (first (getf summary :goals))) 99
+          (getf (first (getf payload :steps)) :operator) 'y)
+    (is (equal '(:goals ((a 1))) (episode-summary episode)))
+    (is (equal '(:steps ((:operator x))) (episode-payload episode)))
+    (is (eq :event (episode-kind episode)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Knowledge memory
+;;; ---------------------------------------------------------------------------
+
+(test knowledge-merge-keeps-rule-order
+  "Merging knowledge into a context any number of times leaves the rules in
+the order knowledge memory has them, ahead of the rules only the context has."
+  (flet ((rule (name)
+           (make-rule :name name :if '((a ?x)) :then `(,name ?x)))
+         (names (rules)
+           (mapcar #'rule-name rules)))
+    (let ((km (make-knowledge-memory
+               :facts '((a 1))
+               :rules (mapcar #'rule '(r1 r2 r3))))
+          (ctx (make-context :name 'target
+                             :rules (list (rule 'r2) (rule 'own)))))
+      (dotimes (i 3)
+        (knowledge-merge-into-context! ctx km)
+        (is (equal '(r1 r2 r3 own) (names (context-rules ctx)))))
+      (is (eq (second (knowledge-memory-rules km)) (second (context-rules ctx))))
+      (is (fact-p '(a 1) (context-facts ctx)))
+      ;; A context copied to knowledge and merged back is unchanged.
+      (knowledge-merge-into-context! ctx (knowledge-from-context ctx))
+      (is (equal '(r1 r2 r3 own) (names (context-rules ctx))))
+      ;; A query sees derived facts only when asked to infer.
+      (is (null (knowledge-query '(r1 ?x) :memory km)))
+      (is (equal '((r1 1))
+                 (mapcar (lambda (hit) (getf hit :fact))
+                         (knowledge-query '(r1 ?x) :memory km :infer t)))))))
