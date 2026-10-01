@@ -132,10 +132,12 @@
 (test callers-end-on-facts-that-hold-variables
   ;; A rule or operator that leaves a variable open asserts a fact holding
   ;; it; the next rule to reuse that name used to bind the variable to itself.
+  ;; MAKE-RULE refuses such a rule unless told to CONTINUE.
   (is (listp (%bounded
                (forward-chain
                 '((a 1))
-                (list (make-rule :name 'r1 :if '((a ?x)) :then '((b ?x ?y)))
+                (list (handler-bind ((unsafe-rule #'continue))
+                        (make-rule :name 'r1 :if '((a ?x)) :then '((b ?x ?y))))
                       (make-rule :name 'r2 :if '((b ?x ?y)) :then '((c ?y))))))))
   (is (plan-p (%bounded
                 (plan-from-context

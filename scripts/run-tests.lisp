@@ -18,6 +18,9 @@
 
 (ql:quickload :automa-gp/tests :silent t)
 
-(let ((ok (uiop:symbol-call :automa-gp/tests :run-tests)))
+;; RUN-TESTS prints the failures and then signals; the exit code carries
+;; the outcome, so no backtrace is wanted here.
+(let ((ok (handler-case (uiop:symbol-call :automa-gp/tests :run-tests)
+            (error () nil))))
   (format t "~&automa-gp tests: ~A~%" (if ok "PASSED" "FAILED"))
   (uiop:quit (if ok 0 1)))
