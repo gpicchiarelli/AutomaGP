@@ -54,8 +54,11 @@ FROM base AS test
 WORKDIR /workspaces/automa-gp
 COPY --chown=${USER_UID}:${USER_GID} . .
 
-# scripts/run-tests.sh links this tree into ~/quicklisp/local-projects and
-# exits non-zero when a test fails, which fails the image build.
-RUN ./scripts/run-tests.sh
+# Put the tree on Quicklisp's load path so `(ql:quickload :automa-gp)` works
+# in the image's REPL. scripts/run-tests.sh tests the checkout it lives in
+# and exits non-zero when a test fails, which fails the image build.
+RUN mkdir -p "${HOME}/quicklisp/local-projects" \
+ && ln -sfn /workspaces/automa-gp "${HOME}/quicklisp/local-projects/automa-gp" \
+ && ./scripts/run-tests.sh
 
 CMD ["./scripts/run-tests.sh"]

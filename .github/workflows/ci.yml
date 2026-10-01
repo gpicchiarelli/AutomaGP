@@ -62,7 +62,4 @@ jobs:
               --load /tmp/quicklisp.lisp \
               --eval "(quicklisp-quickstart:install :path \"$HOME/quicklisp/\")" \
               --eval '(quit)'
-            mkdir -p "$HOME/quicklisp/local-projects"
-            ln -sfn "$(pwd)" "$HOME/quicklisp/local-projects/automa-gp"
-            rm -f "$HOME/quicklisp/local-projects/system-index.txt"
             ./scripts/run-tests.sh

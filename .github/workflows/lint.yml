@@ -39,7 +39,7 @@ jobs:
         uses: ibiqlik/action-yamllint@v3
         with:
           config_file: .yamllint.yaml
-          file_or_dir: .github .markdownlint.yaml .markdownlint-cli2.yaml .yamllint.yaml
+          file_or_dir: .github .markdownlint.yaml .markdownlint-cli2.yaml .yamllint.yaml .pre-commit-config.yaml CITATION.cff
           strict: true
 
   actionlint:
@@ -74,10 +74,10 @@ jobs:
       - name: Set up SBCL and Quicklisp
         uses: ./.github/actions/setup-lisp
 
-      # Per-file compile errors and full WARNINGs fail the job. STYLE-WARNINGs
-      # are printed but do not fail it (ASDF's failure-p excludes them).
-      # Deferred "undefined variable" warnings, which SBCL only reports at the
-      # end of the compilation unit, are surfaced as workflow annotations.
+      # Per-file compile errors and full WARNINGs fail the load itself. The
+      # next step fails the job on any STYLE-WARNING and on the deferred
+      # "undefined variable/function" warnings SBCL reports at the end of a
+      # compilation unit: the tree compiles clean and stays that way.
       - name: Load automa-gp, automa-gp/web and automa-gp/tests from scratch
         run: |
           set -o pipefail
@@ -100,7 +100,7 @@ jobs:
             echo "- WARNING: $(grep -c '^; caught WARNING' "$LOG" || true)"
             echo "- STYLE-WARNING: $(grep -c '^; caught STYLE-WARNING' "$LOG" || true)"
           } >> "$GITHUB_STEP_SUMMARY"
-          if grep -q '^;   Undefined variables:' "$LOG"; then
-            VARS="$(grep -A1 '^;   Undefined variables:' "$LOG" | tail -n1 | sed 's/^; *//')"
-            echo "::warning title=SBCL undefined variables::$VARS (forward references across files; define the specials before first use)"
+          if grep -E '^; caught (WARNING|STYLE-WARNING)|^;   Undefined (variables|functions):' "$LOG"; then
+            echo "::error title=SBCL compiler diagnostics::The systems no longer compile clean; see the lines above."
+            exit 1
           fi

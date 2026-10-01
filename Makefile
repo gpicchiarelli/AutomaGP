@@ -34,7 +34,7 @@ lint: ## markdownlint, yamllint, actionlint, shellcheck — each skipped when no
 	  echo ">> markdownlint-cli2"; markdownlint-cli2 "**/*.md"; \
 	else echo ">> markdownlint-cli2 not installed, skipping (brew install markdownlint-cli2)"; fi
 	@if command -v yamllint >/dev/null 2>&1; then \
-	  echo ">> yamllint"; yamllint -c .yamllint.yaml .github .devcontainer .pre-commit-config.yaml CITATION.cff; \
+	  echo ">> yamllint"; yamllint -c .yamllint.yaml --strict .github .markdownlint.yaml .markdownlint-cli2.yaml .yamllint.yaml .pre-commit-config.yaml CITATION.cff; \
 	else echo ">> yamllint not installed, skipping (brew install yamllint)"; fi
 	@if command -v actionlint >/dev/null 2>&1; then \
 	  echo ">> actionlint"; actionlint; \

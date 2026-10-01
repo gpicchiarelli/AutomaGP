@@ -173,7 +173,7 @@ cd macos/AutomaGPWorkbench && swift run
 
 ## Install and run
 
-You need SBCL and Quicklisp. On macOS, `brew install sbcl` and the [Quicklisp installer](https://www.quicklisp.org/beta/) are enough. The scripts symlink this checkout into `~/quicklisp/local-projects/automa-gp` on first run.
+You need SBCL and Quicklisp. On macOS, `brew install sbcl` and the [Quicklisp installer](https://www.quicklisp.org/beta/) are enough. The scripts load the checkout they live in and change nothing outside it. To `ql:quickload` the system from your own REPL, link the checkout once: `ln -sfn "$PWD" ~/quicklisp/local-projects/automa-gp`.
 
 ```bash
 git clone https://github.com/gpicchiarelli/AutomaGP.git

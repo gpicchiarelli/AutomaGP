@@ -8,8 +8,9 @@ the `automa-gp` package; file paths are relative to the repository root.
 SBCL and Quicklisp. On macOS `brew install sbcl`; on Debian or Ubuntu
 `apt install sbcl`. Install Quicklisp with the
 [official installer](https://www.quicklisp.org/beta/). The scripts in
-`scripts/` create the symlink `~/quicklisp/local-projects/automa-gp` on
-first run, so `(ql:quickload :automa-gp)` finds the checkout. Nothing is
+`scripts/` load the checkout they live in and change nothing outside it.
+For `(ql:quickload :automa-gp)` from your own REPL, link the checkout once
+with `ln -sfn "$PWD" ~/quicklisp/local-projects/automa-gp`. Nothing is
 installed globally. `make test` and `make load` wrap the same steps;
 `Dockerfile` and `.devcontainer/` give the same environment in a container.
 

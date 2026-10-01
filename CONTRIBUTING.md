@@ -34,8 +34,10 @@ sbcl --non-interactive --load /tmp/quicklisp.lisp \
 ln -sfn "$PWD" ~/quicklisp/local-projects/automa-gp
 ```
 
-`./scripts/run-tests.sh` creates that symlink for you and runs the FiveAM
-suite; it exits non-zero when a test fails. `./scripts/run-web.sh` starts
+The symlink is for your own REPL. `./scripts/run-tests.sh` does not need
+it: it registers the checkout it lives in with ASDF, runs the FiveAM
+suite, and exits non-zero when a test fails, so a second clone or a git
+worktree always tests itself. `./scripts/run-web.sh` starts
 the Hunchentoot console. The macOS Workbench builds with
 `swift build -c release` inside `macos/AutomaGPWorkbench` (Xcode 15 or
 newer, no signing).

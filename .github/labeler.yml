@@ -1,4 +1,4 @@
-# Path-based labels for pull requests (actions/labeler v5 syntax).
+# Path-based labels for pull requests (actions/labeler v5 and later syntax).
 # Label names match the repository's label set.
 
 planner:
@@ -9,8 +9,11 @@ planner:
           - tests/test-planner.lisp
           - tests/test-mea.lisp
           - tests/test-executor.lisp
+          - tests/test-external-actions.lisp
           - tests/test-conditions.lisp
           - tests/test-explanation.lisp
+          - tests/test-narration.lisp
+          - tests/test-induction.lisp
           - tests/test-autonomy.lisp
           - tests/test-events.lisp
 
@@ -21,6 +24,7 @@ memory:
           - tests/test-memory.lisp
           - tests/test-persistence.lisp
           - tests/test-archive.lisp
+          - tests/test-archive-replay.lisp
 
 adapters:
   - changed-files:
@@ -28,6 +32,7 @@ adapters:
           - adapters/**
           - interface/notice.lisp
           - tests/test-adapters.lisp
+          - tests/test-notice.lisp
 
 domains:
   - changed-files:
@@ -43,6 +48,7 @@ workbench:
           - interface/web-api.lisp
           - interface/json.lisp
           - scripts/run-web.sh
+          - scripts/run-web.lisp
           - tests/test-web.lisp
           - tests/test-workbench.lisp
 

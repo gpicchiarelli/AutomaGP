@@ -15,7 +15,7 @@
       "onAutoForward": "notify"
     }
   },
-  "postCreateCommand": "./scripts/run-tests.sh",
+  "postCreateCommand": "mkdir -p ~/quicklisp/local-projects && ln -sfn \"$PWD\" ~/quicklisp/local-projects/automa-gp && ./scripts/run-tests.sh",
   "customizations": {
     "vscode": {
       "extensions": [
