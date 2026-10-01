@@ -7,7 +7,9 @@
   :author "Giacomo Picchiarelli <gpicchiarelli@gmail.com>"
   :license "BSD-2-Clause"
   :version (:read-file-form "version.lisp-expr")
-  :depends-on ("uiop")
+  ;; interface/notice.lisp reads link and terminal state through SB-POSIX,
+  ;; which a bare SBCL does not load on its own.
+  :depends-on ("uiop" (:feature :sbcl (:require "sb-posix")))
   :serial t
   :components ((:file "packages")
                (:file "version")
