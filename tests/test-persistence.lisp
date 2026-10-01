@@ -211,8 +211,9 @@ they were saved in, however many times the context is saved and loaded."
       (is (equal names (mapcar #'operator-name (context-operators restored))))
       (is (equal names (mapcar #'car (context-actions restored))))
       (is (equal names (mapcar #'action-name (actions-of restored))))
-      (is (equal (append names '(nil))
+      (is (equal (mapcar #'rule-name (context-rules ctx))
                  (mapcar #'rule-name (context-rules restored))))
+      (is (= 4 (length (context-rules restored))))
       (is (equal names (mapcar #'event-reaction-name
                                (context-event-reactions restored))))
       (is (equal '(("a.pdf") ("b.pdf"))

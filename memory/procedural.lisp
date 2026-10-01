@@ -215,6 +215,14 @@ Signals UNKNOWN-PROCEDURE when there is none; USE-VALUE supplies another name."
 ;;; The archive file
 ;;; ---------------------------------------------------------------------------
 
+(defun archive-error-cause (condition)
+  "CONDITION, or the condition it wraps when the persistence service has
+already wrapped one: the archive error then names what went wrong, not who
+reported it."
+  (let ((reason (and (typep condition 'persistence-error)
+                     (persistence-error-reason condition))))
+    (if (typep reason 'condition) reason condition)))
+
 (defmacro with-archive-errors ((action) &body body)
   "Run BODY. An error it signals becomes a PROCEDURE-ARCHIVE-ERROR for
 ACTION (:READ or :WRITE) on *PROCEDURE-ARCHIVE-PATH*, the original as its cause."
@@ -223,7 +231,7 @@ ACTION (:READ or :WRITE) on *PROCEDURE-ARCHIVE-PATH*, the original as its cause.
                       (error 'procedure-archive-error
                              :path *procedure-archive-path*
                              :action ,action
-                             :cause cause))))
+                             :cause (archive-error-cause cause)))))
      ,@body))
 
 (defun %call-with-archive-restarts (thunk retry-report skip-report)
@@ -267,7 +275,7 @@ a handler finds session memory itself in *PROCEDURAL-MEMORY*."
       (when cause
         (error 'procedure-archive-error :path *procedure-archive-path*
                                         :action :read
-                                        :cause cause))
+                                        :cause (archive-error-cause cause)))
       procedures)))
 
 (defun maybe-autoload-procedure-archive ()
