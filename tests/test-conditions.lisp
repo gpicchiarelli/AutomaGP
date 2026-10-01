@@ -414,6 +414,29 @@ Returns what the step returned and the events recorded, :ASK-USER aside."
           (is (equal '(:ask-user :skip)
                      (%event-kinds (execution-strategy-events result)))))))))
 
+(test ask-user-event-records-the-name-chosen
+  ;; Each case is (ANSWER CHOICE-RECORDED). The argument of the answer, a
+  ;; fact list or an operator, is not copied into the :ASK-USER event.
+  (dolist (case `((:skip :skip)
+                  ((:use-value (a 1)) :use-value)
+                  ((:use-alternative . ,(force-connect-op)) :use-alternative)))
+    (destructuring-bind (answer recorded) case
+      (let ((*ask-user-fn* (lambda (c names)
+                             (declare (ignore c names))
+                             answer)))
+        (with-failure-strategy (:ask)
+          (handler-bind ((gp-error #'plan-runner-condition-handler))
+            (call-with-gp-restarts
+             (lambda ()
+               (if *gp-alternative-operator*
+                   (values '((done 1)) :alternative)
+                   (error 'action-failed :reason "transient")))
+             :operator (failing-connect-op)))
+          (is (eq recorded
+                  (getf (find :ask-user (strategy-events-of)
+                              :key (lambda (event) (getf event :kind)))
+                        :choice))))))))
+
 (test recovery-that-cannot-be-taken-is-a-gp-error
   ;; Each case is (RESTART-AND-ARGUMENTS ANSWER-TO-ASK-USER).
   (let ((op (failing-connect-op))

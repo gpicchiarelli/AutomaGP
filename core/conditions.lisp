@@ -418,9 +418,13 @@ step results and in the ACTION-FAILED."
                                                :reason "ask-user"))
                            '(:retry :skip :abort-execution :use-value
                              :use-alternative)))
+                  (chosen (if (consp choice) (car choice) choice))
                   (argument (and (consp choice) (cdr choice))))
-             (record-strategy-event :ask-user :choice choice)
-             (case (if (consp choice) (car choice) choice)
+             ;; The event names the recovery and leaves its argument out: a
+             ;; fact list or an operator object does not belong in a log
+             ;; that is copied into results and serialised.
+             (record-strategy-event :ask-user :choice chosen)
+             (case chosen
                (:retry (retry))
                (:skip (skip))
                (:abort-execution (abort-plan))
