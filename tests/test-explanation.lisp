@@ -401,6 +401,27 @@ Each entry is (KIND . PLIST), recorded with TRACE-RECORD."
       (is (string= text returned))
       (is (eq tr trace)))))
 
+(test missing-trace-message-ignores-package-and-printer-settings
+  "The text that names a topic without a trace is as stable as an explanation."
+  (clear-trace-session)
+  (loop for (topic named) in '((:last ":LAST")
+                               (no-such-topic "NO-SUCH-TOPIC")
+                               ((a . "b") "(A . \"b\")")
+                               (42 "42"))
+        for expected = (format nil "No deliberative trace for ~A.~%" named)
+        do (dolist (package '(:cl-user :keyword :automa-gp/tests))
+             (multiple-value-bind (text trace written)
+                 (let ((*package* (find-package package))
+                       (*print-case* :downcase)
+                       (*print-base* 2))
+                   (multiple-value-call #'values
+                     (explain-trace topic)
+                     (with-output-to-string (stream)
+                       (explain-trace topic :stream stream))))
+               (is (string= expected text) "topic ~S in ~A" topic package)
+               (is (null trace))
+               (is (string= expected written) "topic ~S in ~A" topic package)))))
+
 (test explain-topics-resolve-to-their-own-trace
   (clear-trace-session)
   (let* ((plan (%studio-plan))

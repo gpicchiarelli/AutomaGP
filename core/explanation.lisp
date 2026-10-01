@@ -14,7 +14,8 @@
 
 (defparameter *trace-enabled* t
   "When false, WITH-TRACE opens no trace and TRACE-RECORD records nothing,
-so nothing reaches *LAST-TRACE* or *TRACE-HISTORY*.")
+so no new trace reaches *LAST-TRACE* or *TRACE-HISTORY*. A trace opened
+earlier keeps the entries it has and is still published when it closes.")
 
 (defvar *current-trace* nil
   "Active DELIBERATIVE-TRACE being recorded, or NIL.")
@@ -99,8 +100,8 @@ Returns the entry plist, or NIL if tracing is off / no current trace."
 
 (defun %publish-trace (trace)
   "Make TRACE the last trace and the newest entry of the bounded history.
-Each variable is assigned once, and the history only ever with a list that
-no one else holds, so a reader never sees a half-built history."
+Each variable is assigned once and no list is modified in place, so a reader
+never sees a half-built history."
   (let ((limit (if (typep *trace-history-limit* '(integer 0))
                    *trace-history-limit*
                    0))
@@ -378,10 +379,11 @@ written to STREAM (T means *STANDARD-OUTPUT*) and NIL is returned."
   "Explain TOPIC (see RESOLVE-EXPLAIN-TOPIC) from its recorded trace.
 Returns (VALUES TEXT TRACE). STREAM is as for FORMAT: with NIL, TEXT is the
 explanation; otherwise the explanation is written to STREAM and TEXT is NIL.
-When TOPIC has no trace the text says so and TRACE is NIL.
+When TOPIC has no trace the text names TOPIC and says so, and TRACE is NIL.
 Named EXPLAIN-TRACE (not EXPLAIN) to avoid clashing with FiveAM:EXPLAIN."
   (let ((trace (resolve-explain-topic topic)))
     (values (if trace
                 (format-explanation trace stream)
-                (format stream "No deliberative trace for ~S.~%" topic))
+                (format stream "No deliberative trace for ~A.~%"
+                        (%with-standard-printing (%fmt-term topic))))
             trace)))
