@@ -287,6 +287,7 @@
    #:trace-record
    #:finalize-trace
    #:with-trace
+   #:call-with-trace
    #:last-trace
    #:trace-of
    #:find-trace-entries
