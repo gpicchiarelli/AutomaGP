@@ -612,3 +612,171 @@
            (is (eq :execute (context-mode (gp-context))))
            (is (equal "changed" (adapter-read-file-string marker))))
       (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
+
+;;; ---------------------------------------------------------------------------
+;;; The gates speak through a typed condition, in both runners
+;;; ---------------------------------------------------------------------------
+
+(defun call-with-unwritten-marker (function)
+  "Call FUNCTION with the name of a file in a directory nobody created.
+The directory is removed afterwards, whatever FUNCTION left there."
+  (let ((dir (uiop:ensure-directory-pathname
+              (merge-pathnames
+               (format nil "automa-gp-gate-~A-~A/" (get-universal-time)
+                       (random 1000000))
+               (uiop:temporary-directory)))))
+    (unwind-protect
+         (funcall function (namestring (merge-pathnames "marker.txt" dir)))
+      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
+
+(defun note-file-operator (name preconditions &key (content "noticed"))
+  "An operator that notes ?PATH and would write CONTENT there."
+  (make-operator
+   :name name
+   :preconditions preconditions
+   :add-list '((noted ?path))
+   :meta (list :external (list :adapter :filesystem
+                               :op :write-string
+                               :args (list :path '?path :content content)))))
+
+(defun mark-then-note-case (path)
+  "A context that can mark PATH and then note it through the filesystem
+adapter, and the plan that does both. Returns (VALUES CONTEXT PLAN)."
+  (let ((ctx (create-context :name 'gate
+                             :facts (list (list 'ready path)
+                                          (list 'seen path)))))
+    (register-operator! ctx (make-operator :name 'mark
+                                           :preconditions '((ready ?path))
+                                           :add-list '((marked ?path))))
+    (register-operator! ctx (note-file-operator 'note-file '((seen ?path))))
+    (values ctx
+            (plan-from-context ctx :goals (list (list 'marked path)
+                                                (list 'noted path))))))
+
+(defun run-with-adapters (mode ctx plan)
+  (ecase mode
+    (:simulate (let ((*invoke-adapters* t))
+                 (simulate-plan plan :context ctx)))
+    (:execute (execute-plan! ctx plan :adapters t))))
+
+(test the-external-gates-signal-plan-refused-with-a-reason
+  (loop
+    for (reason text break)
+      in (list (list :external-mismatch "no longer matches"
+                     (lambda (ctx path)
+                       (declare (ignore path))
+                       (setf (operator-meta (find-operator ctx 'note-file))
+                             (operator-meta
+                              (note-file-operator 'note-file nil
+                                                  :content "changed")))))
+               (list :external-unsupported "no longer support"
+                     (lambda (ctx path)
+                       (setf (context-facts ctx)
+                             (list (list 'ready path))))))
+    do (dolist (mode '(:simulate :execute))
+         (call-with-unwritten-marker
+          (lambda (path)
+            (multiple-value-bind (ctx plan) (mark-then-note-case path)
+              (is (equal '(mark note-file)
+                         (mapcar (lambda (step) (getf step :operator))
+                                 (plan-steps plan))))
+              (funcall break ctx path)
+              (let ((facts (copy-list (context-facts ctx)))
+                    (refusal (handler-case (run-with-adapters mode ctx plan)
+                               (plan-refused (c) c))))
+                (is (typep refusal 'plan-refused)
+                    "~A did not refuse (~A)" mode reason)
+                (when (typep refusal 'plan-refused)
+                  (is (typep refusal 'gp-error))
+                  (is (eq reason (plan-refused-reason refusal)))
+                  (is (eq ctx (gp-condition-context refusal)))
+                  (is (search text (princ-to-string refusal))))
+                ;; MARK, the step before the external one, was not applied.
+                (is (equal facts (context-facts ctx)))
+                (is-false (file-exists-p path)))))))))
+
+(test simulation-never-reaches-an-adapter
+  (call-with-unwritten-marker
+   (lambda (path)
+     (multiple-value-bind (ctx plan) (mark-then-note-case path)
+       (let ((facts (copy-list (context-facts ctx)))
+             (result (run-with-adapters :simulate ctx plan)))
+         (is-true (execution-success result))
+         (is (fact-p (list 'noted path)
+                     (state-facts (execution-final-state result))))
+         (is (every (lambda (step) (null (getf step :external)))
+                    (execution-steps result)))
+         (is (equal facts (context-facts ctx)))
+         (is-false (file-exists-p path)))))))
+
+(test an-alternative-operator-cannot-run-an-unrecorded-external-action
+  ;; The plan names NOTE, which has no external action, so the plan record
+  ;; holds none. FORCE-NOTE, offered through USE-ALTERNATIVE, would write a
+  ;; file nobody was shown.
+  (flet ((attempt (path &key adapters on-refusal)
+           (let ((ctx (create-context :name 'gate
+                                      :facts (list (list 'seen path))))
+                 (force (note-file-operator 'force-note '((seen ?path))))
+                 (*plan-runner-default-abort* nil))
+             (register-operator! ctx (make-operator
+                                      :name 'note
+                                      :preconditions '((seen ?path) (open ?path))
+                                      :add-list '((noted ?path))))
+             (let ((plan (make-instance
+                          'plan
+                          :goals (list (list 'noted path))
+                          :steps (list (list :operator 'note
+                                             :bindings (list (cons '?path path))
+                                             :goal (list 'noted path)))
+                          :success t)))
+               (automa-gp::remember-plan-external-actions plan :context ctx)
+               (is (null (plan-external-actions plan :context ctx)))
+               (values
+                (handler-case
+                    (handler-bind ((precondition-failure
+                                     (lambda (c)
+                                       (declare (ignore c))
+                                       (invoke-restart :use-alternative force)))
+                                   (plan-refused
+                                     (lambda (c)
+                                       (declare (ignore c))
+                                       (when on-refusal
+                                         (invoke-restart on-refusal)))))
+                      (execute-plan! ctx plan :adapters adapters))
+                  (plan-refused (c) c))
+                ctx)))))
+    ;; Adapters on: the alternative is refused, under the step restarts.
+    (loop for (restart status) in '((:skip :skipped)
+                                    (:abort-execution :aborted))
+          do (call-with-unwritten-marker
+              (lambda (path)
+                (multiple-value-bind (result ctx)
+                    (attempt path :adapters t :on-refusal restart)
+                  (is (execution-result-p result) "~A is not offered" restart)
+                  (when (execution-result-p result)
+                    (is-false (execution-success result))
+                    (is (equal (list status)
+                               (mapcar (lambda (step) (getf step :status))
+                                       (execution-steps result)))))
+                  (is (equal (list (list 'seen path)) (context-facts ctx)))
+                  (is-false (file-exists-p path))))))
+    ;; With nobody recovering, the caller sees the typed refusal.
+    (call-with-unwritten-marker
+     (lambda (path)
+       (multiple-value-bind (refusal ctx) (attempt path :adapters t)
+         (is (typep refusal 'plan-refused))
+         (when (typep refusal 'plan-refused)
+           (is (eq :external-mismatch (plan-refused-reason refusal)))
+           (is (eq 'force-note
+                   (operator-name (gp-condition-operator refusal)))))
+         (is (equal (list (list 'seen path)) (context-facts ctx)))
+         (is-false (file-exists-p path)))))
+    ;; Adapters off: the alternative is an ordinary symbolic step.
+    (call-with-unwritten-marker
+     (lambda (path)
+       (multiple-value-bind (result ctx) (attempt path :adapters nil)
+         (is (execution-result-p result))
+         (when (execution-result-p result)
+           (is-true (execution-success result)))
+         (is (fact-p (list 'noted path) (context-facts ctx)))
+         (is-false (file-exists-p path)))))))
