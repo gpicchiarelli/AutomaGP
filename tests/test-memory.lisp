@@ -150,7 +150,7 @@
 (test episodes-recorded-after-a-restore-get-fresh-ids
   "A restored episode keeps its id, integer or symbol, and no later episode
 is given an integer already in use."
-  (let* ((automa-gp::*episode-counter* 0)
+  (let* ((*episode-counter* 0)
          (memory (deserialize-episodic-memory
                   '(:episodic :limit 10
                     :episodes ((:episode :id 7 :kind :plan)
@@ -204,7 +204,7 @@ a limit of NIL keeps everything, also across a save."
          (ids (memory)
            (mapcar #'episode-id (episodic-memory-episodes memory))))
     (loop for (limit count kept) in '((3 5 3) (5 3 3) (0 4 0) (nil 300 300))
-          do (let* ((automa-gp::*episode-counter* count)
+          do (let* ((*episode-counter* count)
                     (memory (make-episodic-memory :limit limit
                                                   :episodes (episodes count)))
                     (newest (loop for id from count above (- count kept)

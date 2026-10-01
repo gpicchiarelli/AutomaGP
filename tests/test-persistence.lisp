@@ -604,6 +604,36 @@ is touched, and no temporary file stays behind."
         (is (equal '(:kept "after") (read-sexp-file path)))
         (is (= 1 (length (uiop:directory-files dir))))))))
 
+#+sb-thread
+(test concurrent-writes-leave-one-whole-file
+  "Each writer of a path stages a file of its own and renames it into place:
+a reader meets the whole file of one writer, never a mixture or a part."
+  (with-persist-directory (dir)
+    (let* ((path (merge-pathnames "shared.agp" dir))
+           (forms (loop for writer below 4
+                        collect (list :writer writer
+                                      :filler (make-list 2000
+                                                         :initial-element writer))))
+           (misreads 0))
+      (write-sexp-file path (first forms))
+      (let ((threads (mapcar (lambda (form)
+                               (sb-thread:make-thread
+                                (lambda ()
+                                  (handler-case
+                                      (dotimes (i 25 t)
+                                        (write-sexp-file path form))
+                                    (error () nil)))))
+                             forms)))
+        (loop while (some #'sb-thread:thread-alive-p threads)
+              do (unless (member (handler-case (read-sexp-file path)
+                                   (error () nil))
+                                 forms :test #'equal)
+                   (incf misreads)))
+        (is (every #'sb-thread:join-thread threads))
+        (is (zerop misreads))
+        (is (member (read-sexp-file path) forms :test #'equal))
+        (is (= 1 (length (uiop:directory-files dir))))))))
+
 (test a-failed-save-keeps-the-previous-snapshot
   (with-persist-directory (dir)
     (let ((path (merge-pathnames "session.agp" dir)))

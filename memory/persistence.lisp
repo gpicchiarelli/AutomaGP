@@ -84,19 +84,19 @@ ARGUMENTS. A large or circular argument is printed in brief."
                        (*print-circle* t))
                    (apply #'format nil control arguments))))
 
-(defun call-with-persistence-errors (path thunk)
+(defun %call-with-persistence-errors (path thunk)
   "Call THUNK for the file PATH. An error it signals that is not a
 PERSISTENCE-ERROR already is signalled again as one, with PATH and with the
 original condition as its reason."
   (let ((*persistence-path* path))
-    (handler-bind ((error (lambda (c)
-                            (unless (typep c 'persistence-error)
-                              (error 'persistence-error :path path :reason c)))))
+    (handler-bind (((and error (not persistence-error))
+                     (lambda (cause)
+                       (error 'persistence-error :path path :reason cause))))
       (funcall thunk))))
 
 (defmacro with-persistence-errors ((path) &body body)
-  "Run BODY for the file PATH; see CALL-WITH-PERSISTENCE-ERRORS."
-  `(call-with-persistence-errors ,path (lambda () ,@body)))
+  "Run BODY for the file PATH; see %CALL-WITH-PERSISTENCE-ERRORS."
+  `(%call-with-persistence-errors ,path (lambda () ,@body)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Reading data
@@ -731,7 +731,7 @@ recorded later cannot be given it again."
     (when (integerp id)
       (setf *episode-counter* (max *episode-counter* id)))
     (make-instance 'episode
-                   :id (or id (next-episode-id))
+                   :id (or id (%next-episode-id))
                    :kind (or kind :event)
                    :context-name context-name
                    :summary summary

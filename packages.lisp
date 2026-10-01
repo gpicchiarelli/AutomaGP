@@ -334,6 +334,7 @@
    ;; episodic memory (Phase 7)
    #:*episodic-memory*
    #:*episodic-memory-limit*
+   #:*episode-counter*
    #:episode
    #:episode-p
    #:episode-id
