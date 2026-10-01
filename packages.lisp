@@ -60,6 +60,8 @@
    #:context-cycle
    #:context-cycle-context
    #:context-cycle-parent
+   #:context-add-fact!
+   #:context-remove-fact!
    #:context-query
    #:context-modify!
    #:clone-context

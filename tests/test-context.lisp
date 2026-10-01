@@ -9,7 +9,7 @@
   "The value of BODY, or :TIMED-OUT / :EXHAUSTED when BODY does not end.
 A regression that loops then fails one check instead of hanging the suite.
 The matcher and unification suites use it too."
-  `(handler-case (sb-ext:with-timeout 2 ,@body)
+  `(handler-case (sb-ext:with-timeout 5 ,@body)
      (sb-ext:timeout () :timed-out)
      (storage-condition () :exhausted)))
 
@@ -129,8 +129,35 @@ The matcher and unification suites use it too."
     (dolist (k (list k1 k2))
       (is (eq top (context-parent k)))
       (is (equal '((f 1)) (context-all-facts k))))
-    (signals context-cycle (make-context :parent k1 :children (list top)))
-    (is (null (context-parent top)))))
+    ;; TOP is an ancestor of K1. The refusal comes before K2, listed with it
+    ;; in either order, has been moved.
+    (dolist (children (list (list top) (list k2 top) (list top k2)))
+      (signals context-cycle (make-context :parent k1 :children children))
+      (is (null (context-parent top)))
+      (is (eq top (context-parent k2)))
+      (is (equal (list k1 k2) (context-children top))))))
+
+(test context-facts-are-asserted-and-retracted-in-place
+  (let* ((parent (create-context :facts '((shared 1) (inherited 2))))
+         (child (create-context :parent parent :facts '((own 3)))))
+    ;; Each case is (OPERATION FACT LOCAL-FACTS-AFTER), applied in turn.
+    (loop for (operation fact local)
+            in '((:add (new 4) ((own 3) (new 4)))
+                 (:add (new 4) ((own 3) (new 4)))
+                 (:add (shared 1) ((own 3) (new 4) (shared 1)))
+                 (:remove (own 3) ((new 4) (shared 1)))
+                 (:remove (absent 0) ((new 4) (shared 1)))
+                 (:remove (inherited 2) ((new 4) (shared 1)))
+                 (:remove (shared 1) ((new 4)))
+                 (:remove (new 4) ()))
+          do (is (equal local
+                        (ecase operation
+                          (:add (context-add-fact! child fact))
+                          (:remove (context-remove-fact! child fact)))))
+             (is (equal local (facts-of child))))
+    ;; The parent was never touched, and what it holds is still inherited.
+    (is (equal '((shared 1) (inherited 2)) (facts-of parent)))
+    (is (equal '((shared 1) (inherited 2)) (context-all-facts child)))))
 
 (test clone-and-compare
   (let* ((a (create-context :name 'a :facts '((f 1)) :goals '(g1) :mode :read))

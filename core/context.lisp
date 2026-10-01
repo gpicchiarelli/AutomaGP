@@ -146,7 +146,8 @@ descendants."
   "Construct a CONTEXT. MODE defaults to :READ.
 The new context inherits from PARENT but is not listed among PARENT's
 children; CREATE-CONTEXT does both. Each context in CHILDREN becomes a child
-of the new one, as by CONTEXT-ADD-CHILD!."
+of the new one, as by CONTEXT-ADD-CHILD!. Signals CONTEXT-CYCLE, moving no
+child, when one of CHILDREN is PARENT or an ancestor of PARENT."
   (let ((context (make-instance 'context
                                 :name name
                                 :parent parent
@@ -159,6 +160,12 @@ of the new one, as by CONTEXT-ADD-CHILD!."
                                 :event-reactions (copy-list event-reactions)
                                 :mode (if mode (ensure-mode mode) :read)
                                 :meta (copy-tree meta))))
+    ;; Refuse every child before moving any, so that a refusal leaves all of
+    ;; them under the parents they had.
+    (let ((lineage (context-lineage context)))
+      (dolist (child children)
+        (when (member child lineage :test #'eq)
+          (error 'context-cycle :context child :parent context))))
     ;; CONTEXT-ADD-CHILD! pushes, so add the last child first.
     (dolist (child (reverse children))
       (context-add-child! context child))
@@ -185,6 +192,18 @@ of the new one, as by CONTEXT-ADD-CHILD!."
 (defun facts-of (context)
   "Local facts on CONTEXT (no inheritance)."
   (context-facts context))
+
+(defun context-add-fact! (context fact)
+  "Assert FACT among the local facts of CONTEXT (idempotent; mutates CONTEXT).
+Returns the local facts. A copy of FACT held only by an ancestor does not
+count: FACT is then stored locally as well."
+  (setf (context-facts context) (add-fact! (context-facts context) fact)))
+
+(defun context-remove-fact! (context fact)
+  "Retract FACT from the local facts of CONTEXT (mutates CONTEXT).
+Returns the local facts. A copy of FACT held by an ancestor stays where it
+is, and stays visible through CONTEXT-ALL-FACTS."
+  (setf (context-facts context) (remove-fact! (context-facts context) fact)))
 
 (defun context-all-facts (context)
   "Facts visible in CONTEXT: its own and those of every ancestor, as a new list.

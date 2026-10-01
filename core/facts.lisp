@@ -47,12 +47,14 @@ Each result is (FACT . BINDINGS) where BINDINGS is an alist (possibly NIL)."
 (defun add-fact! (facts fact)
   "Return FACTS with FACT asserted (idempotent).
 Despite the name nothing is modified: the result is FACTS itself when FACT
-is already there and a new list otherwise, and the caller stores it."
+is already there and a new list otherwise, and the caller stores it.
+CONTEXT-ADD-FACT! does that for the facts of a context."
   (if (fact-p fact facts)
       facts
       (append facts (list fact))))
 
 (defun remove-fact! (facts fact)
   "Return a fact list without FACT.
-Despite the name FACTS is not modified; the caller stores the result."
+Despite the name FACTS is not modified; the caller stores the result.
+CONTEXT-REMOVE-FACT! does that for the facts of a context."
   (remove fact facts :test #'fact-equal))
