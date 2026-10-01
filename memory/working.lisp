@@ -30,13 +30,15 @@
   (:documentation "Working-memory snapshot of a context."))
 
 (defun working-memory-p (object)
+  "True when OBJECT is a WORKING-MEMORY."
   (typep object 'working-memory))
 
 (defvar *working-memory* nil
   "Session working-memory snapshot (refreshed on demand).")
 
 (defun capture-working-memory (context)
-  "Build a WORKING-MEMORY snapshot from CONTEXT."
+  "Build a WORKING-MEMORY snapshot from CONTEXT: the facts visible in it
+(inherited ones included), its own goals and its mode."
   (make-instance 'working-memory
                  :context-name (context-name context)
                  :facts (copy-list (context-all-facts context))
