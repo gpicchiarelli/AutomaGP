@@ -238,6 +238,22 @@ Each entry is (KIND . PLIST), recorded with TRACE-RECORD."
     (is (eq tr (last-trace)))
     (is (null *current-trace*))))
 
+(test call-with-trace-is-with-trace-as-a-function
+  (clear-trace-session)
+  (let ((seen nil))
+    (is (equal '(1 2)
+               (multiple-value-list
+                (call-with-trace :simulate 'garage
+                                 (lambda ()
+                                   (setf seen *current-trace*)
+                                   (values 1 2))))))
+    (is (eq seen (last-trace)))
+    (is (not (trace-open-p seen)))
+    (is (eq :simulate (trace-phase seen)))
+    (is (eq 'garage (trace-context-name seen)))
+    (is (equal '(:begin)
+               (mapcar (lambda (entry) (getf entry :kind)) (trace-entries seen))))))
+
 (test trace-history-keeps-the-newest-within-the-limit
   (clear-trace-session)
   (let* ((*trace-history-limit* 2)
@@ -383,6 +399,10 @@ Each entry is (KIND . PLIST), recorded with TRACE-RECORD."
       (is (< (search "Begin" text) (search "Goal:" text) (search "Result:" text))))
     (is (search "Inizio"
                 (getf (first (nth-value 1 (narrate-trace *current-trace*))) :text)))
+    (trace-record :goal :goal '(b 2))
+    (is (equal '((a 1) (b 2))
+               (mapcar (lambda (entry) (getf entry :goal))
+                       (find-trace-entries :goal *current-trace*))))
     (is (trace-open-p *current-trace*))))
 
 (test explanation-follows-the-format-stream-convention
