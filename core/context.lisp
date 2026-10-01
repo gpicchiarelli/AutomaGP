@@ -1,7 +1,10 @@
 ;;;; core/context.lisp — context core (Phase 1)
 ;;;;
 ;;;; A context is the fundamental unit GP works inside. Hierarchical
-;;;; parent/child contexts support inherited fact lookup (local shadows parent).
+;;;; parent/child contexts support inherited fact lookup: a context sees its
+;;;; own facts together with those of every ancestor. That is a union. A
+;;;; local (POWER D ON) does not hide an inherited (POWER D OFF); only an
+;;;; EQUAL copy of the same fact is listed once.
 
 (in-package #:automa-gp)
 
@@ -15,7 +18,9 @@
     :initarg :parent
     :accessor context-parent
     :initform nil
-    :documentation "Optional parent context for hierarchical lookup.")
+    :documentation "Optional parent context for hierarchical lookup.
+Writing it never makes a context its own ancestor: see CONTEXT-CYCLE.
+CONTEXT-ADD-CHILD! also keeps the children lists in step.")
    (children
     :initarg :children
     :accessor context-children
@@ -69,6 +74,7 @@
   (:documentation "AUTOMA GP context — symbolic work unit."))
 
 (defun context-p (object)
+  "True if OBJECT is a CONTEXT."
   (typep object 'context))
 
 ;;; Session specials used across core, memory, domains, and the REPL.
@@ -82,22 +88,81 @@
 (defvar *last-execution* nil
   "Last EXECUTION-RESULT from GP-SIMULATE or GP-RUN.")
 
+(define-condition context-cycle (error)
+  ((context
+    :initarg :context
+    :reader context-cycle-context
+    :documentation "The context that is, or would become, its own ancestor.")
+   (parent
+    :initarg :parent
+    :initform nil
+    :reader context-cycle-parent
+    :documentation "The refused parent; NIL when an existing loop was met."))
+  (:report (lambda (condition stream)
+             (let ((context (context-cycle-context condition))
+                   (parent (context-cycle-parent condition)))
+               (if parent
+                   (format stream "Context ~S cannot have parent ~S: ~
+                                   it would become its own ancestor"
+                           (context-name context) (context-name parent))
+                   (format stream "The parent links of context ~S form a loop"
+                           (context-name context))))))
+  (:documentation "A parent link would close, or has closed, a loop of contexts.
+Not a GP-ERROR: that hierarchy is defined in core/conditions.lisp, which
+loads after this file, and it describes a step that failed in a plan run."))
+
+(defun context-lineage (context)
+  "CONTEXT followed by its ancestors, nearest first.
+Signals CONTEXT-CYCLE if the parent links loop back on themselves."
+  (loop with lineage = nil
+        for c = context then (context-parent c)
+        while c
+        do (when (member c lineage :test #'eq)
+             (error 'context-cycle :context context))
+           (push c lineage)
+        finally (return (nreverse lineage))))
+
+(defmethod (setf context-parent) :before (parent (child context))
+  "Refuse, before anything is written, a PARENT that is CHILD or one of its
+descendants."
+  (when (and parent (member child (context-lineage parent) :test #'eq))
+    (error 'context-cycle :context child :parent parent)))
+
+(defun context-add-child! (parent child)
+  "Make CHILD a child of PARENT (mutates both) and return CHILD.
+CHILD leaves the children of the parent it had before. Signals CONTEXT-CYCLE,
+leaving every context as it was, when PARENT is CHILD or one of its
+descendants."
+  (let ((previous (context-parent child)))
+    (setf (context-parent child) parent)
+    (when (and previous (not (eq previous parent)))
+      (setf (context-children previous)
+            (remove child (context-children previous) :test #'eq)))
+    (pushnew child (context-children parent) :test #'eq)
+    child))
+
 (defun make-context (&key name parent facts goals actions rules operators
                        events event-reactions mode meta children)
-  "Construct a CONTEXT. MODE defaults to :READ."
-  (make-instance 'context
-                 :name name
-                 :parent parent
-                 :children (copy-list children)
-                 :facts (copy-list facts)
-                 :goals (copy-list goals)
-                 :actions (copy-tree actions)
-                 :rules (copy-list rules)
-                 :operators (copy-list operators)
-                 :events (copy-list events)
-                 :event-reactions (copy-list event-reactions)
-                 :mode (if mode (ensure-mode mode) :read)
-                 :meta (copy-tree meta)))
+  "Construct a CONTEXT. MODE defaults to :READ.
+The new context inherits from PARENT but is not listed among PARENT's
+children; CREATE-CONTEXT does both. Each context in CHILDREN becomes a child
+of the new one, as by CONTEXT-ADD-CHILD!."
+  (let ((context (make-instance 'context
+                                :name name
+                                :parent parent
+                                :facts (copy-list facts)
+                                :goals (copy-list goals)
+                                :actions (copy-tree actions)
+                                :rules (copy-list rules)
+                                :operators (copy-list operators)
+                                :events (copy-list events)
+                                :event-reactions (copy-list event-reactions)
+                                :mode (if mode (ensure-mode mode) :read)
+                                :meta (copy-tree meta))))
+    ;; CONTEXT-ADD-CHILD! pushes, so add the last child first.
+    (dolist (child (reverse children))
+      (context-add-child! context child))
+    context))
 
 (defun create-context (&key name parent facts goals actions rules operators
                          events event-reactions mode meta)
@@ -117,36 +182,30 @@
       (context-add-child! parent ctx))
     ctx))
 
-(defun context-add-child! (parent child)
-  "Register CHILD under PARENT (mutates both)."
-  (setf (context-parent child) parent)
-  (pushnew child (context-children parent) :test #'eq)
-  child)
-
 (defun facts-of (context)
   "Local facts on CONTEXT (no inheritance)."
   (context-facts context))
 
 (defun context-all-facts (context)
-  "Facts visible in CONTEXT along the parent chain.
-Ancestors contribute first; a local fact EQUAL to an ancestor fact replaces it."
-  (let ((chain nil)
-        (result nil))
-    (loop for c = context then (context-parent c)
-          while c
-          do (push c chain))
-    (dolist (c chain)
-      (dolist (f (context-facts c))
-        (setf result (remove f result :test #'fact-equal))
-        (setf result (append result (list f)))))
-    result))
+  "Facts visible in CONTEXT: its own and those of every ancestor, as a new list.
+Ancestors contribute first. A fact that occurs more than once is listed
+once, at its most local position. Nothing else is hidden: a local fact does
+not override an inherited fact that merely differs from it."
+  ;; EQUAL is FACT-EQUAL. Naming the standard predicate lets the
+  ;; implementation hash a long list instead of comparing every pair.
+  (remove-duplicates
+   (mapcan (lambda (c) (copy-list (context-facts c)))
+           (reverse (context-lineage context)))
+   :test #'equal))
 
 (defun context-query (context pattern)
   "Find facts visible in CONTEXT matching PATTERN (no rule inference).
 For inference, see QUERY / GP-QUERY."
   (find-facts pattern (context-all-facts context)))
 
-(defun context-modify! (context &key name mode meta
+(defun context-modify! (context &key (name nil name-p)
+                                 mode
+                                 (meta nil meta-p)
                                  (facts nil facts-p)
                                  (goals nil goals-p)
                                  (actions nil actions-p)
@@ -154,10 +213,12 @@ For inference, see QUERY / GP-QUERY."
                                  (operators nil operators-p)
                                  (events nil events-p)
                                  (event-reactions nil event-reactions-p))
-  "Destructively modify CONTEXT slots when supplied."
-  (when name (setf (context-name context) name))
+  "Destructively modify CONTEXT slots when supplied.
+A supplied NIL clears the slot, except for MODE: NIL is not a mode and
+leaves the mode as it is. Lists are copied, as by MAKE-CONTEXT."
+  (when name-p (setf (context-name context) name))
   (when mode (setf (context-mode context) (ensure-mode mode)))
-  (when meta (setf (context-meta context) meta))
+  (when meta-p (setf (context-meta context) (copy-tree meta)))
   (when facts-p (setf (context-facts context) (copy-list facts)))
   (when goals-p (setf (context-goals context) (copy-list goals)))
   (when actions-p (setf (context-actions context) (copy-tree actions)))
@@ -171,20 +232,19 @@ For inference, see QUERY / GP-QUERY."
 (defun clone-context (context &key name as-child)
   "Deep-enough copy of CONTEXT (facts/goals/actions/rules/operators/events/meta).
 Parent link is cleared unless AS-CHILD is true (then registered under original).
-Event objects are shallow-copied references; reactions are shared by identity."
+The copy has no children. Fact, rule, operator, action, event and reaction
+objects are shared with CONTEXT; the lists that hold them are new."
+  ;; MAKE-CONTEXT copies every list it is given.
   (let ((copy (make-context :name (or name (context-name context))
-                            :parent nil
-                            :facts (copy-list (context-facts context))
-                            :goals (copy-list (context-goals context))
-                            :actions (copy-tree (context-actions context))
-                            :rules (copy-list (context-rules context))
-                            :operators (copy-list (context-operators context))
-                            :events (copy-list (context-events context))
-                            :event-reactions
-                            (copy-list (context-event-reactions context))
+                            :facts (context-facts context)
+                            :goals (context-goals context)
+                            :actions (context-actions context)
+                            :rules (context-rules context)
+                            :operators (context-operators context)
+                            :events (context-events context)
+                            :event-reactions (context-event-reactions context)
                             :mode (context-mode context)
-                            :meta (copy-tree (context-meta context))
-                            :children nil)))
+                            :meta (context-meta context))))
     (when as-child
       (context-add-child! context copy))
     copy))

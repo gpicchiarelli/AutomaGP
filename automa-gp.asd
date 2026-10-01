@@ -101,6 +101,7 @@
                 :serial t
                 :components ((:file "suite")
                              (:file "support")
+                             (:file "test-modes")
                              (:file "test-context")
                              (:file "test-facts")
                              (:file "test-state")
