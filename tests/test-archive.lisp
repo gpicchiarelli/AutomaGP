@@ -848,6 +848,22 @@ never half loaded, runs no code, and is not replaced by a later autosave."
       (is (procedure-p (gp-find-procedure 'new)))
       (is (string= text (uiop:read-file-string path))))))
 
+(test archive-error-handler-sees-session-memory
+  "The file is read into a scratch store. A handler must find the session
+store in its place, without the procedures read before the damage."
+  (with-archive-file (path :autoload t)
+    (%write-archive-text path "(:kind :automa-gp-procedure-archive
+                                :procedures ((:procedure :name good :goals ((a))) 17))")
+    (let ((seen :not-called))
+      (handler-bind ((procedure-archive-error
+                       (lambda (c)
+                         (setf seen (list (procedural-memory-procedures
+                                           *procedural-memory*)
+                                          *read-eval*))
+                         (%skip-archive c))))
+        (is (null (gp-procedures))))
+      (is (equal '(nil t) seen)))))
+
 (test repaired-archive-file-is-read-on-retry
   (with-archive-file (path :autoload t)
     (%write-archive-text path "(")
@@ -883,14 +899,17 @@ never half loaded, runs no code, and is not replaced by a later autosave."
     (is (null (plan-from-ranked-procedures (gp-context) nil (gp-operators))))
     (signals error (gp-use-procedure :goals goals))))
 
-(test default-procedure-name-is-the-same-in-every-package
+(test default-procedure-name-ignores-package-and-print-case
   (gp-clear-memory)
   (let* ((plan (%archive-studio))
-         (names (mapcar (lambda (package)
-                          (let ((*package* (find-package package)))
-                            (procedure-name (procedure-from-plan plan))))
-                        '(:cl-user :automa-gp :automa-gp/tests :keyword))))
+         (names (loop for package in '(:cl-user :automa-gp :automa-gp/tests :keyword)
+                      append (loop for print-case in '(:upcase :downcase :capitalize)
+                                   collect (let ((*package* (find-package package))
+                                                 (*print-case* print-case))
+                                             (procedure-name
+                                              (procedure-from-plan plan)))))))
     (is (every (lambda (name) (eq name (first names))) names))
+    (is (string= "PROC-DEFAULT" (symbol-name (first names))))
     (is (eq (find-package :automa-gp) (symbol-package (first names))))))
 
 (test remembering-other-goals-under-a-name-starts-a-fresh-count

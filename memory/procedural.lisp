@@ -251,34 +251,48 @@ While it runs, RETRY calls it again and SKIP returns NIL instead."
   "Procedures in the archive file, in file order; NIL when there is no file.
 The file is read with *READ-EVAL* off and into a scratch store, so a file
 that cannot be read leaves session memory as it was.
-Signals PROCEDURE-ARCHIVE-ERROR."
+Signals PROCEDURE-ARCHIVE-ERROR, and only once the scratch store is gone:
+a handler finds session memory itself in *PROCEDURAL-MEMORY*."
   (when (%procedure-archive-file)
-    (let ((*procedural-memory* (make-procedural-memory))
-          (*procedure-archive-loaded* t)
-          (*read-eval* nil))
-      (with-archive-errors (:read)
-        (load-procedure-archive *procedure-archive-path*))
-      (reverse (procedural-memory-procedures *procedural-memory*)))))
+    (multiple-value-bind (procedures cause)
+        (let ((*procedural-memory* (make-procedural-memory))
+              (*procedure-archive-loaded* t)
+              (*read-eval* nil))
+          (handler-case
+              (progn
+                (load-procedure-archive *procedure-archive-path*)
+                (reverse (procedural-memory-procedures *procedural-memory*)))
+            (error (cause)
+              (values nil cause))))
+      (when cause
+        (error 'procedure-archive-error :path *procedure-archive-path*
+                                        :action :read
+                                        :cause cause))
+      procedures)))
 
 (defun maybe-autoload-procedure-archive ()
   "Read the archive file into session memory, once per image.
 Nothing happens while autoload is off, once the file was read, written or
 set aside, during a load, or when there is no file (*PROCEDURE-ARCHIVE-PATH*,
 or a sibling .sexp of an .agp path).
-A file that cannot be read signals PROCEDURE-ARCHIVE-ERROR and leaves
-session memory untouched. RETRY reads it again; SKIP continues without it.
-After any other exit the next call tries again."
+A file that cannot be found or read signals PROCEDURE-ARCHIVE-ERROR and
+leaves session memory untouched. RETRY reads it again; SKIP continues
+without it. After any other exit the next call tries again."
   (when (and *procedure-archive-autoload*
              (not *procedure-archive-loaded*)
-             (not *loading-procedure-archive*)
-             (%procedure-archive-file))
-    (let ((memory *procedural-memory*))
-      (dolist (procedure (%call-with-archive-restarts
-                          #'%archive-file-procedures
-                          "Read the procedure archive file again."
-                          "Continue without the procedure archive file."))
-        (install-procedure! procedure memory)))
-    (setf *procedure-archive-loaded* t)))
+             (not *loading-procedure-archive*))
+    (let* ((memory *procedural-memory*)
+           (read (%call-with-archive-restarts
+                  (lambda ()
+                    (if (%procedure-archive-file)
+                        (%archive-file-procedures)
+                        :no-file))
+                  "Read the procedure archive file again."
+                  "Continue without the procedure archive file.")))
+      (unless (eq read :no-file)
+        (dolist (procedure read)
+          (install-procedure! procedure memory))
+        (setf *procedure-archive-loaded* t)))))
 
 (defun maybe-autosave-procedure-archive (&optional (memory *procedural-memory*))
   "Write MEMORY to the archive file when autosave is on and MEMORY is the
@@ -314,9 +328,13 @@ MEMORY keeps its change either way. Returns true when the file was written."
 
 (defun %default-procedure-name (context-name &optional (ordinal 1))
   "PROC-<CONTEXT-NAME>, with -ORDINAL appended after the first.
-Interned in AUTOMA-GP, so the name does not depend on the caller's *PACKAGE*."
+Interned in AUTOMA-GP from the symbol's own name, so the result does not
+depend on the caller's *PACKAGE* or *PRINT-CASE*."
   (intern (format nil "PROC-~A~@[-~D~]"
-                  (or context-name 'unnamed)
+                  (typecase context-name
+                    (null "UNNAMED")
+                    (symbol (symbol-name context-name))
+                    (t context-name))
                   (when (> ordinal 1) ordinal))
           :automa-gp))
 
@@ -601,7 +619,8 @@ procedure built by hand) leaves the final state unknown, as NIL."
   "How many nested precondition repairs may reuse an archived procedure.
 A deeper repair uses Means-Ends Analysis only. This bounds the work, not
 termination: a repair never reuses a procedure that is already being
-replayed, so the nesting cannot exceed the number of archived procedures.")
+replayed, so every level of nesting replays another archived procedure and
+the nesting ends when the archive has none left.")
 
 (defvar *procedures-in-replay* nil
   "Procedures currently being replayed, innermost first. Stops a repair from
