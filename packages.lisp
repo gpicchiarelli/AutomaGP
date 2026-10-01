@@ -120,6 +120,12 @@
    #:rule-conclusions
    #:forward-chain
    #:*forward-chain-limit*
+   #:forward-chain-incomplete
+   #:forward-chain-incomplete-limit
+   #:unsafe-rule
+   #:unsafe-rule-name
+   #:unsafe-rule-variables
+   #:variables-in
    ;; queries
    #:query
    #:query-facts
@@ -127,6 +133,11 @@
    #:prove
    #:prove-all
    #:*query-depth-limit*
+   #:*query-step-limit*
+   #:query-incomplete
+   #:query-incomplete-goal
+   #:query-incomplete-limit
+   #:instantiate-bindings
    ;; operators
    #:operator
    #:operator-p
@@ -147,6 +158,10 @@
    #:observation-active-p
    #:gp-observation
    #:induce-operator
+   #:merge-induced-operators
+   #:induction-error
+   #:induction-error-name
+   #:induction-error-reason
    #:gp-listen
    #:gp-note-state
    #:gp-learn-action
