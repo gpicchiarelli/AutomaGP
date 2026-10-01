@@ -226,16 +226,25 @@ introduced. When LIFT is true:
 - a constant symbol that occurs at least twice in EXISTING and meets the
   same different symbol of NEW each time becomes the next ?Xn;
 - a different number, and a symbol that occurs once, are refused.
+Of the pairings that fit, one that turns the fewest constants into
+variables is taken: an example that only repeats EXISTING lifts nothing,
+in whatever order it lists its facts.
 
 The merged operator keeps the parameters, cost, action, risk,
 reversibility and meta of EXISTING; its :EXAMPLES count grows by one and
 :GENERALIZED gains the symbols its variables newly stand for."
   (let* ((patterns (%operator-patterns existing))
          (counts (%term-counts patterns))
-         (first-index (%next-induction-index patterns)))
+         (first-index (%next-induction-index patterns))
+         (liftable (if lift
+                       (loop for count being the hash-values of counts
+                             count (>= count 2))
+                       0))
+         (budget 0))
     ;; STATE is (IMAGES . LIFTS), newest entry first. IMAGES maps a variable
     ;; of EXISTING to the term of NEW it stands for. LIFTS maps a constant
-    ;; of EXISTING to (TERM-OF-NEW . VARIABLE). A NIL state means no fit.
+    ;; of EXISTING to (TERM-OF-NEW . VARIABLE) and holds at most BUDGET
+    ;; entries. A NIL state means no fit.
     (labels ((merge-term (a b state)
                (destructuring-bind (images . lifts) state
                  (cond
@@ -259,7 +268,8 @@ reversibility and meta of EXISTING; its :EXAMPLES count grows by one and
                          (destructuring-bind (term . variable) (cdr lifted)
                            (values variable
                                    (and (%same-term-p term b) state))))
-                        ((>= (gethash a counts 0) 2)
+                        ((and (>= (gethash a counts 0) 2)
+                              (< (length lifts) budget))
                          (let ((variable (%induction-variable
                                           (+ first-index (length lifts)))))
                            (values variable
@@ -300,24 +310,30 @@ reversibility and meta of EXISTING; its :EXAMPLES count grows by one and
                                    next
                                    (lambda (facts state)
                                      (funcall k (cons fact facts) state))))))
-                         bs))))
-      (merge-facts
-       (operator-preconditions existing) (operator-preconditions new)
-       (cons nil nil)
-       (lambda (preconditions state)
-         (merge-facts
-          (operator-add-list existing) (operator-add-list new) state
-          (lambda (adds state)
-            (merge-facts
-             (operator-delete-list existing) (operator-delete-list new) state
-             (lambda (deletes state)
-               (destructuring-bind (images . lifts) state
-                 (%merged-operator
-                  existing new preconditions adds deletes
-                  (append
-                   (loop for (nil . term) in (reverse images)
-                         unless (variable-symbol-p term)
-                           collect term)
-                   (loop for (constant term) in (reverse lifts)
-                         collect constant
-                         collect term)))))))))))))
+                         bs)))
+             (merge-operators ()
+               (merge-facts
+                (operator-preconditions existing) (operator-preconditions new)
+                (cons nil nil)
+                (lambda (preconditions state)
+                  (merge-facts
+                   (operator-add-list existing) (operator-add-list new) state
+                   (lambda (adds state)
+                     (merge-facts
+                      (operator-delete-list existing) (operator-delete-list new)
+                      state
+                      (lambda (deletes state)
+                        (destructuring-bind (images . lifts) state
+                          (%merged-operator
+                           existing new preconditions adds deletes
+                           (append
+                            (loop for (nil . term) in (reverse images)
+                                  unless (variable-symbol-p term)
+                                    collect term)
+                            (loop for (constant term) in (reverse lifts)
+                                  collect constant
+                                  collect term))))))))))))
+      ;; The smallest number of lifted constants that fits comes first.
+      (loop for limit from 0 to liftable
+            do (setf budget limit)
+            thereis (merge-operators)))))

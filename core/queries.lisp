@@ -181,6 +181,17 @@ is signalled; the solutions returned are still sound."
    goals bindings
    (lambda () (%prove-all goals facts rules bindings depth nil))))
 
+(defun %name-anonymous-variables (tree)
+  "A copy of TREE in which each anonymous ? is a fresh variable of its own.
+An anonymous variable takes no binding, so a proof leaves it in the goal;
+a named one comes back as the term it stood for."
+  (cond
+    ((anonymous-variable-p tree) (gensym "?ANY"))
+    ((consp tree)
+     (cons (%name-anonymous-variables (car tree))
+           (%name-anonymous-variables (cdr tree))))
+    (t tree)))
+
 (defun query (pattern context &key (infer t))
   "Query PATTERN in CONTEXT.
 If INFER is true (default), use backward chaining over visible rules.
@@ -188,23 +199,26 @@ If INFER is NIL, match facts only (like FIND-FACTS / CONTEXT-QUERY).
 
 Returns (VALUES HITS COMPLETE-P). HITS is a list of distinct plists
   (:BINDINGS alist :FACT instantiated-pattern :SOURCE :FACT|:RULE)
-where :SOURCE is :FACT when the instantiated pattern is a visible fact.
-COMPLETE-P is NIL when the search limits of PROVE may have hidden a hit;
-PROVE then also signals the warning QUERY-INCOMPLETE."
+where :BINDINGS covers the named variables of PATTERN, :FACT also fills
+in what each anonymous ? stood for, and :SOURCE is :FACT when that fact
+is a visible fact. COMPLETE-P is NIL when the search limits of PROVE may
+have hidden a hit; PROVE then also signals the warning QUERY-INCOMPLETE."
   (let ((facts (context-all-facts context)))
     (if infer
-        (multiple-value-bind (solutions complete-p)
-            (prove pattern facts (context-all-rules context))
-          (values (remove-duplicates
-                   (loop for b in solutions
-                         for fact = (substitute-bindings pattern b)
-                         collect (list :bindings (instantiate-bindings pattern b)
-                                       :fact fact
-                                       :source (if (fact-p fact facts)
-                                                   :fact
-                                                   :rule)))
-                   :test #'equal :from-end t)
-                  complete-p))
+        (let ((goal (%name-anonymous-variables pattern)))
+          (multiple-value-bind (solutions complete-p)
+              (prove goal facts (context-all-rules context))
+            (values (remove-duplicates
+                     (loop for b in solutions
+                           for fact = (substitute-bindings goal b)
+                           collect (list :bindings (instantiate-bindings
+                                                    pattern b)
+                                         :fact fact
+                                         :source (if (fact-p fact facts)
+                                                     :fact
+                                                     :rule)))
+                     :test #'equal :from-end t)
+                    complete-p)))
         (values (loop for hit in (query-facts pattern facts)
                       collect (list :bindings (instantiate-bindings
                                                pattern (getf hit :bindings))
