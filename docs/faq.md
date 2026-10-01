@@ -11,8 +11,7 @@ SBCL and Quicklisp. On macOS `brew install sbcl`; on Debian or Ubuntu
 `scripts/` load the checkout they live in and change nothing outside it.
 For `(ql:quickload :automa-gp)` from your own REPL, link the checkout once
 with `ln -sfn "$PWD" ~/quicklisp/local-projects/automa-gp`. Nothing is
-installed globally. `make test` and `make load` wrap the same steps;
-`Dockerfile` and `.devcontainer/` give the same environment in a container.
+installed globally. `make test` and `make load` wrap the same steps.
 
 ## How do I run the tests?
 

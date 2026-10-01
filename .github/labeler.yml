@@ -65,8 +65,6 @@ ci:
   - changed-files:
       - any-glob-to-any-file:
           - .github/**
-          - .devcontainer/**
-          - Dockerfile
           - Makefile
           - .pre-commit-config.yaml
           - .editorconfig
