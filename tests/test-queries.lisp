@@ -286,3 +286,63 @@ and the limit named by each QUERY-INCOMPLETE warning it signalled."
     (is (equal '((:bindings ((?w . z)) :fact (grandparent a z) :source :fact)
                  (:bindings ((?w . c)) :fact (grandparent a c) :source :rule))
                (query '(grandparent a ?w) ctx)))))
+
+(test backward-chaining-agrees-with-the-forward-closure
+  ;; :COMPLETE programs must be answered in full and say so. :ANSWERED ones
+  ;; lose no answer here although the search cannot rule one out. A :SOUND
+  ;; one outgrows the step limit: whatever it answers must still be true.
+  (loop for (expect steps facts rules patterns)
+          in '((:complete nil
+                ((edge a b) (edge b c) (edge c a) (edge c d))
+                (((path ?x ?y) (edge ?x ?y))
+                 ((path ?x ?z) (edge ?x ?y) (path ?y ?z)))
+                ((path a ?w) (path ?v ?w) (path d ?w) (path ?v a)
+                 (path a a) (path d a)))
+               (:answered nil
+                ((edge a b) (edge b c) (edge c a) (edge c d))
+                (((path ?x ?y) (edge ?x ?y))
+                 ((path ?x ?z) (path ?x ?y) (edge ?y ?z)))
+                ((path a ?w) (path ?v ?w) (path d ?w) (path a a) (path d a)))
+               (:complete nil
+                ((married a b) (married c d))
+                (((married ?x ?y) (married ?y ?x)))
+                ((married ?v ?w) (married b ?w) (married b a) (married a c)))
+               (:complete nil
+                ((zero n0) (succ n0 n1) (succ n1 n2) (succ n2 n3) (succ n3 n4))
+                (((even ?x) (zero ?x))
+                 ((even ?y) (succ ?x ?y) (odd ?x))
+                 ((odd ?y) (succ ?x ?y) (even ?x)))
+                ((even ?w) (odd ?w) (even n4) (odd n4) (even ?) (odd n0)))
+               (:complete nil
+                ((parent r a) (parent r b) (parent a a1) (parent a a2)
+                 (parent b b1) (parent a1 x) (parent b1 y))
+                (((same-generation ?x ?y) (parent ?p ?x) (parent ?p ?y))
+                 ((same-generation ?x ?y)
+                  (parent ?px ?x) (same-generation ?px ?py) (parent ?py ?y)))
+                ((same-generation ?v ?w) (same-generation x ?w)
+                 (same-generation x y) (same-generation x a)))
+               (:sound 2000
+                ((link a b) (link b c) (link c d))
+                (((connected ?x ?y) (link ?x ?y))
+                 ((connected ?x ?y) (connected ?y ?x))
+                 ((connected ?x ?z) (connected ?x ?y) (connected ?y ?z)))
+                ((connected a ?w) (connected ?v ?w) (connected a d))))
+        for ctx = (apply #'%looping-context facts rules)
+        for closure = (forward-chain (context-all-facts ctx)
+                                     (context-all-rules ctx))
+        do (loop for pattern in patterns
+                 for expected = (mapcar #'car (find-facts pattern closure))
+                 do (multiple-value-bind (hits complete-p limits)
+                        (let ((*query-step-limit* (or steps *query-step-limit*)))
+                          (%searching (lambda () (query pattern ctx))))
+                      (let ((answers (mapcar (lambda (hit) (getf hit :fact))
+                                             hits)))
+                        (is (subsetp answers expected :test #'equal))
+                        (is (= (length answers)
+                               (length (remove-duplicates answers
+                                                          :test #'equal))))
+                        (unless (eq expect :sound)
+                          (is (subsetp expected answers :test #'equal)))
+                        (is (eq (null limits) (and complete-p t)))
+                        (when (eq expect :complete)
+                          (is (eq t complete-p))))))))

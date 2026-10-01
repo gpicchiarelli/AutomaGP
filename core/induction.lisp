@@ -2,15 +2,16 @@
 ;;;;
 ;;;; A before/after observation becomes a STRIPS operator. The objects of a
 ;;;; change are the terms it both removes a fact about and adds a fact
-;;;; about; a change that only adds or only removes cannot tell an object
-;;;; from a value, so every term of it counts. Preconditions are the removed
-;;;; facts plus the before-facts that mention an object. A value such as OFF
-;;;; never pulls in another fact, and unrelated facts stay out. With
-;;;; generalization, an object symbol that the whole change shares becomes
-;;;; ?X0; numbers stay ground. A second example merges only when it fits the
-;;;; operator already induced under the same name. A ground merge keeps
-;;;; every constant: a different symbol or number does not fit and does not
-;;;; become a variable.
+;;;; about, so a value such as OFF, which one side alone mentions, pulls in
+;;;; no other fact. A change that only adds or only removes cannot tell an
+;;;; object from a value, so every term of it counts. Preconditions are the
+;;;; removed facts plus the before-facts that mention an object; unrelated
+;;;; facts stay out. With generalization, an object symbol that the whole
+;;;; change shares becomes ?X0; numbers stay ground. A second example merges
+;;;; only when it fits the operator already induced under the same name, and
+;;;; then lifts as few constants as fit. A ground merge keeps every
+;;;; constant: a different symbol or number does not fit and does not become
+;;;; a variable.
 
 (in-package #:automa-gp)
 
@@ -52,6 +53,7 @@ before and after states hold the same facts."))
   (if (consp fact) (rest fact) nil))
 
 (defun %term-in-fact-p (term fact)
+  "True when TERM is one of the terms of FACT."
   (member term (%fact-terms fact) :test #'equal))
 
 (defun %terms-of-facts (facts)
@@ -66,6 +68,7 @@ before and after states hold the same facts."))
        (not (keywordp term))))
 
 (defun %induction-variable (index)
+  "The variable ?Xindex that induction lifts an object to."
   (intern (format nil "?X~D" index) :automa-gp))
 
 (defun %lift-fact (fact bindings)
@@ -175,6 +178,7 @@ JSON façade read equals the one typed at the REPL."
           (incf (gethash term counts 0)))))))
 
 (defun %operator-patterns (operator)
+  "A fresh list of the preconditions, added and deleted facts of OPERATOR."
   (append (operator-preconditions operator)
           (operator-add-list operator)
           (operator-delete-list operator)))

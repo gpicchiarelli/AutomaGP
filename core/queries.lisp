@@ -8,7 +8,11 @@
 ;;;; depth-first and bounded twice: by the length of a chain of rule
 ;;;; applications and by the number of goals resolved. A search cut by a
 ;;;; bound returns the answers it found and says that others may be missing.
-;;;; Without tabling, a left-recursive rule always reaches the depth bound.
+;;;; A goal that comes back as its own subgoal is not proved again: that
+;;;; proof would only repeat an answer the outer goal has without it.
+;;;; Without tabling, a left-recursive rule always reaches the depth bound,
+;;;; and a rule with two recursive antecedents can use up the steps before
+;;;; it has every answer. FORWARD-CHAIN closes such rule sets.
 
 (in-package #:automa-gp)
 

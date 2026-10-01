@@ -120,3 +120,18 @@
     (is (equal '(explicit)
                (mapcar #'operator-name (context-planning-operators ctx))))
     (is (null (find-operator ctx 'power-on)))))
+
+(test the-planner-tries-every-way-an-operator-achieves-a-goal
+  (let ((connect (make-operator :name 'connect
+                                :preconditions '((port ?a out) (port ?b in))
+                                :add-list '((linked ?a ?b) (linked ?b ?a))))
+        (state '((port y out) (port x in))))
+    ;; (LINKED X Y) fits the first add pattern only with the ports swapped;
+    ;; the second pattern is the one the state allows.
+    (loop for goal in '((linked y x) (linked x y))
+          for plan = (plan-for state (list goal) (list connect))
+          do (is (plan-success plan))
+             (is (equal '(connect)
+                        (mapcar (lambda (step) (getf step :operator))
+                                (plan-steps plan))))
+             (is (fact-p goal (plan-final-state plan))))))
