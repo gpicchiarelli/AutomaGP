@@ -490,7 +490,28 @@ then delete that directory tree."
       (signals type-error (autonomous-loop :policy bad)))
     (signals type-error (autonomous-step :context 'studio-audio))
     (signals type-error (autonomous-loop :context 'studio-audio))
-    (is (equal before (gp-facts)))))
+    (is (equal before (gp-facts))))
+  ;; An authority written into the slot after construction is checked
+  ;; before the cycle reacts to an event, plans or runs anything.
+  (dolist (bad '(:root nil "execute" execute))
+    (%auto-studio)
+    (gp-add-reaction (make-event-reaction :name 'on-ping
+                                          :when '(ping ?who)
+                                          :assert '((pinged ?who))))
+    (gp-emit '(ping a))
+    (let ((policy (make-autonomy-policy :authority :simulate :auto-confirm t))
+          (before (copy-tree (gp-facts)))
+          (mode (context-mode (gp-context)))
+          (marker (list :marker t)))
+      (setf (policy-authority policy) bad
+            *last-autonomy* marker)
+      (signals error (autonomous-step :policy policy))
+      (signals error (autonomous-loop :policy policy))
+      (is (equal before (gp-facts)) "facts under authority ~S" bad)
+      (is (= 1 (length (pending-events (gp-context))))
+          "the event stays pending under authority ~S" bad)
+      (is (eq mode (context-mode (gp-context))))
+      (is (eq marker *last-autonomy*)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The authorization gate

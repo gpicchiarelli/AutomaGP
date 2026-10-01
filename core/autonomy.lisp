@@ -499,6 +499,8 @@ plist (also stored in *LAST-AUTONOMY*):
   :PLAN :EXECUTION   plists, or NIL when the step got no further
   :GOALS :PENDING-EVENTS  the context after the step
 When REMEMBER is true, the plan and the run are recorded as episodes.
+A policy whose authority is not one of *VALID-AUTHORITIES* is an error,
+signalled before the cycle reacts to anything.
 Does not loop — see AUTONOMOUS-LOOP."
   (let* ((ctx (%session-context context))
          (pol (ensure-autonomy-policy policy))
@@ -508,6 +510,11 @@ Does not loop — see AUTONOMOUS-LOOP."
          (execution nil)
          (authorized nil)
          (reason nil))
+    ;; The slot is writable after construction; reactions already change
+    ;; live facts, so the authority is checked before the first phase.
+    (unless (member authority *valid-authorities* :test #'eq)
+      (error "The policy authority is ~S; expected one of ~S"
+             authority *valid-authorities*))
     (flet ((note (phase &rest plist)
              (push (list* :phase phase plist) phases)))
       (multiple-value-bind (status halt)
