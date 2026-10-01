@@ -411,6 +411,16 @@
    ;; persistence service (Phase 7)
    #:*persistence-format-version*
    #:*default-snapshot-directory*
+   #:*procedure-archive-format*
+   #:*persistence-symbol-packages*
+   #:*persistence-symbol-limit*
+   #:*persistence-depth-limit*
+   #:persistence-error
+   #:persistence-error-path
+   #:persistence-error-reason
+   #:persistence-version-error
+   #:persistence-version-error-found
+   #:persistence-version-error-expected
    #:serialize-rule
    #:deserialize-rule
    #:serialize-operator
