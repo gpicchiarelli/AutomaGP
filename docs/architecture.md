@@ -24,6 +24,74 @@ memory/        working · knowledge · episodic · procedural · persistence
 core/          events · mea · planner · executor
 ```
 
+## Core contract
+
+What the core guarantees since 0.195.0. Each sentence corresponds to a
+tested behaviour; the limits are stated where they apply.
+
+**Contexts.** A context sees its own facts and those of every ancestor.
+That is a union with one copy of each fact: a local `(power d on)` does
+not hide an inherited `(power d off)`. A parent link that would make a
+context its own ancestor signals `context-cycle` before anything is
+written, and every walk along the chain goes through `context-lineage`.
+`context-add-fact!` and `context-remove-fact!` change the local facts
+only. An execute in a child context refuses, before any step, a plan that
+would retract a fact the child only inherits (`plan-refused`, reason
+`:inherited-retraction`).
+
+**Facts.** Rules, operators, and plans never assert a fact that still
+holds a variable. An operator that adds a three-element fact
+`(predicate object value)` replaces every other three-element fact with
+the same predicate and object; facts of any other length are only added
+and deleted as written.
+
+**Matching.** A variable is a symbol whose name starts with `?`; `?`
+alone matches anything and binds nothing. `match` and `unify` never bind
+a variable to a term that contains it, and every walk over bindings ends
+on a circular alist.
+
+**Rules and queries.** `make-rule` signals `unsafe-rule`, with a
+`continue` restart, for a consequent variable no antecedent binds.
+`forward-chain` runs at most `*forward-chain-limit*` rounds. `query` and
+`prove` rename rule variables apart, drop a goal that repeats on its own
+path, follow at most `*query-depth-limit*` rule applications below one
+goal, and resolve at most `*query-step-limit*` goals in all. Each returns
+a value that says whether the answer is complete and signals
+`forward-chain-incomplete` or `query-incomplete` when a limit cut it.
+There is no tabling: a left-recursive rule ends incomplete, and
+`gp-infer` closes such rule sets by forward chaining.
+
+**Planning.** Means-Ends Analysis treats a goal that already holds as a
+zero-length success, fails a branch whose goal recurs beneath itself
+(`:goal-cycle`), stops when the search returns to a state it has seen
+(`:goal-clobbered`), and refuses an operator whose effects it cannot
+ground. A goal that is a bare symbol is a label: the plan lists it under
+`:ignored-goals`, and `plan-success` speaks for the fact goals only.
+
+**Execution and failure.** A plan step runs inside the restarts `:retry`,
+`:skip`, `:use-value`, `:use-alternative`, and `:abort-execution`;
+`confirmation-required` adds `:confirm`. The conditions are
+`precondition-failure`, `confirmation-required`, `unknown-operator`,
+`action-failed`, and `plan-refused`. A deliberative strategy chooses a
+restart by policy: `:signal`, `:skip`, `:retry`, `:abort`, or `:ask`.
+With `:signal` the condition reaches the caller's handlers with the
+restarts still available. The retry limit counts one step. A plan that
+names an operator that is gone and carries no recorded effects is refused
+before its first step.
+
+**Persistence.** A `.agp` file is data, not code. It is read with
+`*read-eval*` off, creates symbols only in the packages named by
+`*persistence-symbol-packages*`, and is bounded by
+`*persistence-symbol-limit*` and `*persistence-depth-limit*`. A file
+written by another format version signals `persistence-version-error`.
+A write goes to a temporary file that is then renamed. A damaged
+procedure archive signals `procedure-archive-error` on every access, with
+`:retry` and `:skip`, and autosave never overwrites it.
+
+**Threads.** The session state (current context, current plan, last
+execution, trace history) is not locked. One deliberation runs at a time;
+a front end with several threads must serialise its calls.
+
 ## Autonomy (Phase 12 / PROMPT §28)
 
 - `make-autonomy-policy` — `:authority` `:read` | `:simulate` | `:execute`
@@ -47,11 +115,14 @@ Each sentence corresponds to a tested behaviour.
 `gp-narrate` speaks the recorded trace in Italian. A failed `gp-plan` opens
 a listening session. `gp-induce-rule` turns the manual before/after change
 into an operator: the object symbol shared by that change becomes `?X0`,
-and numbers stay ground. Without an explicit before-state, induce refuses
+and numbers stay ground. Its preconditions are the facts the change
+removed and the before-facts about an object of the change; a fact that
+only shares a value with the change is left out. Without an explicit before-state, induce refuses
 when listening is not active. A successful plan or archive use that ends
 `:plan-failed` listening also drops the before-state. A second example
-with the same name merges when it fits; a differing number or a one-off
-value is refused. `gp-learn-action` stays ground and uses the same
+with the same name merges when it fits, aligned by role whatever its
+objects are called, lifting as few constants as fit and keeping risk,
+action, and meta; a differing number or a one-off value is refused. `gp-learn-action` stays ground and uses the same
 listening gate. A second example with the same constants
 merges. A different symbol or number is refused and does not become a
 variable. An operator that already uses variables is left unchanged.
@@ -190,7 +261,10 @@ record an execution. A run that starts still sets the mode to execute
 or simulate.
 An autonomous execute or simulate halts, and does not signal, when that
 action no longer matches or the facts no longer support it, with or
-without adapters when the plan recorded its actions. The loop does not
+without adapters when the plan recorded its actions. The same holds when
+the runner itself refuses the plan after the gate, including an execute
+that would retract an inherited fact: the halt carries the reason of the
+refusal. The loop does not
 take another step. When the action is authorized, the execute or
 simulate still runs. The workbench Passo and Ciclo buttons post `/api/autonomy/step` and
 `/api/autonomy/loop` with the live session authority (`:read`, `:simulate`, or
@@ -227,7 +301,8 @@ a reaction goal, a rule consequent, or a current goal has that shape.
 When that goal already holds, the phrase is refused: the goal is not
 recorded and the previous plan stays. `gp-add-goal` refuses the same
 way for a fact-like goal that already holds, matching names across
-packages; symbol goals are still accepted as labels. The
+packages; symbol goals are still accepted as labels, and a plan lists
+them under `:ignored-goals`. The
 predicate is required, unless the first word is an operator name, a
 reaction name, a rule name, or a word in that operator's, reaction's, or
 rule's `:ask` meta.
@@ -365,7 +440,7 @@ requires confirmation on a live run.
 
 ## Dependency policy
 
-Core: ANSI Common Lisp, ASDF, UIOP.
+Core: ANSI Common Lisp, ASDF, UIOP; on SBCL the notices also use `sb-posix`.
 Web (optional): Hunchentoot.
 Tests: FiveAM.
 Workbench: Swift 5.9, macOS 13 or later, no packages.
