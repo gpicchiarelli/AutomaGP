@@ -229,6 +229,9 @@
    #:execution-meta
    #:*last-execution*
    #:*execution-confirm*
+   #:plan-refused
+   #:plan-refused-reason
+   #:plan-refused-facts
    #:expected-state-from-plan
    #:operator-needs-confirmation-p
    #:simulate-operator

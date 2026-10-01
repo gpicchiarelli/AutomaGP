@@ -12,7 +12,10 @@
 (in-package #:automa-gp)
 
 (defvar *event-counter* 0
-  "Monotonic counter for event ids within a Lisp image.")
+  "Number of the newest event id issued or restored in this Lisp image.
+Ids are symbols named EVT-n and n only grows, so an id is not issued twice.
+MAKE-EVENT moves the counter past every EVT-n id it is handed, which keeps
+the ids of a restored context distinct from the ones issued after it.")
 
 (defvar *last-reaction* nil
   "Plist describing the last PROCESS-PENDING-EVENTS! / GP-REACT result.")
@@ -21,7 +24,7 @@
   ((id
     :initarg :id
     :accessor event-id
-    :documentation "Unique id for this event instance.")
+    :documentation "Id of this event, unique within a context's event log.")
    (type
     :initarg :type
     :accessor event-type
@@ -47,11 +50,21 @@
   (:documentation "A symbolic event bound to a context."))
 
 (defun event-p (object)
+  "True if OBJECT is a GP-EVENT."
   (typep object 'gp-event))
 
 (defun next-event-id ()
-  (incf *event-counter*)
-  (intern (format nil "EVT-~D" *event-counter*) :automa-gp))
+  "Issue the next event id: the symbol EVT-n for the next unused n."
+  (intern (format nil "EVT-~D" (incf *event-counter*)) :automa-gp))
+
+(defun %event-id-number (id)
+  "The n of an id named EVT-n, or NIL for any other id."
+  (when (symbolp id)
+    (let ((name (symbol-name id)))
+      (when (and (> (length name) 4)
+                 (string= "EVT-" name :end2 4)
+                 (every #'digit-char-p (subseq name 4)))
+        (parse-integer name :start 4)))))
 
 (defun parse-event-form (form)
   "Parse FORM into (VALUES TYPE DATA).
@@ -61,9 +74,15 @@ FORM is (TYPE . DATA), e.g. (FILE-CREATED \"doc.pdf\")."
   (values (car form) (copy-list (cdr form))))
 
 (defun make-event (&key type data (status :pending) meta id timestamp)
-  "Construct a GP-EVENT. TYPE is required."
+  "Construct a GP-EVENT. TYPE is required.
+Without ID the event gets the next EVT-n id. An ID named EVT-n, as on an
+event restored from a saved context, moves *EVENT-COUNTER* up to n so that
+no later event is issued the same id."
   (unless type
     (error "MAKE-EVENT requires :TYPE"))
+  (let ((n (%event-id-number id)))
+    (when n
+      (setf *event-counter* (max *event-counter* n))))
   (make-instance 'gp-event
                  :id (or id (next-event-id))
                  :type type
@@ -103,6 +122,7 @@ FORM is (TYPE . DATA), e.g. (FILE-CREATED \"doc.pdf\")."
   (:documentation "Reaction: match event → assert facts and/or add goals."))
 
 (defun event-reaction-p (object)
+  "True if OBJECT is an EVENT-REACTION."
   (typep object 'event-reaction))
 
 (defun make-event-reaction (&key name when assert goals meta)
@@ -166,26 +186,33 @@ FORM is (TYPE . DATA), e.g. (FILE-CREATED \"doc.pdf\")."
         (match pat (event-form event)))))
 
 (defun events-of (context &key status)
-  "Events on CONTEXT, oldest first. Optional :STATUS filter (:PENDING …)."
-  (let ((evs (copy-list (context-events context))))
-    (if status
-        (remove status evs :key #'event-status :test-not #'eq)
-        evs)))
+  "Events on CONTEXT, oldest first, as a fresh list.
+With :STATUS (:PENDING …) only the events in that status; NIL lists all."
+  (loop for event in (context-events context)
+        when (or (null status) (eq (event-status event) status))
+          collect event))
 
 (defun pending-events (context)
+  "Events on CONTEXT still waiting for PROCESS-PENDING-EVENTS!, oldest first."
   (events-of context :status :pending))
 
-(defun clear-events! (context &key (status nil status-p))
-  "Clear events on CONTEXT. With :STATUS, only clear matching status."
+(defun clear-events! (context &key status)
+  "Clear events on CONTEXT and return the events left.
+With :STATUS, clear only the events in that status. NIL, the default,
+clears them all, the same way EVENTS-OF with a NIL status lists them all."
   (setf (context-events context)
-        (if status-p
-            (remove status (context-events context)
-                    :key #'event-status :test #'eq)
-            nil))
-  (context-events context))
+        (when status
+          (remove status (context-events context)
+                  :key #'event-status :test #'eq))))
 
-(defun emit-event! (context form-or-event &key (assert-fact t) meta)
+(defun emit-event! (context form-or-event &key (assert-fact t)
+                                            (meta nil meta-p))
   "Post an event onto CONTEXT. FORM-OR-EVENT is (TYPE . DATA) or a GP-EVENT.
+A form makes a new event carrying META. A GP-EVENT is posted as it is: its
+status becomes :PENDING and META, when supplied, replaces its meta.
+An event whose id is already in CONTEXT's log is an error and changes
+nothing: the same event posted twice would sit in the log twice, be
+reacted to twice, and settle both entries at once.
 When ASSERT-FACT (default T), also assert (TYPE . DATA) as a context fact
 so ordinary forward-chain rules can see it.
 Returns the GP-EVENT (status :PENDING)."
@@ -196,6 +223,12 @@ Returns the GP-EVENT (status :PENDING)."
                    (multiple-value-bind (type data)
                        (parse-event-form form-or-event)
                      (make-event :type type :data data :meta meta)))))
+    (when (find (event-id event) (context-events context)
+                :key #'event-id :test #'equal)
+      (error "Event ~S is already posted on context ~S."
+             (event-id event) (context-name context)))
+    (when (and meta-p (event-p form-or-event))
+      (setf (event-meta event) (copy-tree meta)))
     (setf (event-status event) :pending)
     (setf (context-events context)
           (append (context-events context) (list event)))
@@ -211,91 +244,112 @@ Returns the GP-EVENT (status :PENDING)."
     event))
 
 (defun %apply-reaction-bindings (reaction bindings)
-  "Return (VALUES FACTS GOALS) ground from REACTION under BINDINGS."
-  (let ((facts nil)
-        (goals nil))
-    (dolist (pat (event-reaction-assert reaction))
-      (let ((f (substitute-bindings pat bindings)))
-        (unless (or (eq f *fail*) (pattern-has-variable-p f))
-          (push f facts))))
-    (dolist (pat (event-reaction-goals reaction))
-      (let ((g (substitute-bindings pat bindings)))
-        (unless (or (eq g *fail*) (pattern-has-variable-p g))
-          (push g goals))))
-    (values (nreverse facts) (nreverse goals))))
+  "Instantiate REACTION's :ASSERT and :GOALS patterns under BINDINGS.
+Returns (VALUES FACTS GOALS DROPPED). A pattern that still holds a variable,
+one the reaction's :WHEN did not bind, is neither asserted nor added as a
+goal; its instance is returned in DROPPED so the caller can report it."
+  (let ((dropped nil))
+    (flet ((instances (patterns)
+             (loop for pattern in patterns
+                   for instance = (substitute-bindings pattern bindings)
+                   if (pattern-has-variable-p instance)
+                     do (push instance dropped)
+                   else
+                     collect instance)))
+      (let* ((facts (instances (event-reaction-assert reaction)))
+             (goals (instances (event-reaction-goals reaction))))
+        (values facts goals (nreverse dropped))))))
 
 (defun react-to-event! (context event &key (reactions nil reactions-p))
   "Apply matching event reactions to EVENT on CONTEXT.
 Asserts facts, adds goals, marks EVENT :PROCESSED (or :IGNORED if none matched).
-Returns a plist (:EVENT :MATCHED :FACTS-ADDED :GOALS-ADDED)."
-  (let* ((rs (if reactions-p
-                 reactions
-                 (context-all-event-reactions context)))
-         (matched nil)
-         (facts-added nil)
-         (goals-added nil))
-    (dolist (r rs)
-      (let ((b (match-event-reaction r event)))
-        (unless (fail-p b)
-          (push (event-reaction-name r) matched)
-          (multiple-value-bind (facts goals)
-              (%apply-reaction-bindings r b)
-            (dolist (f facts)
-              (setf (context-facts context)
-                    (add-fact! (context-facts context) f))
-              (push f facts-added))
-            (dolist (g goals)
-              (add-goal! context g)
-              (push g goals-added))))))
+Returns a plist (:EVENT :MATCHED :FACTS-ADDED :GOALS-ADDED :DROPPED).
+:FACTS-ADDED and :GOALS-ADDED name only what this call added: a fact
+CONTEXT already held and a goal it already listed are left out. :DROPPED
+lists the :ASSERT and :GOALS instances that still held a variable and were
+therefore neither asserted nor added."
+  (let ((matched nil)
+        (facts-added nil)
+        (goals-added nil)
+        (dropped nil))
+    (dolist (reaction (if reactions-p
+                          reactions
+                          (context-all-event-reactions context)))
+      (let ((bindings (match-event-reaction reaction event)))
+        (unless (fail-p bindings)
+          (push (event-reaction-name reaction) matched)
+          (multiple-value-bind (facts goals non-ground)
+              (%apply-reaction-bindings reaction bindings)
+            (dolist (fact facts)
+              (unless (fact-p fact (context-facts context))
+                (setf (context-facts context)
+                      (add-fact! (context-facts context) fact))
+                (push fact facts-added)))
+            (dolist (goal goals)
+              (unless (goal-active-p context goal)
+                (add-goal! context goal)
+                (push goal goals-added)))
+            (setf dropped (append dropped non-ground))))))
     (setf (event-status event) (if matched :processed :ignored))
+    (setf matched (nreverse matched)
+          facts-added (nreverse facts-added)
+          goals-added (nreverse goals-added))
     (trace-record :event
                   :action :react
                   :type (event-type event)
                   :id (event-id event)
-                  :matched (reverse matched)
-                  :facts (reverse facts-added)
-                  :goals (reverse goals-added))
+                  :matched (copy-list matched)
+                  :facts (copy-list facts-added)
+                  :goals (copy-list goals-added)
+                  :dropped (copy-list dropped))
     (list :event event
-          :matched (nreverse matched)
-          :facts-added (nreverse facts-added)
-          :goals-added (nreverse goals-added))))
+          :matched matched
+          :facts-added facts-added
+          :goals-added goals-added
+          :dropped dropped)))
+
+(defun %assert-inferred-facts! (context)
+  "Forward-chain CONTEXT's rules over its facts and assert what is new.
+Returns the new facts, in the order they were derived."
+  (let ((new (nth-value 1 (forward-chain (context-all-facts context)
+                                         (context-all-rules context)))))
+    (dolist (fact new)
+      (setf (context-facts context)
+            (add-fact! (context-facts context) fact)))
+    new))
 
 (defun process-pending-events! (context &key (plan nil) (infer nil))
   "Process all :PENDING events on CONTEXT (oldest first).
 Optionally forward-chain (:INFER T) after reactions.
-When :PLAN is true and the context has goals, build a plan via MEA and
-store it in *CURRENT-PLAN*. Returns a summary plist (also in *LAST-REACTION*).
+When :PLAN is true and a fact-like goal of the context is still open, build
+a plan via MEA, store it in *CURRENT-PLAN* and set the mode to :PLAN. With
+no open goal there is nothing to plan: the previous plan and the mode stay,
+as with GP-PLAN.
+Returns a summary plist (:PROCESSED :MATCHED :FACTS-ADDED :GOALS-ADDED
+:DROPPED :PLAN :RESULTS), also kept in *LAST-REACTION*. :FACTS-ADDED lists
+the facts the reactions added, then the inferred ones; :RESULTS holds the
+REACT-TO-EVENT! plist of each event.
 Does not record episodic memory — callers (e.g. GP-REACT) may do so."
   (let* ((pending (pending-events context))
-         (all-matched nil)
-         (all-facts nil)
-         (all-goals nil)
-         (results nil)
+         (results (mapcar (lambda (event) (react-to-event! context event))
+                          pending))
+         (inferred (when infer (%assert-inferred-facts! context)))
          (plan-obj nil))
-    (dolist (ev pending)
-      (let ((r (react-to-event! context ev)))
-        (push r results)
-        (setf all-matched (append all-matched (getf r :matched)))
-        (setf all-facts (append all-facts (getf r :facts-added)))
-        (setf all-goals (append all-goals (getf r :goals-added)))))
-    (when infer
-      (multiple-value-bind (all new)
-          (forward-chain (context-all-facts context)
-                         (context-all-rules context))
-        (declare (ignore all))
-        (dolist (f new)
-          (setf (context-facts context)
-                (add-fact! (context-facts context) f))
-          (push f all-facts))))
-    (when (and plan (goals-of context))
+    (when (and plan
+               (differences (context-all-facts context)
+                            (normalize-planning-goals (goals-of context))))
       (setf (context-mode context) :plan)
       (setf plan-obj (plan-from-context context))
       (setf *current-plan* plan-obj))
-    (setf *last-reaction*
-          (list :processed (length pending)
-                :matched all-matched
-                :facts-added all-facts
-                :goals-added all-goals
-                :plan plan-obj
-                :results (nreverse results)))
-    *last-reaction*))
+    (flet ((collect (key)
+             (loop for result in results
+                   append (copy-list (getf result key)))))
+      (setf *last-reaction*
+            (list :processed (length pending)
+                  :matched (collect :matched)
+                  :facts-added (append (collect :facts-added)
+                                       (copy-list inferred))
+                  :goals-added (collect :goals-added)
+                  :dropped (collect :dropped)
+                  :plan plan-obj
+                  :results results)))))
