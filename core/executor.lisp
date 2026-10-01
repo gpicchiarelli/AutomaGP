@@ -226,6 +226,14 @@ A step recorded before :REVERSIBLE was stored counts as reversible."
                  :risk (or (getf step :risk) :low)
                  :reversible (and (getf step :reversible t) t)))
 
+(defun step-confirmation-operator (step context)
+  "The operator a live run asks confirmation for when it runs STEP: the one
+registered in CONTEXT or, when it is no longer registered, a stand-in
+carrying the risk the plan recorded on STEP. The executor and the autonomy
+gate both ask this function, so they cannot disagree about a risky step."
+  (or (lookup-operator (getf step :operator) :context context)
+      (%operator-for-stored-step step)))
+
 (defun %external-action-withheld (result operator)
   "Mark RESULT when a requested adapter action is not run.
 An effects-only step no longer has its preconditions, so the symbolic

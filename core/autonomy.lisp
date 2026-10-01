@@ -166,16 +166,6 @@ redirects a run to the session context."
 ;;; Risk
 ;;; ---------------------------------------------------------------------------
 
-(defun %step-operator (step context)
-  "The operator EXECUTE-PLAN! will ask confirmation for when it runs STEP:
-the one registered in CONTEXT, or, when it is no longer registered, a
-stand-in carrying the risk the plan recorded on STEP. A step that
-recorded none counts as reversible and :LOW, as it does in the executor."
-  (or (lookup-operator (getf step :operator) :context context)
-      (make-operator :name (or (getf step :operator) 'stored-effects)
-                     :risk (or (getf step :risk) :low)
-                     :reversible (and (getf step :reversible t) t))))
-
 (defun plan-risky-operators (plan context)
   "The steps of PLAN that need confirmation before a live run, in plan
 order, each as (:NAME :RISK :REVERSIBLE). A step counts when its operator
@@ -183,7 +173,7 @@ is irreversible or :HIGH/:CRITICAL risk; for an operator that is no
 longer registered in CONTEXT, the risk recorded on the step decides."
   (when (plan-p plan)
     (loop for step in (plan-steps plan)
-          for operator = (%step-operator step context)
+          for operator = (step-confirmation-operator step context)
           when (operator-needs-confirmation-p operator)
             collect (list :name (operator-name operator)
                           :risk (operator-risk operator)
