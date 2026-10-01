@@ -751,8 +751,9 @@ whatever those procedures did not achieve.
 A procedure that covers every remaining fact is tried first, then one whose
 goals stay inside those facts, then one that also achieves something else.
 A procedure that restores a part counts only when the rest can be restored
-after it; otherwise the next one is tried. USED procedures, and procedures
-already being replayed, are not replayed again.
+after it and the part still holds then; otherwise the next one is tried.
+USED procedures, and procedures already being replayed, are not replayed
+again.
 Returns (VALUES NEW-STATE STEPS FROM-PROCEDURE REPLAY-EVENTS) or NIL.
 FROM-PROCEDURE is set only when a single procedure achieved MISSING."
   (dolist (procedure (append (%procedures-covering-goals missing)
@@ -775,7 +776,10 @@ FROM-PROCEDURE is set only when a single procedure achieved MISSING."
                               (getf (plan-meta plan) :replay-events))
                       (%combine-partial-repair procedure plan rest state2
                                                operators for-operator used))
-                (when new-state
+                ;; Restoring the rest may have undone what PROCEDURE
+                ;; restored. Then MISSING is not restored: try the next.
+                (when (and new-state
+                           (null (%facts-still-missing missing new-state)))
                   (return-from %repair-assemble
                     (values new-state steps name replay-events))))))))))
   (when used
@@ -1133,7 +1137,8 @@ The trace names each reused procedure. :FROM-PROCEDURE stays unset."
   "Combine procedures that achieve part of GOALS. Procedures whose goals
 stay inside the request come first, then procedures that also achieve
 something else; those extra goals are applied. A search restores a
-remainder only after some procedure has already contributed.
+remainder only after some procedure has already contributed, and counts
+only when every goal holds after it.
 INITIAL is the state the whole plan starts from, PIECES the plans replayed
 so far and USED their procedures.
 Returns a PLAN, or NIL when the pieces do not achieve GOALS."
@@ -1169,7 +1174,10 @@ Returns a PLAN, or NIL when the pieces do not achieve GOALS."
     (when used
       (multiple-value-bind (mea-state mea-steps)
           (%repair-by-search rest state operators)
-        (when mea-state
+        ;; The search was asked for REST only. It may have undone a goal
+        ;; that a piece achieved; that is not a plan for GOALS.
+        (when (and mea-state
+                   (null (%facts-still-missing goals mea-state)))
           (%plan-from-pieces goals pieces mea-state operators context-name
                              mea-steps initial))))))
 

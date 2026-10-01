@@ -406,6 +406,23 @@ the file, and autoload is AUTOLOAD. The file is deleted afterwards."
     (is (fact-p '(cable interface-01 connected) (plan-final-state plan))))
   (is (search "FILL-EMPTY" (gp-explain :plan nil))))
 
+(test archive-plan-rejects-a-search-that-undoes-a-reused-goal
+  "MAKE-A achieves (A). The search for (B) finds only OP-B, which deletes
+(A). Those pieces do not achieve the request: no plan may claim they do."
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-fact '(device d1))
+  (%install-recorded 'make-a '((a d1 yes))
+                     (%recorded-step 'op-a '((device d1)) '((a d1 yes))))
+  (gp-add-operator
+   (make-operator :name 'op-b
+                  :preconditions '((device ?d))
+                  :add-list '((b ?d yes))
+                  :delete-list '((a ?d yes))))
+  (let ((plan (gp-plan :goals '((a d1 yes) (b d1 yes)))))
+    (is-false (plan-success plan))
+    (is (null (plan-reused-procedure-names plan)))))
+
 (test archive-plan-combines-a-procedure-that-also-achieves-something-else
   (gp-clear-memory)
   (gp-reset)

@@ -936,25 +936,30 @@ the goal stays open and the root fact is untouched."
 ;;; --- only the archive can restore what a step needs.
 
 (test archive-repair-tries-the-next-procedure-when-the-rest-cannot-follow
-  "A-FIRST ranks first and uses up the token B-SECOND needs. The repair
-must then try B-SECOND first instead of giving up."
-  (gp-clear-memory)
-  (gp-reset)
-  (gp-add-fact '(device d1))
-  (gp-add-fact '(token d1 yes))
-  (%install-recorded 'a-first '((a d1 yes))
-                     (%recorded-step 'op-a '((token d1 yes)) '((a d1 yes))
-                                     '((token d1 yes))))
-  (%install-recorded 'b-second '((b d1 yes))
-                     (%recorded-step 'op-b '((token d1 yes)) '((b d1 yes))))
-  (%install-recorded 'top '((done d1 yes))
-                     (%recorded-step 'op-top '((a d1 yes) (b d1 yes))
-                                     '((done d1 yes))))
-  (let ((plan (gp-use-procedure :name 'top)))
-    (is (equal '(op-b op-a op-top) (%step-operators plan)))
-    (is (fact-p '(done d1 yes) (plan-final-state plan))))
-  (is-true (execution-success (gp-run)))
-  (is (fact-p '(done d1 yes) (gp-facts))))
+  "A-FIRST ranks first, but B-SECOND cannot follow it: A-FIRST uses up the
+token B-SECOND needs, or B-SECOND deletes what A-FIRST restored. The repair
+must then start from B-SECOND instead of giving up."
+  (loop for (a-step b-step)
+          in (list (list (%recorded-step 'op-a '((token d1 yes)) '((a d1 yes))
+                                         '((token d1 yes)))
+                         (%recorded-step 'op-b '((token d1 yes)) '((b d1 yes))))
+                   (list (%recorded-step 'op-a '((device d1)) '((a d1 yes)))
+                         (%recorded-step 'op-b '((device d1)) '((b d1 yes))
+                                         '((a d1 yes)))))
+        do (gp-clear-memory)
+           (gp-reset)
+           (gp-add-fact '(device d1))
+           (gp-add-fact '(token d1 yes))
+           (%install-recorded 'a-first '((a d1 yes)) a-step)
+           (%install-recorded 'b-second '((b d1 yes)) b-step)
+           (%install-recorded 'top '((done d1 yes))
+                              (%recorded-step 'op-top '((a d1 yes) (b d1 yes))
+                                              '((done d1 yes))))
+           (let ((plan (gp-use-procedure :name 'top)))
+             (is (equal '(op-b op-a op-top) (%step-operators plan)))
+             (is (fact-p '(done d1 yes) (plan-final-state plan))))
+           (is-true (execution-success (gp-run)))
+           (is (fact-p '(done d1 yes) (gp-facts)))))
 
 (test archive-narrowed-replay-does-not-reuse-its-own-procedure
   "KIT cannot run in full: OP-X needs a fact only OP-G1 produces later. The
