@@ -178,7 +178,14 @@
    #:goal-holds-p
    #:differences
    #:apply-operator
+   #:apply-stored-effects
+   #:retract-slot-conflicts
+   #:ground-pattern
+   #:ungrounded-adds
+   #:extend-bindings-from-state
    #:precondition-subgoals
+   #:missing-stored-preconditions
+   #:make-plan-step
    #:achieve
    #:achieve-all
    #:means-ends-analyze
