@@ -931,3 +931,104 @@ the goal stays open and the root fact is untouched."
   (let ((run (gp-run :confirm t)))
     (is-true (execution-success run))
     (is (fact-p '(ready interface-01) (gp-facts)))))
+
+;;; --- Procedures made of recorded steps: no operator is registered, so
+;;; --- only the archive can restore what a step needs.
+
+(test archive-repair-tries-the-next-procedure-when-the-rest-cannot-follow
+  "A-FIRST ranks first and uses up the token B-SECOND needs. The repair
+must then try B-SECOND first instead of giving up."
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-fact '(device d1))
+  (gp-add-fact '(token d1 yes))
+  (%install-recorded 'a-first '((a d1 yes))
+                     (%recorded-step 'op-a '((token d1 yes)) '((a d1 yes))
+                                     '((token d1 yes))))
+  (%install-recorded 'b-second '((b d1 yes))
+                     (%recorded-step 'op-b '((token d1 yes)) '((b d1 yes))))
+  (%install-recorded 'top '((done d1 yes))
+                     (%recorded-step 'op-top '((a d1 yes) (b d1 yes))
+                                     '((done d1 yes))))
+  (let ((plan (gp-use-procedure :name 'top)))
+    (is (equal '(op-b op-a op-top) (%step-operators plan)))
+    (is (fact-p '(done d1 yes) (plan-final-state plan))))
+  (is-true (execution-success (gp-run)))
+  (is (fact-p '(done d1 yes) (gp-facts))))
+
+(test archive-narrowed-replay-does-not-reuse-its-own-procedure
+  "KIT cannot run in full: OP-X needs a fact only OP-G1 produces later. The
+replay narrowed to the request leaves OP-X aside; repairing OP-G2 inside it
+must not bring the whole of KIT back in."
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-fact '(device d1))
+  (%install-recorded 'kit '((x d1 yes) (g1 d1 yes) (g2 d1 yes))
+                     (%recorded-step 'op-x '((k d1 yes)) '((x d1 yes)))
+                     (%recorded-step 'op-g1 '((device d1))
+                                     '((g1 d1 yes) (k d1 yes)))
+                     (%recorded-step 'op-g2 '((x d1 yes)) '((g2 d1 yes))))
+  (let* ((plan (gp-plan :goals '((g1 d1 yes) (g2 d1 yes))))
+         (operators (%step-operators plan)))
+    (is (<= (count 'op-g2 operators) 1) "OP-G2 is planned twice: ~S" operators)
+    (is (not (and (member 'op-x operators)
+                  (search "Left aside" (gp-explain :plan nil))))
+        "OP-X is both left aside and planned: ~S" operators)))
+
+(test archive-combined-plan-records-an-empty-initial-state
+  (gp-clear-memory)
+  (gp-reset)
+  (%install-recorded 'make-a '((a d1 yes))
+                     (%recorded-step 'op-a nil '((a d1 yes))))
+  (%install-recorded 'make-b '((b d1 yes))
+                     (%recorded-step 'op-b nil '((b d1 yes))))
+  (let ((plan (gp-plan :goals '((a d1 yes) (b d1 yes)))))
+    (is (equal '(make-a make-b) (plan-reused-procedure-names plan)))
+    (is (null (plan-initial-state plan)))
+    (is (fact-p '(b d1 yes) (plan-final-state plan)))))
+
+(test archive-plan-leaves-one-trace-however-many-procedures-it-replays
+  "Nested repairs and combined pieces are replays inside one plan. A replay
+that is tried and dropped leaves no trace at all."
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-fact '(device d1))
+  (%install-recorded 'make-a '((a d1 yes))
+                     (%recorded-step 'op-a '((device d1)) '((a d1 yes))))
+  (%install-recorded 'make-b '((b d1 yes))
+                     (%recorded-step 'op-b '((a d1 yes)) '((b d1 yes))))
+  (%install-recorded 'make-c '((c d1 yes))
+                     (%recorded-step 'op-c '((b d1 yes)) '((c d1 yes))))
+  (%install-recorded 'make-d '((d d1 yes))
+                     (%recorded-step 'op-d1 '((a d1 yes)) '((half d1 yes)))
+                     (%recorded-step 'op-d2 '((never d1 yes)) '((d d1 yes))))
+  (flet ((traces () (length (gp-trace-history))))
+    (let ((before (traces)))
+      (is (equal '(op-a op-b op-c)
+                 (%step-operators (gp-use-procedure :name 'make-c))))
+      (is (= (1+ before) (traces)))
+      (is (eq (gp-last-trace) (getf (plan-meta (gp-last-plan)) :trace))))
+    (let ((before (traces)))
+      (is (equal '(make-a make-b)
+                 (plan-reused-procedure-names
+                  (gp-plan :goals '((a d1 yes) (b d1 yes))))))
+      (is (= (1+ before) (traces))))
+    (let ((before (traces))
+          (last (gp-last-trace)))
+      (signals error (gp-use-procedure :name 'make-d))
+      (is (= before (traces)))
+      (is (eq last (gp-last-trace))))))
+
+(test remembered-procedure-drops-the-marks-of-the-replay-it-came-from
+  ":STORED-APPLY and :EFFECTS-ONLY describe one replay. Stored in the
+archive they would make an unchecked plan skip the operator's own check."
+  (gp-clear-memory)
+  (%remember-charge-procedure)
+  (gp-remove-operator 'charge)
+  (let ((plan (gp-use-procedure :name 'charge-then-use)))
+    (is (eq t (getf (first (plan-steps plan)) :stored-apply)))
+    (let ((again (gp-remember-procedure :name 'again)))
+      (is (notany (lambda (step)
+                    (or (getf step :stored-apply) (getf step :effects-only)))
+                  (procedure-steps again)))
+      (is (eq t (getf (first (plan-steps plan)) :stored-apply))))))
