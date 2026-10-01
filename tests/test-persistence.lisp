@@ -256,6 +256,53 @@ they were saved in, however many times the context is saved and loaded."
                         'persistence-error)
                  "~A accepted ~S" deserialize form))))
 
+(test resume-context-reports-what-no-context-can-be-built-from
+  "A slot value the constructors refuse is a PERSISTENCE-ERROR that carries
+the refusal, not the bare error of the constructor."
+  (dolist (slots '((:facts 5) (:goals 7) (:mode :fly) (:rules (r))
+                   (:operators ((:operator))) (:actions ((:action)))
+                   (:events ((:event :data ("a.pdf"))))
+                   (:event-reactions (5))))
+    (let ((failure (%persistence-failure-of
+                    (lambda () (resume-context (list* :context slots))))))
+      (is (typep failure 'persistence-error) "Resumed with ~S" slots)
+      (when failure
+        (is (null (persistence-error-path failure)))
+        (is (stringp (princ-to-string failure)))))))
+
+(test a-saved-unsafe-rule-loads-as-it-was-saved
+  "MAKE-RULE reports a consequent variable that no antecedent binds. A rule
+built past that report and saved, or saved before the check existed, comes
+back from a form and from a file, in a context and in knowledge memory."
+  (signals unsafe-rule (make-rule :name 'loose :if '((a ?x)) :then '(b ?y)))
+  (let* ((rule (handler-bind ((unsafe-rule #'continue))
+                 (make-rule :name 'loose :if '((a ?x)) :then '(b ?y))))
+         (form (serialize-rule rule))
+         (context (make-context :name 'holder :facts '((a 1))
+                                :rules (list rule)))
+         (knowledge (make-knowledge-memory :rules (list rule))))
+    (flet ((same-rule-p (loaded)
+             (equal form (serialize-rule loaded))))
+      (is (same-rule-p (deserialize-rule form)))
+      (is (same-rule-p (first (context-rules
+                               (resume-context (suspend-context context))))))
+      (with-persist-directory (dir)
+        (let ((context-file (merge-pathnames "context.agp" dir))
+              (snapshot-file (merge-pathnames "snapshot.agp" dir)))
+          (persist-context context context-file)
+          (save-snapshot snapshot-file :context context :knowledge knowledge)
+          (is (same-rule-p (first (context-rules
+                                   (restore-context context-file)))))
+          (let ((bundle (load-snapshot snapshot-file)))
+            (is (same-rule-p (first (context-rules (getf bundle :context)))))
+            (is (same-rule-p (first (knowledge-memory-rules
+                                     (getf bundle :knowledge)))))
+            ;; The rule concludes nothing that is not ground.
+            (is (equal '((a 1))
+                       (forward-chain
+                        (context-facts (getf bundle :context))
+                        (context-rules (getf bundle :context)))))))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Files: written whole, read as data
 ;;; ---------------------------------------------------------------------------

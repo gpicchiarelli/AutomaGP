@@ -242,8 +242,88 @@ a limit of NIL keeps everything, also across a save."
     (is (eq :event (episode-kind episode)))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Working memory
+;;; ---------------------------------------------------------------------------
+
+(test working-memory-copies-what-the-context-shows
+  "The snapshot holds the facts visible in the context, inherited ones
+included, with its own goals and mode, and shares no list with it."
+  (let* ((parent (make-context :name 'parent :facts '((shared 1))
+                               :goals '((parent-goal))))
+         (child (create-context :name 'child :parent parent
+                                :facts '((own 2)) :goals '((child-goal))
+                                :mode :plan))
+         (*working-memory* nil)
+         (wm (refresh-working-memory child)))
+    (is (eq wm *working-memory*))
+    (is (eq 'child (working-memory-context-name wm)))
+    (is (equal '((shared 1) (own 2)) (working-memory-facts wm)))
+    (is (equal '((child-goal)) (working-memory-goals wm)))
+    (is (eq :plan (working-memory-mode wm)))
+    (is (integerp (working-memory-captured-at wm)))
+    ;; The context moves on; the snapshot does not.
+    (context-add-fact! child '(later 3))
+    (add-goal! child '(later-goal))
+    (is (equal '((shared 1) (own 2)) (working-memory-facts wm)))
+    (is (equal '((child-goal)) (working-memory-goals wm)))
+    (let ((state (working-memory-state wm)))
+      (is (equal '((shared 1) (own 2)) (state-facts state)))
+      (is (eq 'child (state-source state)))
+      (is (eq :current (state-kind state))))
+    ;; What is not a context, or not a snapshot, gives NIL and changes nothing.
+    (dolist (not-a-context '(nil 42 "child"))
+      (is (null (refresh-working-memory not-a-context)))
+      (is (eq wm *working-memory*))
+      (is (null (working-memory-state not-a-context))))
+    (is (eq t (clear-working-memory)))
+    (is (null *working-memory*))
+    (is (null (working-memory-state)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Knowledge memory
 ;;; ---------------------------------------------------------------------------
+
+(test knowledge-rules-are-newest-first-whether-named-or-not
+  "KNOWLEDGE-ADD-RULE! orders rules as REGISTER-RULE! does. A merge puts the
+knowledge rules first, in their order, and merging again adds no rule twice,
+named or not."
+  (flet ((rule (name tag)
+           (make-rule :name name :if '((a ?x)) :then `(,tag ?x)))
+         (tags (rules)
+           (mapcar (lambda (rule) (first (first (rule-then rule)))) rules)))
+    (let ((km (make-knowledge-memory))
+          (registered (make-context :name 'registered)))
+      (loop for (name tag) in '((r1 one) (nil two) (r3 three) (nil four)
+                                (r1 five))
+            do (is (rule-p (knowledge-add-rule! (rule name tag) km)))
+               (register-rule! registered (rule name tag)))
+      (is (equal '(five four three two) (tags (knowledge-memory-rules km))))
+      (is (equal (tags (context-rules registered))
+                 (tags (knowledge-memory-rules km))))
+      (let ((target (make-context :name 'target
+                                  :rules (list (rule 'r3 'replaced)
+                                               (rule nil 'own)))))
+        (dotimes (i 3)
+          (knowledge-merge-into-context! target km)
+          (is (equal '(five four three two own) (tags (context-rules target)))))
+        ;; A context copied to knowledge and merged back is unchanged.
+        (knowledge-merge-into-context! target (knowledge-from-context target))
+        (is (equal '(five four three two own) (tags (context-rules target)))))
+      (is (equal '(five four two)
+                 (tags (knowledge-remove-rule! 'r3 km)))))))
+
+(test knowledge-facts-are-asserted-once
+  (let ((km (make-knowledge-memory))
+        (ctx (make-context :name 'target :facts '((b 2)))))
+    (dolist (fact '((a 1) (b 2) (a 1)))
+      (is (equal fact (knowledge-add-fact! fact km))))
+    (is (equal '((a 1) (b 2)) (knowledge-memory-facts km)))
+    (dotimes (i 2)
+      (knowledge-merge-into-context! ctx km)
+      (is (equal '((b 2) (a 1)) (context-facts ctx))))
+    (is (equal '((b 2)) (knowledge-remove-fact! '(a 1) km)))
+    ;; The copy the context took stays in the context.
+    (is (equal '((b 2) (a 1)) (context-facts ctx)))))
 
 (test knowledge-merge-keeps-rule-order
   "Merging knowledge into a context any number of times leaves the rules in

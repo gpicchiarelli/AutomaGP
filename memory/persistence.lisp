@@ -480,6 +480,11 @@ or breaks one of those limits."
 
 ;;; ---------------------------------------------------------------------------
 ;;; Serialization (objects → readable plists and back)
+;;;
+;;; A DESERIALIZE- function signals PERSISTENCE-ERROR for a form of another
+;;; shape. An error from the constructor of the object, such as a slot value
+;;; of the wrong type, is that constructor's own; the functions that load a
+;;; file, and RESUME-CONTEXT, signal it again as a PERSISTENCE-ERROR.
 ;;; ---------------------------------------------------------------------------
 
 (defun %plist-p (object)
@@ -511,10 +516,14 @@ or breaks one of those limits."
         :meta (copy-tree (rule-meta rule))))
 
 (defun deserialize-rule (form)
-  "The RULE that a (:RULE ...) form describes."
+  "The RULE that a (:RULE ...) form describes, as it was saved.
+A rule that MAKE-RULE reports as an UNSAFE-RULE was built past that report
+before it was saved, or was saved before rules were checked, so it is built
+past the report again: what was saved loads."
   (destructuring-bind (&key name if then meta &allow-other-keys)
       (%form-plist form :rule)
-    (make-rule :name name :if if :then then :meta meta)))
+    (handler-bind ((unsafe-rule #'continue))
+      (make-rule :name name :if if :then then :meta meta))))
 
 (defun serialize-operator (op)
   "The operator OP as an (:OPERATOR ...) form."
@@ -587,25 +596,13 @@ or breaks one of those limits."
         :status (event-status event)
         :meta (copy-tree (event-meta event))))
 
-(defun %event-id-number (id)
-  "The n of an event id EVT-n, or NIL when ID is not written that way."
-  (let ((name (and (symbolp id) (symbol-name id))))
-    (and name
-         (> (length name) 4)
-         (string= "EVT-" name :end2 4)
-         (every #'digit-char-p (subseq name 4))
-         (parse-integer name :start 4))))
-
 (defun deserialize-event (form)
   "The event that an (:EVENT ...) form describes, with the id it was saved
-with. *EVENT-COUNTER* is moved past that id, so an event posted later
-cannot be given it again."
+with. MAKE-EVENT moves *EVENT-COUNTER* past that id, so an event posted
+later cannot be given it again."
   (destructuring-bind (&key id type data timestamp status meta
                          &allow-other-keys)
       (%form-plist form :event)
-    (let ((number (%event-id-number id)))
-      (when number
-        (setf *event-counter* (max *event-counter* number))))
     (make-event :id id
                 :type type
                 :data data
@@ -854,8 +851,10 @@ when it carries another format number than *PROCEDURE-ARCHIVE-FORMAT*."
 
 (defun resume-context (form)
   "Rebuild a CONTEXT from a suspend/serialize form. Signals
-PERSISTENCE-ERROR when FORM is not a (:CONTEXT ...) property list."
-  (deserialize-context form))
+PERSISTENCE-ERROR when FORM is not a (:CONTEXT ...) property list or holds
+something no context can be built from."
+  (with-persistence-errors (nil)
+    (deserialize-context form)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Snapshot bundle
