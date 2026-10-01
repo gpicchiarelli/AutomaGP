@@ -2,5 +2,5 @@
 
 (in-package #:automa-gp)
 
-(defparameter *version* "0.194.0"
-  "AUTOMA GP version (Esegui confirm honesty; HTML autonomy confirm).")
+(defparameter *version* "0.195.0"
+  "AUTOMA GP version (engineering pass over the core and the memory layers).")
