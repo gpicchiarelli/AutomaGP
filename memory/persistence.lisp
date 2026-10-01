@@ -22,12 +22,15 @@ LOAD-PROCEDURE-ARCHIVE requires it.")
   "Directory that relative snapshot and archive paths are placed under.
 NIL, the default, leaves them relative to *DEFAULT-PATHNAME-DEFAULTS*.")
 
-(defparameter *persistence-symbol-packages*
-  '("AUTOMA-GP" "KEYWORD" "COMMON-LISP-USER")
-  "Names of the packages in which READ-SEXP-FILE may create a symbol that
-does not exist yet; the package current at the call is always one of them.
-T allows every existing package. A symbol that already exists is read
-whatever its package, and no package is ever created.")
+(defparameter *persistence-symbol-packages* t
+  "The packages in which READ-SEXP-FILE may create a symbol that does not
+exist yet. T, the default, allows every package that exists: a session
+saves symbols of whatever packages its vocabulary lives in, a domain
+package included, and the file has to load in a new image. A list of
+package names allows those packages and the package current at the call.
+Either way a symbol that already exists is read whatever its package, no
+package is ever created, and *PERSISTENCE-SYMBOL-LIMIT* bounds how many
+symbols one file creates.")
 
 (defparameter *persistence-symbol-limit* 10000
   "Most symbols that reading one file may create, or NIL for no limit.")
@@ -104,6 +107,8 @@ original condition as its reason."
 ;;; WRITE-SEXP-FILE prints for symbolic data and nothing else: lists, symbols,
 ;;; integers, ratios, floats, strings, characters, simple vectors, pathnames,
 ;;; 'x, #'x, #:x, the #n= and #n# labels of shared structure, and ; comments.
+;;; One more form is read because files written earlier hold it: the
+;;; #A((n) BASE-CHAR . "...") that SBCL prints for a string of base characters.
 ;;; ---------------------------------------------------------------------------
 
 (defvar *read-symbol-packages* nil
@@ -301,6 +306,19 @@ values of %READ-TOKEN."
           (t
            (add (%read-datum stream))))))))
 
+(defun %read-base-string (stream)
+  "The string written as #A((n) BASE-CHAR . \"...\"), whose #A has been read.
+No other array is read."
+  (let ((datum (%read-datum stream)))
+    (or (and (consp datum)
+             (consp (cdr datum))
+             (eq (second datum) 'base-char)
+             (stringp (cddr datum))
+             (equal (first datum) (list (length (cddr datum))))
+             (cddr datum))
+        (%persistence-failure
+         "#A is read only for a string of base characters"))))
+
 (defun %read-sharp (stream)
   "The datum that a # introduces; the # has been read."
   (let* ((digits (loop for char = (peek-char nil stream nil nil)
@@ -329,6 +347,7 @@ values of %READ-TOKEN."
          (#\( (coerce (%read-list stream) 'simple-vector))
          (#\' (list 'function (%read-datum stream)))
          (#\: (make-symbol (%read-token stream)))
+         ((#\A #\a) (%read-base-string stream))
          ((#\P #\p)
           (let ((namestring (%read-datum stream)))
             (unless (stringp namestring)
@@ -371,6 +390,25 @@ values of %READ-TOKEN."
       (when (%peek-datum stream)
         (%persistence-failure "the file holds more than one datum")))))
 
+(defun %print-string (stream string)
+  "Write STRING to STREAM in string syntax (CLHS 2.4.5), whatever its
+element type."
+  (write-char #\" stream)
+  (loop for char across string
+        do (when (find char "\"\\")
+             (write-char #\\ stream))
+           (write-char char stream))
+  (write-char #\" stream))
+
+(defvar *data-pprint-dispatch*
+  (let ((table (copy-pprint-dispatch nil)))
+    (set-pprint-dispatch 'string '%print-string 0 table)
+    table)
+  "The standard pretty-printer dispatch table, with every string printed by
+%PRINT-STRING. Under *PRINT-READABLY* SBCL prints a string of base
+characters, which is what NAMESTRING, FORMAT and PRINC-TO-STRING return,
+as #A((n) BASE-CHAR . \"...\"); a file holds it as the string it is.")
+
 (defun %print-data (form)
   "FORM printed as the text of a file. Signals when FORM holds an object
 that has no readable print or that %READ-DATA would not read back."
@@ -378,7 +416,8 @@ that has no readable print or that %READ-DATA would not read back."
                   (with-standard-io-syntax
                     (let ((*package* (find-package :automa-gp))
                           (*print-pretty* t)
-                          (*print-circle* t))
+                          (*print-circle* t)
+                          (*print-pprint-dispatch* *data-pprint-dispatch*))
                       (prin1-to-string form)))
                 ;; Signalled again from out here, so that whoever reports the
                 ;; error does not print it under *PRINT-READABLY*.
@@ -453,12 +492,14 @@ Signals PERSISTENCE-ERROR."
   "The file to read for PATH: the one ENSURE-SNAPSHOT-PATH names or, when
 that one does not exist and PATH has no type, the file of the bare name if
 there is one. A string without a type was once written under its bare name,
-and those files are still found."
-  (let ((typed (ensure-snapshot-path path :ensure-directory nil)))
-    (or (and (%typeless-p (uiop:ensure-pathname path :want-pathname t))
-             (not (probe-file typed))
-             (probe-file (make-pathname :type nil :defaults typed)))
-        typed)))
+and those files are still found. Signals PERSISTENCE-ERROR for a PATH that
+cannot name a file, such as a directory."
+  (with-persistence-errors (path)
+    (let ((typed (ensure-snapshot-path path :ensure-directory nil)))
+      (or (and (%typeless-p (uiop:ensure-pathname path :want-pathname t))
+               (not (probe-file typed))
+               (probe-file (make-pathname :type nil :defaults typed)))
+          typed))))
 
 (defun %read-file (pathname)
   "The one datum in the file PATHNAME, which is opened as it stands: the
@@ -471,9 +512,9 @@ callers have resolved it with %READ-PATH."
   "Read the one s-expression in the UTF-8 file PATH, as data.
 Nothing in the file is evaluated and reader variables of the caller have
 no effect. A symbol with no package prefix belongs to AUTOMA-GP. A symbol
-that does not exist yet is created only in a package of
-*PERSISTENCE-SYMBOL-PACKAGES* or in the current *PACKAGE*, and at most
-*PERSISTENCE-SYMBOL-LIMIT* of them are; no package is created.
+that does not exist yet is created only in a package that
+*PERSISTENCE-SYMBOL-PACKAGES* allows, and at most *PERSISTENCE-SYMBOL-LIMIT*
+of them are; no package is created.
 Signals PERSISTENCE-ERROR for a file that is missing, is not such data,
 or breaks one of those limits."
   (%read-file (%read-path path)))
