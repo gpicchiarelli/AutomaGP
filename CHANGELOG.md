@@ -9,6 +9,19 @@ versions are the increments listed in `ROADMAP.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Persistence: `.agp` files are UTF-8 and read by a dedicated data reader
+  that refuses `#.`, `#S`, reader conditionals and circular labels. Load
+  and save failures are `persistence-error`; another format version is
+  refused unless `continue` is taken. `*default-snapshot-directory*` is
+  `nil` by default and is honoured for relative paths when set.
+- Episodes: ids are integers (old files keep their symbol ids), and
+  `find-episodes` / `gp-episodes` select failures with `:success :failed`.
+- Knowledge: `knowledge-add-rule!` puts the newest rule first, named or
+  not, as `register-rule!` does; merging knowledge into a context twice
+  changes nothing the second time.
+
 ## [0.195.0] — 2026-10-01
 
 An engineering pass over the core and the memory layers: every defect found

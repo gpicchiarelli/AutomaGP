@@ -79,12 +79,19 @@ restarts still available. The retry limit counts one step. A plan that
 names an operator that is gone and carries no recorded effects is refused
 before its first step.
 
-**Persistence.** A `.agp` file is data, not code. It is read with
-`*read-eval*` off, creates symbols only in the packages named by
-`*persistence-symbol-packages*`, and is bounded by
-`*persistence-symbol-limit*` and `*persistence-depth-limit*`. A file
-written by another format version signals `persistence-version-error`.
-A write goes to a temporary file that is then renamed. A damaged
+**Persistence.** A `.agp` file is UTF-8 data, not code. A dedicated
+reader accepts only what the writer produces: no `#.`, no `#S`, no reader
+conditionals, no circular labels. Nesting is bounded by
+`*persistence-depth-limit*` and new symbols by
+`*persistence-symbol-limit*`; no package is created. By default a symbol
+may be created in any existing package; bind
+`*persistence-symbol-packages*` to a list of names to restrict a file
+that is not trusted. A file written by another format version signals
+`persistence-version-error`, which `continue` overrides. Every other load
+or save failure is a `persistence-error`, and the stores are then as they
+were. A write goes to a staged file beside the target that is then
+renamed, so a reader never sees half a file; the rewrite does not keep a
+custom file mode. A damaged
 procedure archive signals `procedure-archive-error` on every access, with
 `:retry` and `:skip`, and autosave never overwrites it.
 
