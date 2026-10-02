@@ -129,8 +129,8 @@ a symbol would print with its package prefix outside this package."
   (when knowledge (clear-knowledge-memory))
   (when episodic (clear-episodic-memory))
   (when procedural (clear-procedural-memory))
-  (when (fboundp '%clear-applies-result-cache)
-    (funcall '%clear-applies-result-cache))
+  ;; Defined later in this system, in interface/web-api.lisp.
+  (%clear-applies-result-cache)
   t)
 
 (defun gp-reset ()
@@ -149,10 +149,10 @@ Returns the new context."
   (clear-trace-session)
   (clear-working-memory)
   (clear-episodic-memory)
-  (when (fboundp '%clear-applies-result-cache)
-    (funcall '%clear-applies-result-cache))
-  (when (fboundp '%stop-notice-watches)
-    (funcall '%stop-notice-watches))
+  ;; Both are defined later in this system: interface/web-api.lisp and
+  ;; interface/notice.lisp.
+  (%clear-applies-result-cache)
+  (%stop-notice-watches)
   *current-context*)
 
 (defun gp-context (&key name parent facts mode rules operators)
@@ -370,13 +370,13 @@ A step that fails is given up and the run ends unsuccessful, unless
 :RETRY, :ABORT and :ASK choose a restart themselves, and :SIGNAL lets the
 GP-ERROR reach the caller's handlers with the restarts RETRY SKIP
 ABORT-EXECUTION USE-VALUE USE-ALTERNATIVE ASK-USER active.
-A plan GP-RUN would refuse is refused here too, before any simulated step
-and with the context mode left as it was: a step whose operator the
-context does not register (UNKNOWN-OPERATOR), a recorded external action
-that no longer matches, or facts that no longer support an action that
-would be handed to an adapter (PLAN-REFUSED). No plan, or an unsuccessful
-one, is refused the same way. When REMEMBER is true (default), records an
-episode."
+The plan is refused, before any simulated step and with the context mode
+left as it was, for what GP-RUN would refuse it for as well: a step whose
+operator the context does not register and that carries no record to run
+from (UNKNOWN-OPERATOR), a recorded external action that no longer
+matches, or facts that no longer support an action that would be handed
+to an adapter (PLAN-REFUSED). No plan, or an unsuccessful one, is refused
+the same way. When REMEMBER is true (default), records an episode."
   (let ((ctx (ensure-current-context))
         (p (%successful-plan plan "GP-SIMULATE" "simulating")))
     ;; EXECUTE-PLAN! finds a step's operator in the context alone, while
@@ -548,8 +548,12 @@ operator in place was not induced, :USES-VARIABLES, or :DOES-NOT-FIT."
 
 (defun %induce (name before before-p after after-p register generalize)
   "Induce operator NAME from one observation; see GP-LEARN-ACTION and
-GP-INDUCE-RULE, which differ in GENERALIZE alone. The listening session
-ends only when the induction succeeded."
+GP-INDUCE-RULE, which differ in GENERALIZE alone. A BEFORE or AFTER that
+is supplied must be a list of facts. The listening session of the current
+context ends only when the induction succeeded; one open on another
+context is not this command's to end."
+  (when before-p (%check-elements before 'cons))
+  (when after-p (%check-elements after 'cons))
   (let* ((ctx (ensure-current-context))
          (before (if before-p before (%listening-before ctx)))
          (after (if after-p after (context-all-facts ctx)))
@@ -557,7 +561,8 @@ ends only when the induction succeeded."
          (operator (if register
                        (%register-induced-operator ctx fresh generalize)
                        fresh)))
-    (%end-listening)
+    (when (eq (getf *observation* :context) ctx)
+      (%end-listening))
     operator))
 
 (defun gp-learn-action (name &key (before nil before-p) (after nil after-p)
@@ -565,6 +570,7 @@ ends only when the induction succeeded."
   "Induce a ground operator named NAME and, by default, register it.
 BEFORE defaults to the before-state of the listening session (GP-NOTE-STATE
 or GP-LISTEN), which may be empty. AFTER defaults to the current facts.
+Either, when supplied, is a list of facts; anything else is a TYPE-ERROR.
 Without an explicit BEFORE, a listening session must be active on the
 current context — a stale before-state left after a successful plan, or
 one noted in another context, is refused.
@@ -578,7 +584,7 @@ reason is :UNCHANGED-STATE, :NOT-INDUCED (an operator of that name exists
 and was not induced), :USES-VARIABLES or :DOES-NOT-FIT. Either way the
 operator in place and the listening session stay as they were.
 With REGISTER false the operator is returned and nothing is registered.
-Clears the session only after a successful induction."
+Ends the session of the current context only after a successful induction."
   (%induce name before before-p after after-p register nil))
 
 (defun gp-induce-rule (name &key (before nil before-p) (after nil after-p)
@@ -586,7 +592,8 @@ Clears the session only after a successful induction."
   "Induce a generalized operator named NAME and, by default, register it.
 The object symbol shared by one change becomes ?X0. Numbers stay ground.
 BEFORE defaults to the before-state of the listening session, which may be
-empty. AFTER defaults to the current facts. Without an explicit BEFORE, a
+empty. AFTER defaults to the current facts. Either, when supplied, is a
+list of facts; anything else is a TYPE-ERROR. Without an explicit BEFORE, a
 listening session must be active on the current context — a stale
 before-state left after a successful plan, or one noted in another
 context, is refused.
@@ -599,7 +606,7 @@ reason is :UNCHANGED-STATE, :NOT-INDUCED (an operator of that name exists
 and was not induced) or :DOES-NOT-FIT. Either way the operator in place
 and the listening session stay as they were.
 With REGISTER false the operator is returned and nothing is registered.
-Clears the session only after a successful induction."
+Ends the session of the current context only after a successful induction."
   (%induce name before before-p after after-p register t))
 
 ;;; ---------------------------------------------------------------------------
@@ -676,7 +683,7 @@ SUCCESS :FAILED those that did not. A filter left NIL selects everything."
     (last-episode *episodic-memory*)))
 
 (defun gp-remember-procedure (&key plan name)
-  "Store a reusable procedure from PLAN (default: last successful plan).
+  "Store a reusable procedure from PLAN (default: the session plan).
 Same name accumulates successes. Autosaves the procedure archive when
 *PROCEDURE-ARCHIVE-AUTOSAVE* is true (default).
 No plan, or an unsuccessful one, is refused before the archive is touched."
@@ -685,7 +692,8 @@ No plan, or an unsuccessful one, is refused before the archive is touched."
    :name name))
 
 (defun gp-procedures (&optional goals)
-  "List stored procedures, or those matching GOALS when supplied."
+  "List stored procedures, or those whose goal set equals GOALS when
+supplied."
   (if goals
       (procedures-for-goals goals)
       (copy-list (procedural-memory-procedures (ensure-procedural-memory)))))
@@ -701,7 +709,7 @@ No plan, or an unsuccessful one, is refused before the archive is touched."
                        (procedural-memory-procedures (ensure-procedural-memory)))))
 
 (defun gp-archive-best (goals)
-  "Highest-scoring archived procedure for GOALS, or NIL."
+  "Highest-scoring archived procedure whose goal set equals GOALS, or NIL."
   (archive-best goals))
 
 (defun gp-archive-save (&optional (path *procedure-archive-path*))
@@ -734,18 +742,16 @@ GP-PLAN: a plan that succeeds ends a listening session that was opened
 for a failed plan. When REMEMBER is true (default), records a plan episode
 in episodic memory."
   (let* ((ctx (ensure-current-context))
-         (goal-set (normalize-planning-goals (or goals (goals-of ctx))))
+         (requested (or goals (goals-of ctx)))
+         (goal-set (normalize-planning-goals requested))
          (operators (context-planning-operators ctx))
          (plan
-           (flet ((does-not-apply (what)
-                    (%refuse :procedure-does-not-apply
-                             "Procedure ~A does not apply to the current ~
-                              state; no plan was built."
-                             what))
-                  (no-procedure ()
+           (flet ((no-procedure ()
+                    ;; REQUESTED, labels included: the sentence repeats
+                    ;; what was asked, not what was left of it.
                     (%refuse :no-procedure
-                             "No archived procedure matches goals ~S."
-                             goal-set)))
+                             "No archived procedure matches goals ~:S."
+                             requested)))
              (cond
                (name
                 (let ((procedure (%procedure-named
@@ -756,12 +762,18 @@ in episodic memory."
                                                (context-all-facts ctx)
                                                operators
                                                :context-name (context-name ctx))
-                          (does-not-apply (procedure-name procedure))))))
+                          (%refuse :procedure-does-not-apply
+                                   "Procedure ~A does not apply to the ~
+                                    current state; no plan was built."
+                                   (procedure-name procedure))))))
                (unchecked
                 (procedure->plan (or (archive-best goal-set) (no-procedure))))
                ((plan-from-ranked-procedures ctx goal-set operators))
                ((%procedures-for-planning goal-set)
-                (does-not-apply goal-set))
+                (%refuse :procedure-does-not-apply
+                         "No archived procedure for goals ~S applies to ~
+                          the current state; no plan was built."
+                         goal-set))
                (t
                 (no-procedure))))))
     (remember-plan-external-actions plan :context ctx)
@@ -796,10 +808,12 @@ NIL. A session memory that does not exist yet is left out."
 
 (defun gp-load (path &key (apply t))
   "Load a snapshot from PATH and return the bundle.
-When APPLY is true (default), install it into the session: its memories
-replace the session's, and its context, when it has one, becomes the
-current context. The last plan, the last execution and the listening
-session belong to the context before it and are then dropped."
+When APPLY is true (default), install it into the session: each memory
+the bundle holds replaces the session's, and its context, when it has
+one, becomes the current context. The last plan, the last execution and
+the listening session belong to the context before it and are then
+dropped. A bundle without a context leaves the current context and those
+three as they were."
   (let ((bundle (load-snapshot path)))
     (when apply
       (apply-snapshot! bundle :set-current nil)
@@ -830,11 +844,13 @@ before it and are dropped."
                        (assert-fact t) (remember t) (meta nil meta-p))
   "Post event FORM ((TYPE . DATA), e.g. (FILE-CREATED \"doc.pdf\")) on the
 current context. By default only records the event (and asserts it as a fact).
-META, when supplied, becomes the meta of the event; a GP-EVENT posted
-without it keeps its own.
+META, a plist, becomes the meta of the event when supplied; a GP-EVENT
+posted without it keeps its own. A META that is not a list is a TYPE-ERROR
+and nothing is posted.
 When :REACT is true, process pending events as GP-REACT does (reactions →
 facts/goals), with :PLAN, :INFER and :REMEMBER passed on.
 Returns the GP-EVENT (and leaves *LAST-REACTION* when reacting)."
+  (check-type meta list)
   (let* ((ctx (ensure-current-context))
          (event (if meta-p
                     (emit-event! ctx form :assert-fact assert-fact :meta meta)
@@ -873,7 +889,8 @@ Returns REACTION."
   (register-event-reaction! (ensure-current-context) reaction))
 
 (defun gp-remove-reaction (name)
-  "Remove event reaction named NAME from the current context."
+  "Remove event reaction named NAME from the current context.
+Returns the local reactions that remain."
   (remove-event-reaction! (ensure-current-context) name))
 
 (defun gp-reactions ()

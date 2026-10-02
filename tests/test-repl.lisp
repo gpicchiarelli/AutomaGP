@@ -225,6 +225,18 @@ the type of any other error it signalled."
                            (lambda () (gp-listen :reason :bogus)))
                      (list "an atom as missing goals"
                            (lambda () (gp-listen :missing 'door-open)))
+                     (list "an atom as the before-state"
+                           (lambda () (gp-learn-action 'shut :before 'door-open
+                                                             :after '((door shut)))))
+                     (list "a symbol among the before facts"
+                           (lambda () (gp-induce-rule 'shut :before '(door-open)
+                                                            :after '((door shut)))))
+                     (list "a string among the after facts"
+                           (lambda () (gp-learn-action 'shut
+                                                       :before '((door open))
+                                                       :after '("door shut"))))
+                     (list "an atom as event meta"
+                           (lambda () (gp-emit '(knock) :meta 'loud)))
                      (list "a mode that is none"
                            (lambda () (gp-mode :bogus))))
           do (is (typep (nth-value 1 (ignore-errors (funcall thunk)))
@@ -236,6 +248,7 @@ the type of any other error it signalled."
     (is (null (gp-goals)))
     (is (null (gp-actions)))
     (is (null (gp-reactions)))
+    (is (null (gp-events)))
     (is (null (gp-rules)))
     (is (equal operators (gp-operators)))
     (is (eq plan (gp-last-plan)))
@@ -430,6 +443,47 @@ successfully and was then refused by GP-RUN."
     (is (string= "GP-SIMULATE requires a plan; call GP-PLAN first or pass :PLAN."
                  (princ-to-string (nth-value 1 (ignore-errors (gp-simulate))))))))
 
+(test repl-simulate-and-run-leave-a-failed-step-to-the-caller
+  "Under a :SIGNAL strategy the GP-ERROR of a failed step reaches a handler
+bound around the command with the step restarts still active. The commands
+used to signal it again from a HANDLER-CASE, after the restarts were gone."
+  (loop for (command mode) in (list (list #'gp-simulate :simulate)
+                                    (list #'gp-run :execute))
+        do (flet ((failing-plan ()
+                    ;; The only step of the plan needs (DOOR CLOSED).
+                    (%repl-door)
+                    (gp-remove-fact '(door closed))
+                    (gp-failure-strategy :signal)))
+             (dolist (restart '(:skip :abort-execution))
+               (failing-plan)
+               (let* ((offered nil)
+                      (result
+                        (handler-bind
+                            ((gp-error
+                               (lambda (condition)
+                                 (setf offered
+                                       (mapcar #'restart-name
+                                               (compute-restarts condition)))
+                                 (invoke-restart restart))))
+                          (funcall command))))
+                 (is (subsetp '(:retry :skip :abort-execution :use-value
+                                :use-alternative :ask-user)
+                              offered)
+                     "~A offered only ~S" mode offered)
+                 (is (not (execution-success result)))
+                 (is (eq result (gp-last-execution)))
+                 (is (eq mode (gp-mode)))))
+             ;; A handler that leaves the command finds the mode as it was.
+             (failing-plan)
+             (signals precondition-failure (funcall command))
+             (is (eq :plan (gp-mode)))
+             (is (null (gp-last-execution)))
+             ;; With no strategy the step is given up and the command returns.
+             (failing-plan)
+             (gp-failure-strategy nil)
+             (is (not (execution-success (funcall command))))
+             (is (eq mode (gp-mode))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Listening and induction
 ;;; ---------------------------------------------------------------------------
@@ -469,9 +523,15 @@ of another, which induced an operator that deletes facts it never saw."
                                 :name 'elsewhere
                                 :facts '((folder notes present)))))
         (is (eq :no-listening-session (refusal)))
-        (is (null (gp-operators))))
+        (is (null (gp-operators)))
+        ;; An induction from explicit states succeeds there, and the
+        ;; session of the other context is not its to end.
+        (is (operator-p (funcall learn 'make-folder
+                                 :before '((folder notes missing))
+                                 :after '((folder notes present))))))
       ;; Back on its own context the session is still open.
       (is (observation-active-p))
+      (is (null (gp-operators)))
       (gp-add-fact '(folder notes present))
       (let ((operator (funcall learn 'make-folder)))
         (is (null (operator-delete-list operator)))
@@ -589,6 +649,11 @@ action, which is not an operator anybody registered."
                      (%refusal-reason
                       (lambda () (apply #'gp-use-procedure keys))))
                  "GP-USE-PROCEDURE ~S found a procedure" keys))
+    ;; The sentence repeats what was asked, the label included.
+    (is (search "TIDY"
+                (princ-to-string
+                 (nth-value 1 (ignore-errors
+                               (gp-use-procedure :goals '(tidy)))))))
     ;; The stored steps need (DOOR CLOSED).
     (gp-remove-fact '(door closed))
     (dolist (keys '((:name opener) (:goals ((door open)))))
