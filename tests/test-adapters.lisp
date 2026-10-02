@@ -303,6 +303,15 @@ ACTION-FAILED that names the operator, unless the spec is :SOFT."
       (is-true (getf (invoke-external-spec write bindings) :ok))
       (is (equal "bound" (adapter-read-file-string file)))
       (is (eq '?path (getf (getf write :args) :path)))
+      ;; A variable bound to another variable is followed to its value, as
+      ;; the core does when it grounds the operator itself.
+      (is-true (getf (invoke-external-spec
+                      write (list (cons '?path '?where)
+                                  (cons '?text '?words)
+                                  (cons '?where (namestring file))
+                                  (cons '?words "followed")))
+                     :ok))
+      (is (equal "followed" (adapter-read-file-string file)))
       ;; A failure: unknown adapter, unknown op, misspelled argument, an
       ;; argument still unbound, a program that fails or does not exist.
       (loop for (spec wanted)
@@ -474,7 +483,11 @@ session; with neither they read the session and never create one."
                                         plan keys))
                         (is-true (apply #'plan-external-actions-supported-p
                                         plan keys))
-                        (is (eq session *current-context*)))))))
+                        (is (eq session *current-context*)))
+               ;; So a simulation given the plan's operators and no context
+               ;; is judged on the plan, whatever session is open.
+               (is-true (execution-success
+                         (simulate-plan plan :operators operators)))))))
 
 (test external-support-is-judged-on-the-facts-supplied
   ":FACTS replaces the facts of the context: the answer is about the run

@@ -52,15 +52,11 @@ Signals ACTION-FAILED for an OP this adapter does not have and for an
 ;;; ---------------------------------------------------------------------------
 
 (defun substitute-external-tree (tree bindings)
-  "Replace variable symbols in TREE using BINDINGS (planner bindings)."
-  (cond
-    ((and (symbolp tree) (variable-symbol-p tree))
-     (let ((pair (lookup-binding tree bindings)))
-       (if pair (cdr pair) tree)))
-    ((consp tree)
-     (cons (substitute-external-tree (car tree) bindings)
-           (substitute-external-tree (cdr tree) bindings)))
-    (t tree)))
+  "Replace variable symbols in TREE using BINDINGS (planner bindings).
+An external spec is grounded as the core grounds an operator pattern,
+with SUBSTITUTE-BINDINGS: a variable bound to another variable is followed
+to its value, so the adapter gets what the symbolic step is about."
+  (substitute-bindings tree bindings))
 
 (defun operator-external-spec (operator)
   "Return the :EXTERNAL plist from OPERATOR meta, or NIL."
