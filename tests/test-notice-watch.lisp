@@ -1,8 +1,10 @@
 ;;;; tests/test-notice-watch.lisp — what a running watch owes its session
 ;;;;
 ;;;; A stop that does not wait, a failing look that can be seen, the
-;;;; context a watch keeps, and writes that never interleave. The fixtures
-;;;; WITH-NOTICE-DIRECTORY and %TEST-FILE-REACTION are in test-notice.lisp.
+;;;; context a watch keeps, writes that never interleave, a slot that is
+;;;; free once its thread is gone, and the lock a front end holds. The
+;;;; fixtures WITH-NOTICE-DIRECTORY and %TEST-FILE-REACTION are in
+;;;; test-notice.lisp.
 
 (in-package #:automa-gp/tests)
 
@@ -158,7 +160,7 @@
                       #'gp-stop-terminal-screen-watch))
     (signals notice-refused (funcall stop)))
   (is (null (automa-gp::%stop-notice-watches)))
-  (dolist (interval '(0 -1 nil "1"))
+  (dolist (interval (list 0 -1 nil "1" sb-ext:double-float-positive-infinity))
     (signals notice-refused (gp-watch-directory "/tmp/" :interval interval))
     (signals notice-refused (gp-watch-processes :interval interval))
     (signals notice-refused (gp-watch-terminals :interval interval))
@@ -209,6 +211,74 @@
                           (sb-thread:list-all-threads)
                           :key #'sb-thread:thread-name
                           :test #'string=))))
+      (when (automa-gp::%notice-watch-active-p '*notice-watch-probe* lock)
+        (ignore-errors
+         (automa-gp::%end-notice-watch '*notice-watch-probe* lock "absent"))))))
+
+(test watch-whose-thread-ends-frees-its-slot
+  (let ((lock *notice-watch-probe-lock*)
+        (looks 0))
+    (setf *notice-watch-probe* nil)
+    (unwind-protect
+         (progn
+           (automa-gp::%begin-notice-watch
+            '*notice-watch-probe* lock 0.05
+            "automa-gp-notice-watch-probe" "busy"
+            (lambda ()
+              (values '(:first) (lambda () (incf looks) '(:later)) nil)))
+           ;; A look has run, so the thread is in its loop.
+           (%await (plusp looks))
+           (is (automa-gp::%notice-watch-active-p '*notice-watch-probe* lock))
+           ;; Not a stop: the thread is ended from outside the watch.
+           (sb-thread:terminate-thread
+            (find "automa-gp-notice-watch-probe" (sb-thread:list-all-threads)
+                  :key #'sb-thread:thread-name :test #'string=))
+           (%await (not (automa-gp::%notice-watch-active-p
+                         '*notice-watch-probe* lock)))
+           (is (not (automa-gp::%notice-watch-active-p
+                     '*notice-watch-probe* lock)))
+           (signals notice-refused
+             (automa-gp::%end-notice-watch '*notice-watch-probe* lock "absent")))
+      (when (automa-gp::%notice-watch-active-p '*notice-watch-probe* lock)
+        (ignore-errors
+         (automa-gp::%end-notice-watch '*notice-watch-probe* lock "absent"))))))
+
+(test front-end-that-holds-the-accept-lock-keeps-a-watch-from-writing
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-reaction (%test-file-reaction))
+  (let ((lock *notice-watch-probe-lock*)
+        (held '(automa-gp::file-created "held"))
+        (own '(automa-gp::file-created "own"))
+        (looks 0))
+    (setf *notice-watch-probe* nil)
+    (unwind-protect
+         (progn
+           (sb-thread:with-recursive-lock (automa-gp::*notice-accept-lock*)
+             (automa-gp::%begin-notice-watch
+              '*notice-watch-probe* lock 0.05
+              "automa-gp-notice-watch-probe" "busy"
+              (lambda ()
+                (values nil
+                        (lambda ()
+                          (incf looks)
+                          (and (automa-gp::%accept-notice held) (list held)))
+                        nil))
+              :join-slack 10)
+             (%await (plusp looks))
+             (sleep 0.3)
+             ;; The watch waits for its turn. The holder may notice.
+             (is (= 1 looks))
+             (is (null (gp-facts)))
+             (is-true (automa-gp::%accept-notice own))
+             (is (fact-p own (gp-facts)))
+             (is (not (fact-p held (gp-facts))))
+             ;; A stop reaches the watch while it waits, well inside the slack.
+             (is (< (%seconds (automa-gp::%end-notice-watch
+                               '*notice-watch-probe* lock "absent"))
+                    3)))
+           (is (not (fact-p held (gp-facts))))
+           (is (null (%watch-thread-names))))
       (when (automa-gp::%notice-watch-active-p '*notice-watch-probe* lock)
         (ignore-errors
          (automa-gp::%end-notice-watch '*notice-watch-probe* lock "absent"))))))

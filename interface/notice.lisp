@@ -23,12 +23,14 @@
 ;;;; Terminal.app read stop when that stop is seen.
 ;;;; A watch keeps to the context it was started on, whichever context is
 ;;;; current later. One noticed form enters a context at a time, so two
-;;;; watches never interleave their writes. A later look that signals is
-;;;; counted with its message: GP-WATCH-FAILURES lists the watches whose
-;;;; latest look failed.
-;;;; An open session keeps its
-;;;; before-state, so the new fact can be the change that GP-INDUCE-RULE
-;;;; generalizes.
+;;;; watches never interleave their writes. A command that is not a notice
+;;;; is not held back by that: the session state is not locked, and a
+;;;; front end that runs commands beside a watch holds *NOTICE-ACCEPT-LOCK*
+;;;; around each of them. A later look that signals is counted with its
+;;;; message: GP-WATCH-FAILURES lists the watches whose latest look failed.
+;;;; A watch whose thread ends without a stop frees its slot.
+;;;; An open session keeps its before-state, so the new fact can be the
+;;;; change that GP-INDUCE-RULE generalizes.
 
 (in-package #:automa-gp)
 
@@ -111,18 +113,28 @@ the reactions."
 (defvar *notice-accept-lock* (sb-thread:make-mutex :name "automa-gp-notice-accept")
   "Held while one noticed form enters a context.
 Every notice and every watch thread takes it, so their writes to a context
-never interleave. A command that is not a notice does not take it.")
+never interleave. A command that is not a notice does not take it: a front
+end that runs commands while a watch runs holds it around each command,
+with SB-THREAD:WITH-RECURSIVE-LOCK, and no watch writes meanwhile. The
+thread that holds it may notice.")
 
 (defun %accept-notice (form &key (react t))
   "Record FORM in the context of this look, unless the look has been stopped.
 Returns NIL when the look is stopped and T when FORM belongs in the
-result. A fact already present is not asserted again. With REACT the
-event is reacted at once, and so is an event still pending for a fact
-already present, as GP-NOTICE-PATH leaves one: the reaction's facts and
-goals enter the context either way. When that context is the current
-one, the working-memory snapshot and *LAST-REACTION* follow it."
-  (sb-thread:with-mutex (*notice-accept-lock*)
-    (unless (%notice-halted-p)
+result. A stop is seen while the look waits for its turn to write. A fact
+already present is not asserted again. With REACT the event is reacted at
+once, and so is an event still pending for a fact already present, as
+GP-NOTICE-PATH leaves one: the reaction's facts and goals enter the
+context either way. When that context is the current one, the
+working-memory snapshot and *LAST-REACTION* follow it."
+  (loop
+    (when (%notice-halted-p)
+      (return nil))
+    ;; A turn that does not come within the timeout skips the body, and the
+    ;; stop is looked at again.
+    (sb-thread:with-recursive-lock (*notice-accept-lock* :timeout 0.1)
+      (when (%notice-halted-p)
+        (return nil))
       ;; A watch thread that has to be terminated is not interrupted here,
       ;; so a form is never left half entered.
       (sb-sys:without-interrupts
@@ -144,7 +156,7 @@ one, the working-memory snapshot and *LAST-REACTION* follow it."
                           :plan nil
                           :results (list result))))
             (refresh-working-memory context))))
-      t)))
+      (return t))))
 
 (defun %notice-path-text (path kind)
   "PATH, a string or a pathname, as a trimmed string that is not empty.
@@ -179,12 +191,16 @@ change an open listening session. Returns the fact."
       (%accept-notice form :react nil)
       form)))
 
-(defun %symbolic-link-p (path)
-  "True when PATH itself is a symbolic link."
-  (let ((text (string-right-trim '(#\/) (namestring path))))
-    (handler-case
-        (sb-posix:s-islnk (sb-posix:stat-mode (sb-posix:lstat text)))
-      (error () nil))))
+(defun %entered-directory-p (path)
+  "True when the walk enters the directory PATH.
+PATH is examined under the name the system knows it by, whatever
+characters that name has. A symbolic link is not entered, and neither is
+a directory that cannot be examined."
+  (handler-case
+      (not (sb-posix:s-islnk
+            (sb-posix:stat-mode
+             (sb-posix:lstat (sb-ext:native-namestring path :as-file t)))))
+    (error () nil)))
 
 (defun %files-under-directory (root)
   "Files under ROOT, including subdirectories.
@@ -208,7 +224,7 @@ not yet listed are left out."
                  (dolist (sub (uiop:subdirectories dir))
                    (when (%notice-halted-p)
                      (return-from visit))
-                   (unless (%symbolic-link-p sub)
+                   (when (%entered-directory-p sub)
                      (visit sub))))))
       (visit (uiop:ensure-directory-pathname root)))
     (sort files #'string< :key #'namestring)))
@@ -293,28 +309,42 @@ True when WATCH is stopped."
           (sb-thread:condition-wait (notice-watch-wake watch) lock
                                     :timeout (min left 60)))))))
 
-(defun %notice-watch-loop (watch lock)
+(defun %notice-watch-loop (watch place lock)
   "Repeat WATCH's look every interval until its stop flag is set.
 The first look already ran on the caller. A stop ends the wait between
 two looks at once. A later look that signals is counted with its message,
 for GP-WATCH-FAILURES, and the facts of the last good look stay. The next
 good look clears that count. The lock is not held during the look, so a
-stop is seen before the next target."
-  (loop until (%notice-watch-wait watch lock)
-        do (handler-case
-               (let ((noticed (%call-notice-look watch lock
-                                                 (notice-watch-look watch))))
-                 (sb-thread:with-mutex (lock)
-                   (unless (notice-watch-stop watch)
-                     (setf (notice-watch-noticed watch) noticed
-                           (notice-watch-failed-looks watch) 0
-                           (notice-watch-failure watch) nil))))
-             (error (condition)
-               (let ((message (or (ignore-errors (princ-to-string condition))
-                                  (prin1-to-string (type-of condition)))))
-                 (sb-thread:with-mutex (lock)
-                   (incf (notice-watch-failed-looks watch))
-                   (setf (notice-watch-failure watch) message)))))))
+stop is seen before the next target. However the thread ends, PLACE no
+longer holds WATCH afterwards: a watch without its thread is not running."
+  (unwind-protect
+       (loop until (%notice-watch-wait watch lock)
+             do (handler-case
+                    (let ((noticed (%call-notice-look
+                                    watch lock (notice-watch-look watch))))
+                      (sb-thread:with-mutex (lock)
+                        (unless (notice-watch-stop watch)
+                          (setf (notice-watch-noticed watch) noticed
+                                (notice-watch-failed-looks watch) 0
+                                (notice-watch-failure watch) nil))))
+                  (error (condition)
+                    (let ((message
+                            (or (ignore-errors (princ-to-string condition))
+                                (prin1-to-string (type-of condition)))))
+                      (sb-thread:with-mutex (lock)
+                        (incf (notice-watch-failed-looks watch))
+                        (setf (notice-watch-failure watch) message))))))
+    (sb-thread:with-mutex (lock)
+      (when (eq (symbol-value place) watch)
+        (setf (symbol-value place) nil)))))
+
+(defun %watch-interval (interval)
+  "INTERVAL as a rational number of seconds, or refuse it.
+A watch repeats every positive, finite number of seconds."
+  (or (and (realp interval)
+           (handler-case (and (plusp interval) (rational interval))
+             (arithmetic-error () nil)))
+      (%refuse-notice "Watch interval must be a positive number of seconds.")))
 
 (defun %begin-notice-watch (place lock interval thread-name busy prepare
                             &key (join-slack 2))
@@ -326,9 +356,7 @@ PREPARE that signals leaves the slot empty. A stop during that look
 records nothing after the target already accepted. The watch keeps the
 context that is current now for every later look. PLACE is the symbol
 of one watch variable."
-  (unless (and (realp interval) (plusp interval))
-    (%refuse-notice "Watch interval must be a positive number of seconds."))
-  (let ((watch (make-notice-watch :interval (rational interval)
+  (let ((watch (make-notice-watch :interval (%watch-interval interval)
                                   :join-slack join-slack
                                   :context (ensure-current-context))))
     (sb-thread:with-mutex (lock)
@@ -346,7 +374,7 @@ of one watch variable."
                        (not (notice-watch-stop watch)))
               (setf (notice-watch-thread watch)
                     (sb-thread:make-thread
-                     (lambda () (%notice-watch-loop watch lock))
+                     (lambda () (%notice-watch-loop watch place lock))
                      :name thread-name))))
           noticed)
       (sb-thread:with-mutex (lock)
@@ -749,7 +777,8 @@ stops during the read. A transcript that cannot be opened or read
 signals."
   (and (not (%notice-halted-p))
        (%regular-transcript-p path)
-       (%file-contains-p path text)))
+       ;; The file is opened under the name that was just examined.
+       (%file-contains-p (sb-ext:parse-native-namestring path) text)))
 
 (defun gp-notice-terminal-text ()
   "Notice each transcript text that a reaction already names.

@@ -42,15 +42,23 @@
           (when (and tty (%test-tty-name-p tty) pid)
             (return (values tty pid))))))))
 
+(defun %test-typescript (marker)
+  "Path of the typescript the PTY session named MARKER writes."
+  (format nil "/tmp/automa-gp-script-~A" marker))
+
+(defun %test-delete-typescripts (&rest markers)
+  "Delete the typescripts the PTY sessions named MARKERS left behind."
+  (dolist (marker markers)
+    (ignore-errors (delete-file (%test-typescript marker)))))
+
 (defun %test-open-pty-session (marker)
   "Launch a short-lived PTY session whose command line contains MARKER."
   ;; A real typescript path is more reliable than /dev/null on FreeBSD.
-  (let ((typescript (format nil "/tmp/automa-gp-script-~A" marker)))
-    (uiop:launch-program
-     (%test-script-argv typescript "perl" "-e"
-                        (format nil "sleep 60; # ~A" marker))
-     :output #P"/dev/null"
-     :error-output #P"/dev/null")))
+  (uiop:launch-program
+   (%test-script-argv (%test-typescript marker) "perl" "-e"
+                      (format nil "sleep 60; # ~A" marker))
+   :output #P"/dev/null"
+   :error-output #P"/dev/null"))
 
 (defun %test-ensure-tty (marker &optional session)
   "Return (values TTY CHILD SESSION OVERRIDE). Allocates a PTY when possible;
@@ -543,7 +551,8 @@ otherwise OVERRIDE is a synthetic name for *NOTICE-OPEN-TERMINALS-OVERRIDE*."
         (ignore-errors
          (uiop:run-program (list "kill" "-9" child) :ignore-error-status t)))
       (when (and session (uiop:process-alive-p session))
-        (ignore-errors (uiop:terminate-process session :urgent t))))))
+        (ignore-errors (uiop:terminate-process session :urgent t)))
+      (%test-delete-typescripts marker))))
 
 (test watch-terminals-notices-a-terminal-that-opens-later
   (labels ((tty-open-p (name)
@@ -652,6 +661,7 @@ otherwise OVERRIDE is a synthetic name for *NOTICE-OPEN-TERMINALS-OVERRIDE*."
                             :test #'string=))))
         (setf automa-gp::*notice-open-terminals-override* saved)
         (close-session session child)
+        (%test-delete-typescripts probe born-mark later)
         (when (gp-terminal-watch)
           (ignore-errors (gp-stop-terminal-watch)))))))
 
@@ -1365,3 +1375,42 @@ osascript where it exists, so the Terminal.app read itself is the one cut."
       (multiple-value-bind (code body) (web-api-handle :get "/api/reaction")
         (is (= 200 code))
         (is (getf body :reaction))))))
+
+(test notice-takes-a-name-as-the-system-knows-it
+  ;; A pathname reads [ ] * and ? as a pattern. In these names they are
+  ;; plain characters.
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-reaction (%test-file-reaction))
+  (flet ((native (directory name)
+           (concatenate 'string (sb-ext:native-namestring directory) name)))
+    (with-notice-directory (outside)
+      (adapter-write-file-string (native outside "secret.txt") "outside")
+      (dolist (name '("linked" "link[1]" "li*nk" "link?"))
+        (with-notice-directory (dir)
+          (sb-posix:symlink (sb-ext:native-namestring outside :as-file t)
+                            (native dir name))
+          (is (null (gp-notice-directory dir))
+              "The walk entered the linked directory ~S." name)))
+      (is (null (gp-facts)))
+      ;; A directory of that kind that is no link is entered.
+      (with-notice-directory (dir)
+        (sb-posix:mkdir (native dir "real[1]") #o700)
+        (with-open-file (out (sb-ext:parse-native-namestring
+                              (native dir "real[1]/inside.txt"))
+                             :direction :output)
+          (write-string "inside" out))
+        (let ((noticed (gp-notice-directory dir)))
+          (is (= 1 (length noticed)))
+          (is (search "inside.txt" (second (first noticed)))))))
+    (gp-reset)
+    (with-notice-directory (dir)
+      (let ((path (native dir "typescript[1].log")))
+        (with-open-file (out (sb-ext:parse-native-namestring path)
+                             :direction :output)
+          (write-string "MARKER here" out))
+        (gp-add-reaction
+         (make-event-reaction :name 'on-marker
+                              :when (list 'automa-gp::terminal-text path
+                                          "MARKER"))))
+      (is (= 1 (length (gp-notice-terminal-text)))))))
