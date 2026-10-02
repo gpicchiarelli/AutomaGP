@@ -125,8 +125,9 @@ result. A stop is seen while the look waits for its turn to write. A fact
 already present is not asserted again. With REACT the event is reacted at
 once, and so is an event still pending for a fact already present, as
 GP-NOTICE-PATH leaves one: the reaction's facts and goals enter the
-context either way. When that context is the current one, the
-working-memory snapshot and *LAST-REACTION* follow it."
+context either way. When that context is the current one,
+*LAST-REACTION* follows it. The working-memory snapshot follows it when
+the current context is that one or inherits from it."
   (loop
     (when (%notice-halted-p)
       (return nil))
@@ -144,18 +145,22 @@ working-memory snapshot and *LAST-REACTION* follow it."
                                (find form (pending-events context)
                                      :key #'event-form :test #'equal))
                           (emit-event! context form)))
-               (result (and event react (react-to-event! context event))))
-          (when (and event (eq context *current-context*))
-            (when result
-              (setf *last-reaction*
-                    (list :processed 1
-                          :matched (copy-list (getf result :matched))
-                          :facts-added (copy-list (getf result :facts-added))
-                          :goals-added (copy-list (getf result :goals-added))
-                          :dropped (copy-list (getf result :dropped))
-                          :plan nil
-                          :results (list result))))
-            (refresh-working-memory context))))
+               (result (and event react (react-to-event! context event)))
+               (current *current-context*))
+          (when (and result (eq context current))
+            (setf *last-reaction*
+                  (list :processed 1
+                        :matched (copy-list (getf result :matched))
+                        :facts-added (copy-list (getf result :facts-added))
+                        :goals-added (copy-list (getf result :goals-added))
+                        :dropped (copy-list (getf result :dropped))
+                        :plan nil
+                        :results (list result))))
+          ;; The snapshot lists inherited facts too.
+          (when (and event
+                     (context-p current)
+                     (member context (context-lineage current) :test #'eq))
+            (refresh-working-memory current))))
       (return t))))
 
 (defun %notice-path-text (path kind)

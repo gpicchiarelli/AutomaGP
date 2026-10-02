@@ -125,6 +125,17 @@
                (is (eq 'elsewhere
                        (working-memory-context-name *working-memory*)))
                (is (null (working-memory-facts *working-memory*)))
+               (is (null (gp-last-reaction))))
+             ;; A context that inherits from the watched one sees the fact,
+             ;; and so does the snapshot that describes it.
+             (gp-context :name 'child :parent home)
+             (let* ((next (namestring (merge-pathnames "next.txt" dir)))
+                    (seen (list 'seen next)))
+               (adapter-write-file-string next "next")
+               (%await (fact-p seen (working-memory-facts *working-memory*)))
+               (is (fact-p seen (gp-facts)))
+               (is (fact-p seen (working-memory-facts *working-memory*)))
+               (is (eq 'child (working-memory-context-name *working-memory*)))
                (is (null (gp-last-reaction)))))
         (automa-gp::%stop-notice-watches)))))
 
