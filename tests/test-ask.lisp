@@ -639,6 +639,18 @@ every string of PRESENT and none of ABSENT.")
   (is (null (gp-goals)))
   (is (null (gp-facts))))
 
+(test ask-reads-a-name-that-is-not-a-symbol
+  ;; A rule may be named by a number or a string. Such a name is read as
+  ;; it prints, and the other phrases of the context still work.
+  (%add-operators '((power-on (power-state ?d on))))
+  (gp-add-rule (make-rule :name 7 :if '((wind strong)) :then '((flag up))))
+  (gp-add-rule (make-rule :name "alza" :if '((wind strong)) :then '((flag high))))
+  (loop for (phrase goal) in '(("7" (flag up))
+                               ("alza" (flag high))
+                               ("power-state lamp" (power-state lamp on)))
+        do (is (equal goal (gp-interpret phrase))))
+  (signals phrase-refused (gp-interpret "ciao")))
+
 (defun %goals-named (refusal)
   "The candidate goals the PHRASE-REFUSED REFUSAL names."
   (etypecase refusal
