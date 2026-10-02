@@ -64,15 +64,15 @@ The lists are copied; the facts and RULE objects in them are shared."
   (knowledge-memory-facts km))
 
 (defun knowledge-add-rule! (rule &optional (km (ensure-knowledge-memory)))
-  "Register RULE in knowledge memory. Returns RULE.
-A named rule replaces the rule of that name and goes first; an unnamed
-rule goes last, as with REGISTER-RULE!."
-  (let* ((name (rule-name rule))
-         (rules (knowledge-memory-rules km)))
+  "Register RULE in knowledge memory, newest first. Returns RULE.
+A rule with a name replaces the rule of that name, as with REGISTER-RULE!."
+  (let ((name (rule-name rule))
+        (rules (knowledge-memory-rules km)))
     (setf (knowledge-memory-rules km)
-          (if name
-              (cons rule (remove name rules :key #'rule-name :test #'equal))
-              (append rules (list rule))))
+          (cons rule
+                (if name
+                    (remove name rules :key #'rule-name :test #'equal)
+                    rules)))
     rule))
 
 (defun knowledge-remove-rule! (name &optional (km (ensure-knowledge-memory)))
@@ -101,16 +101,17 @@ Each hit is a plist (:FACT f :BINDINGS alist), as with QUERY-FACTS."
 (defun knowledge-merge-into-context! (context &optional (km (ensure-knowledge-memory)))
   "Merge knowledge facts/rules into CONTEXT (local slots). Returns CONTEXT.
 A knowledge rule replaces the context rule of the same name. The merged
-rules keep the order they have in knowledge memory."
-  (dolist (f (knowledge-memory-facts km))
-    (setf (context-facts context) (add-fact! (context-facts context) f)))
-  ;; REGISTER-RULE! puts a named rule first and an unnamed one last, so the
-  ;; named rules are registered back to front and the unnamed front to back.
+rules come first, in the order they have in knowledge memory; merging the
+same knowledge again changes nothing."
+  (dolist (fact (knowledge-memory-facts km))
+    (context-add-fact! context fact))
   (let ((rules (knowledge-memory-rules km)))
-    (dolist (r (reverse rules))
-      (when (rule-name r)
-        (register-rule! context r)))
-    (dolist (r rules)
-      (unless (rule-name r)
-        (register-rule! context r))))
+    ;; REGISTER-RULE! replaces a rule by name only: a rule without a name
+    ;; that an earlier merge put in CONTEXT would be there twice.
+    (setf (context-rules context)
+          (remove-if (lambda (rule) (member rule rules :test #'eq))
+                     (context-rules context)))
+    ;; REGISTER-RULE! puts each rule first.
+    (dolist (rule (reverse rules))
+      (register-rule! context rule)))
   context)

@@ -9,7 +9,7 @@
   "The highest integer episode id made or restored in this Lisp image; a new
 episode gets the next one.")
 
-(defun next-episode-id ()
+(defun %next-episode-id ()
   "A fresh episode id: the integer after *EPISODE-COUNTER*."
   (incf *episode-counter*))
 
@@ -17,7 +17,7 @@ episode gets the next one.")
   ((id
     :initarg :id
     :accessor episode-id
-    :initform (next-episode-id)
+    :initform (%next-episode-id)
     :documentation "An integer no episode made or restored earlier in this
 image carries. An episode restored from a file keeps the id it was saved
 with, which is a symbol in files written before ids were integers.")

@@ -256,6 +256,53 @@ they were saved in, however many times the context is saved and loaded."
                         'persistence-error)
                  "~A accepted ~S" deserialize form))))
 
+(test resume-context-reports-what-no-context-can-be-built-from
+  "A slot value the constructors refuse is a PERSISTENCE-ERROR that carries
+the refusal, not the bare error of the constructor."
+  (dolist (slots '((:facts 5) (:goals 7) (:mode :fly) (:rules (r))
+                   (:operators ((:operator))) (:actions ((:action)))
+                   (:events ((:event :data ("a.pdf"))))
+                   (:event-reactions (5))))
+    (let ((failure (%persistence-failure-of
+                    (lambda () (resume-context (list* :context slots))))))
+      (is (typep failure 'persistence-error) "Resumed with ~S" slots)
+      (when failure
+        (is (null (persistence-error-path failure)))
+        (is (stringp (princ-to-string failure)))))))
+
+(test a-saved-unsafe-rule-loads-as-it-was-saved
+  "MAKE-RULE reports a consequent variable that no antecedent binds. A rule
+built past that report and saved, or saved before the check existed, comes
+back from a form and from a file, in a context and in knowledge memory."
+  (signals unsafe-rule (make-rule :name 'loose :if '((a ?x)) :then '(b ?y)))
+  (let* ((rule (handler-bind ((unsafe-rule #'continue))
+                 (make-rule :name 'loose :if '((a ?x)) :then '(b ?y))))
+         (form (serialize-rule rule))
+         (context (make-context :name 'holder :facts '((a 1))
+                                :rules (list rule)))
+         (knowledge (make-knowledge-memory :rules (list rule))))
+    (flet ((same-rule-p (loaded)
+             (equal form (serialize-rule loaded))))
+      (is (same-rule-p (deserialize-rule form)))
+      (is (same-rule-p (first (context-rules
+                               (resume-context (suspend-context context))))))
+      (with-persist-directory (dir)
+        (let ((context-file (merge-pathnames "context.agp" dir))
+              (snapshot-file (merge-pathnames "snapshot.agp" dir)))
+          (persist-context context context-file)
+          (save-snapshot snapshot-file :context context :knowledge knowledge)
+          (is (same-rule-p (first (context-rules
+                                   (restore-context context-file)))))
+          (let ((bundle (load-snapshot snapshot-file)))
+            (is (same-rule-p (first (context-rules (getf bundle :context)))))
+            (is (same-rule-p (first (knowledge-memory-rules
+                                     (getf bundle :knowledge)))))
+            ;; The rule concludes nothing that is not ground.
+            (is (equal '((a 1))
+                       (forward-chain
+                        (context-facts (getf bundle :context))
+                        (context-rules (getf bundle :context)))))))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Files: written whole, read as data
 ;;; ---------------------------------------------------------------------------
@@ -269,6 +316,11 @@ they were saved in, however many times the context is saved and loaded."
           :strings '("" "plain" "with \"quotes\" and \\ backslash"
                      "città è più" "two
 lines")
+          ;; What NAMESTRING, FORMAT and PRINC-TO-STRING return on SBCL.
+          :base-strings (list (coerce "base \"quoted\" \\" 'simple-base-string)
+                              (namestring #p"/tmp/doc.pdf")
+                              (format nil "~A" 'name)
+                              (princ-to-string 12))
           :characters '(#\a #\A #\Space #\Newline #\Tab #\( #\; #\\ #\" #\è)
           :symbols '(plain |Mixed Case| |with space| |123| |1E5| |a:b|
                      :keyword cl:car cl-user::persist-sample)
@@ -304,6 +356,8 @@ and what is read does not depend on its reader variables."
           (is (%data= *persist-sample* back) "Under ~S" bindings)
           (is (string= (or reference (setf reference text)) text)
               "The file differs under ~S" bindings)
+          (is (null (search "#A" text)))
+          (is (every #'stringp (getf back :base-strings)))
           (destructuring-bind (first second) (getf back :shared)
             (is (eq first second)))
           (destructuring-bind (first second) (getf back :uninterned)
@@ -353,6 +407,9 @@ righe\"" "\"città\"" "(a\"b\"c)"
                       "(#1=(a b) #1#)" "(#1=#:g #1# #1#)" "(#1=\"s\" . #1#)"
                       "(#1=a #2=#1# #2#)" "(a . #1=(b) )"
                       "#P\"/tmp/x.agp\"" "#p\"x\""
+                      ;; a string of base characters as SBCL once printed it
+                      "#A((3) BASE-CHAR . \"abc\")" "#a((0) base-char . \"\")"
+                      "(#A((2) COMMON-LISP:BASE-CHAR . \"hi\") x)"
                       "; a comment first
  (a ; and one inside
   b) ; and one after"))
@@ -381,6 +438,10 @@ one datum and broken syntax are all a PERSISTENCE-ERROR that names the file."
                       "#" "#\\" "#\\nonsuch" "#'" "'" "#P 3"
                       "a:b:c" "a:::b" "a:" ":"
                       "automa-gp-no-such-package::x"
+                      "common-lisp::persist-no-such-symbol"
+                      "#A((2) BASE-CHAR . \"abc\")" "#A((3) T . \"abc\")"
+                      "#A((3) CHARACTER . \"abc\")" "#A((3) BASE-CHAR 1 2 3)"
+                      "#A(3)" "#A 5" "#A" "#1A\"a\""
                       "1/0" "1e999"))
         (%write-text path text)
         (let ((failure (%persistence-failure-of
@@ -389,7 +450,8 @@ one datum and broken syntax are all a PERSISTENCE-ERROR that names the file."
           (when failure
             (is (equal path (persistence-error-path failure))))))
       (is (null *persist-canary*))
-      (is (null (find-package "AUTOMA-GP-NO-SUCH-PACKAGE"))))))
+      (is (null (find-package "AUTOMA-GP-NO-SUCH-PACKAGE")))
+      (is (null (find-symbol "PERSIST-NO-SUCH-SYMBOL" :common-lisp))))))
 
 (test loaders-never-evaluate-the-file
   (with-persist-directory (dir)
@@ -444,6 +506,9 @@ one datum and broken syntax are all a PERSISTENCE-ERROR that names the file."
           (forget))))))
 
 (test reading-creates-symbols-only-in-allowed-packages
+  "By default a file may name a new symbol in any package that exists: a
+session whose vocabulary lives in a package of its own saves such symbols.
+A list of package names allows those packages and the current one only."
   (with-persist-directory (dir)
     (let ((path (merge-pathnames "packages.agp" dir))
           (package (make-package "AUTOMA-GP-PERSIST-SCRATCH" :use nil)))
@@ -451,21 +516,30 @@ one datum and broken syntax are all a PERSISTENCE-ERROR that names the file."
            (flet ((made ()
                     (find-symbol "MADE-BY-FILE" package)))
              (%write-text path "(automa-gp-persist-scratch::made-by-file)")
-             (signals persistence-error (read-sexp-file path))
-             (is (null (made)))
-             ;; Allowed as the current package, by name, and by T.
+             (let ((*persistence-symbol-packages* '("AUTOMA-GP" "KEYWORD"))
+                   (*package* (find-package :cl-user)))
+               (signals persistence-error (read-sexp-file path))
+               (is (null (made))))
+             ;; Allowed by default, as the current package, by name, and by T.
              (loop for (packages current)
-                     in `((("AUTOMA-GP") ,package)
+                     in `((:default ,(find-package :cl-user))
+                          (("AUTOMA-GP") ,package)
                           (("AUTOMA-GP-PERSIST-SCRATCH") ,*package*)
                           (t ,*package*))
-                   do (let ((*persistence-symbol-packages* packages)
+                   do (let ((*persistence-symbol-packages*
+                              (if (eq packages :default)
+                                  *persistence-symbol-packages*
+                                  packages))
                             (*package* current))
-                        (is (eq (first (read-sexp-file path)) (made)))
+                        (is (eq (first (read-sexp-file path)) (made))
+                            "Allowed packages ~S" packages)
                         (is (not (null (made))))
                         (unintern (made) package)))
              ;; A symbol that exists is read whatever its package.
              (intern "MADE-BY-FILE" package)
-             (is (eq (made) (first (read-sexp-file path)))))
+             (let ((*persistence-symbol-packages* nil)
+                   (*package* (find-package :cl-user)))
+               (is (eq (made) (first (read-sexp-file path))))))
         (delete-package package)))))
 
 (test reading-and-writing-stop-at-the-depth-limit
@@ -530,6 +604,36 @@ is touched, and no temporary file stays behind."
         (is (equal '(:kept "after") (read-sexp-file path)))
         (is (= 1 (length (uiop:directory-files dir))))))))
 
+#+sb-thread
+(test concurrent-writes-leave-one-whole-file
+  "Each writer of a path stages a file of its own and renames it into place:
+a reader meets the whole file of one writer, never a mixture or a part."
+  (with-persist-directory (dir)
+    (let* ((path (merge-pathnames "shared.agp" dir))
+           (forms (loop for writer below 4
+                        collect (list :writer writer
+                                      :filler (make-list 2000
+                                                         :initial-element writer))))
+           (misreads 0))
+      (write-sexp-file path (first forms))
+      (let ((threads (mapcar (lambda (form)
+                               (sb-thread:make-thread
+                                (lambda ()
+                                  (handler-case
+                                      (dotimes (i 25 t)
+                                        (write-sexp-file path form))
+                                    (error () nil)))))
+                             forms)))
+        (loop while (some #'sb-thread:thread-alive-p threads)
+              do (unless (member (handler-case (read-sexp-file path)
+                                   (error () nil))
+                                 forms :test #'equal)
+                   (incf misreads)))
+        (is (every #'sb-thread:join-thread threads))
+        (is (zerop misreads))
+        (is (member (read-sexp-file path) forms :test #'equal))
+        (is (= 1 (length (uiop:directory-files dir))))))))
+
 (test a-failed-save-keeps-the-previous-snapshot
   (with-persist-directory (dir)
     (let ((path (merge-pathnames "session.agp" dir)))
@@ -545,6 +649,42 @@ is touched, and no temporary file stays behind."
       (gp-load path)
       (is (eq 'kept (context-name (gp-context))))
       (is (fact-p '(saved once) (gp-facts))))))
+
+(test a-session-that-holds-base-strings-is-saved-and-loaded
+  "A fact that holds a namestring, a base string on SBCL, does not stop a
+save, and the file holds it in string syntax."
+  (with-persist-directory (dir)
+    (let ((path (merge-pathnames "session.agp" dir))
+          (fact (list 'file-created (namestring #p"/tmp/doc.pdf"))))
+      (gp-clear-memory)
+      (gp-reset)
+      (gp-context :name 'watched)
+      (gp-add-fact fact)
+      (record-episode! :kind :event :summary (list :file (second fact)))
+      (gp-save path)
+      (is (search "\"/tmp/doc.pdf\"" (%file-text path)))
+      (is (null (search "#A" (%file-text path))))
+      (gp-clear-memory)
+      (gp-reset)
+      (gp-load path)
+      (is (fact-p fact (gp-facts)))
+      (is (equal (list :file (second fact))
+                 (episode-summary (gp-last-episode)))))))
+
+(test a-base-string-written-in-array-syntax-is-still-read
+  "Files written before every string was printed alike hold a string of
+base characters as #A((n) BASE-CHAR . \"...\"). Saved again, it is a string."
+  (with-persist-directory (dir)
+    (let ((path (%write-text
+                 (merge-pathnames "legacy-string.agp" dir)
+                 "(:CONTEXT :NAME STUDIO :FACTS
+                   ((:FILE-CREATED #A((12) BASE-CHAR . \"/tmp/doc.pdf\"))))")))
+      (let ((context (restore-context path)))
+        (is (equal '((:file-created "/tmp/doc.pdf")) (context-facts context)))
+        (persist-context context path)
+        (is (null (search "#A" (%file-text path))))
+        (is (equal '((:file-created "/tmp/doc.pdf"))
+                   (context-facts (restore-context path))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Paths
@@ -687,7 +827,18 @@ malformed are a PERSISTENCE-ERROR that names the file."
                           (lambda () (funcall loader missing)))))
             (is (typep failure 'persistence-error) "~A" loader)
             (when failure
-              (is (equal missing (persistence-error-path failure))))))))))
+              (is (equal missing (persistence-error-path failure)))))))
+      ;; A directory is not a file to read or to write.
+      (with-scratch-procedural-memory
+        (dolist (function '(read-sexp-file load-snapshot restore-context
+                            load-procedure-archive persist-context))
+          (is (typep (%persistence-failure-of
+                      (lambda ()
+                        (if (eq function 'persist-context)
+                            (persist-context (make-context :name 'c) dir)
+                            (funcall function dir))))
+                     'persistence-error)
+              "~A took a directory" function))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Procedure archive
