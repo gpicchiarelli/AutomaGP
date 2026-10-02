@@ -602,6 +602,9 @@
    #:json-array
    #:lisp->json
    #:json->lisp
+   #:json-parse-error
+   #:json-parse-error-reason
+   #:json-parse-error-position
    #:json-string->symbol
    #:json->sexp
    #:web-api-handle

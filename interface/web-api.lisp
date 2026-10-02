@@ -2,11 +2,20 @@
 ;;;;
 ;;;; Thin façade over REPL/core. No Hunchentoot here — the web system maps
 ;;;; HTTP onto WEB-API-HANDLE. Reasoning stays in the symbolic core.
+;;;;
+;;;; The file has three parts: how session objects are written for JSON, how
+;;;; a request body is read, and the routes. A route calls the same GP-
+;;;; function the REPL offers, so the gates of that function are the gates
+;;;; of the route.
 
 (in-package #:automa-gp)
 
 (defparameter *web-api-version* "0.16.0"
   "API surface version (operator archive routes included).")
+
+;;; ---------------------------------------------------------------------------
+;;; Session objects as JSON
+;;; ---------------------------------------------------------------------------
 
 (defun %serialize-bindings (bindings)
   (json-array
@@ -116,6 +125,24 @@ simulate/run. MATCHES and SUPPORTED use the same rules as GET /api/plan."
         :meta (operator-meta op)
         :ask (json-array (getf (operator-meta op) :ask))))
 
+(defun %serialize-rule (rule)
+  (list :name (rule-name rule)
+        :if (json-array (rule-if rule))
+        :then (json-array (rule-then rule))
+        :ask (json-array (getf (rule-meta rule) :ask))))
+
+(defun %facts-json ()
+  "The facts of the session context, as a JSON array."
+  (json-array (gp-facts)))
+
+(defun %goals-json ()
+  "The goals of the session context, as a JSON array."
+  (json-array (gp-goals)))
+
+(defun %listening-p ()
+  "T while the session is listening for an induction, else NIL."
+  (and (observation-active-p) t))
+
 (defun %api-status ()
   (let* ((ctx (ensure-current-context))
          (goals (normalize-planning-goals (goals-of ctx)))
@@ -140,22 +167,12 @@ simulate/run. MATCHES and SUPPORTED use the same rules as GET /api/plan."
             :open-goals (length open)
             :facts (length (gp-facts))
             :repair-depth *procedure-repair-archive-depth*
-            :listening (and (observation-active-p) t)
-            :directory-watch (or (and (fboundp 'gp-directory-watch)
-                                      (gp-directory-watch))
-                                 :null)
-            :process-watch (or (and (fboundp 'gp-process-watch)
-                                    (gp-process-watch))
-                               :null)
-            :terminal-watch (or (and (fboundp 'gp-terminal-watch)
-                                     (gp-terminal-watch))
-                                :null)
-            :terminal-text-watch (or (and (fboundp 'gp-terminal-text-watch)
-                                          (gp-terminal-text-watch))
-                                     :null)
-            :terminal-screen-watch (or (and (fboundp 'gp-terminal-screen-watch)
-                                            (gp-terminal-screen-watch))
-                                       :null)
+            :listening (%listening-p)
+            :directory-watch (or (gp-directory-watch) :null)
+            :process-watch (or (gp-process-watch) :null)
+            :terminal-watch (or (gp-terminal-watch) :null)
+            :terminal-text-watch (or (gp-terminal-text-watch) :null)
+            :terminal-screen-watch (or (gp-terminal-screen-watch) :null)
             :listening-missing
             (json-array (if (observation-active-p)
                             (getf *observation* :missing)
@@ -182,6 +199,7 @@ simulate/run. MATCHES and SUPPORTED use the same rules as GET /api/plan."
              :matched (json-array (getf summary :matched))
              :facts-added (json-array (getf summary :facts-added))
              :goals-added (json-array (getf summary :goals-added))
+             :dropped (json-array (getf summary :dropped))
              :plan (%serialize-plan (getf summary :plan))))))
 
 (defun %api-explain ()
@@ -195,6 +213,9 @@ simulate/run. MATCHES and SUPPORTED use the same rules as GET /api/plan."
             :has-trace (and (deliberative-trace-p trace) t)))))
 
 (defun %serialize-autonomy (summary)
+  "SUMMARY of an autonomous step or loop, as *LAST-AUTONOMY* keeps it.
+A loop summary is that of its last step with :ITERATIONS added, so one
+shape serves both."
   (cond
     ((null summary) :null)
     ((not (listp summary)) :null)
@@ -223,54 +244,33 @@ simulate/run. MATCHES and SUPPORTED use the same rules as GET /api/plan."
                         :prefer-archive (policy-prefer-archive p))
           :last (%serialize-autonomy *last-autonomy*))))
 
-(defun %positive-step-count (value &optional default)
-  "Coerce VALUE to an integer ≥ 1, or DEFAULT when VALUE is not a number."
-  (cond
-    ((integerp value) (max 1 value))
-    ((and (realp value) (not (complexp value)))
-     (max 1 (round value)))
-    (t default)))
+;;; ---------------------------------------------------------------------------
+;;; The procedure archive
+;;; ---------------------------------------------------------------------------
 
-(defun %autonomy-policy-from-body (body &key (default-authority :simulate))
-  "Build a policy for one step or loop from BODY, inheriting max-steps
-from the session policy when the body omits it."
-  (let* ((base (ensure-autonomy-policy))
-         (auth-raw (%body-get body :authority :missing))
-         (auth (cond
-                 ((eq auth-raw :missing) default-authority)
-                 ((stringp auth-raw)
-                  (intern (string-upcase auth-raw) :keyword))
-                 (t auth-raw)))
-         (steps-raw (%body-get body :max-steps :missing))
-         (steps (if (eq steps-raw :missing)
-                    (policy-max-steps base)
-                    (%positive-step-count steps-raw (policy-max-steps base))))
-         (adapters (%body-get body :adapters nil))
-         (auto-confirm (%body-get body :auto-confirm nil)))
-    (make-autonomy-policy
-     :authority auth
-     :max-steps steps
-     :adapters (and adapters (not (eq adapters :null)))
-     :auto-confirm (and auto-confirm (not (eq auto-confirm :null))))))
+(defun %procedure-name-text (procedure)
+  "The name of PROCEDURE as text, without a package."
+  (let ((name (procedure-name procedure)))
+    (if (symbolp name)
+        (symbol-name name)
+        (princ-to-string name))))
 
 (defun %find-archived-procedure (name)
-  "Resolve NAME (symbol or JSON string) to a stored procedure, or NIL.
-Exact match first, then a case-insensitive symbol name so the console can
-send back the string LISP->JSON produced."
-  (when name
-    (let* ((procs (gp-procedures))
-           (sym (cond
-                  ((symbolp name) name)
-                  ((stringp name) (json->sexp name))
-                  (t nil)))
-           (wanted (and (symbolp sym) (symbol-name sym))))
-      (or (and (symbolp sym) (find-procedure sym))
-          (and wanted
-               (find wanted procs
-                     :key (lambda (p)
-                            (let ((n (procedure-name p)))
-                              (if (symbolp n) (symbol-name n) "")))
-                     :test #'string-equal))))))
+  "Resolve NAME (a symbol, or a string as JSON sends it) to a stored
+procedure, or NIL.
+The name is looked up as the REPL would look it up: a JSON word as the
+symbol JSON->SEXP makes of it, a JSON string that stays a string as that
+string. When that finds nothing the names are compared as text without
+regard to case or package, so the console can send back the string
+LISP->JSON produced for a procedure named at the REPL."
+  (let ((designator (if (stringp name) (json->sexp name) name)))
+    (when (and designator
+               (not (eq designator :null))
+               (typep designator '(or symbol string)))
+      (or (find-procedure designator)
+          (find (string designator) (gp-procedures)
+                :key #'%procedure-name-text
+                :test #'string-equal)))))
 
 (defvar *applies-result-cache* nil
   "Cache for %PROCEDURE-APPLIES-P across identical fact/operator snapshots.
@@ -289,18 +289,10 @@ Fingerprint changes when a procedure is remembered or scored.")
         (length (procedure-steps procedure))))
 
 (defun %procedure-applies-uncached (procedure facts operators)
-  "Probe PROCEDURE on FACTS without touching the session deliberative trace."
-  (let ((saved-last *last-trace*)
-        (saved-history *trace-history*)
-        (saved-current *current-trace*))
-    (unwind-protect
-        (let ((*current-trace* nil)
-              (*trace-enabled* nil))
-          (and (nth-value 0 (replay-procedure procedure facts operators))
-               t))
-      (setf *last-trace* saved-last
-            *trace-history* saved-history
-            *current-trace* saved-current))))
+  "Probe PROCEDURE on FACTS without touching the session deliberative trace.
+With tracing off the replay opens no trace and publishes none."
+  (let ((*trace-enabled* nil))
+    (and (replay-procedure procedure facts operators) t)))
 
 (defun %procedure-applies-p (procedure)
   "True when PROCEDURE would rebuild a plan on the current facts.
@@ -315,10 +307,7 @@ nothing changed. Does not disturb the session deliberative trace."
          (by-name (when (and (equal facts (getf cache :facts))
                              (equal op-names (getf cache :op-names)))
                     (getf cache :by-name)))
-         (pname (procedure-name procedure))
-         (key (if (symbolp pname)
-                  (symbol-name pname)
-                  (princ-to-string pname)))
+         (key (%procedure-name-text procedure))
          (fp (%procedure-fingerprint procedure)))
     (unless by-name
       (setf by-name (make-hash-table :test #'equal)
@@ -356,6 +345,10 @@ nothing changed. Does not disturb the session deliberative trace."
                                                      :include-applies include-applies))
                              (gp-archive)))))
 
+;;; ---------------------------------------------------------------------------
+;;; Reading a request
+;;; ---------------------------------------------------------------------------
+
 (defun %split-path-query (path)
   "Return (VALUES PATH-WITHOUT-QUERY QUERY-STRING-OR-NIL)."
   (let ((qpos (position #\? path)))
@@ -373,19 +366,57 @@ nothing changed. Does not disturb the session deliberative trace."
               (search (format nil "&~A=~A&" f val) q))
             '("1" "true" "yes" "t")))))
 
-(defun %api-flag (value)
-  "Interpret a JSON/body flag: non-null true-ish values."
-  (cond
-    ((or (eq value :missing) (eq value :null) (null value)) nil)
-    ((eq value t) t)
-    ((and (numberp value) (not (zerop value))) t)
-    ((stringp value)
-     (member (string-downcase value) '("1" "true" "yes" "t") :test #'string=))
-    (t nil)))
+(defun %api-flag (value &optional (what "A flag"))
+  "Read VALUE, from a request body, as a boolean. Returns T or NIL.
+True is JSON true, 1, or one of the strings 1 true yes t. False is JSON
+false, null, a missing key (:MISSING), 0, or one of the strings 0 false no
+nil and the empty string. Strings are compared without regard to case.
+Anything else is an error that names WHAT: a flag that opens a gate is
+never guessed from a value that does not say yes or no."
+  (flet ((one-of (&rest words)
+           (member value words :test #'string-equal)))
+    (cond
+      ((member value '(nil :null :missing)) nil)
+      ((eq value t) t)
+      ((eql value 1) t)
+      ((eql value 0) nil)
+      ((and (stringp value) (one-of "1" "true" "yes" "t")) t)
+      ((and (stringp value) (one-of "0" "false" "no" "nil" "")) nil)
+      (t (error "~A must be true or false, not ~S." what value)))))
 
 (defun %body-get (body key &optional default)
   (let ((v (getf body key :missing)))
     (if (eq v :missing) default v)))
+
+(defun %body-flag (body key &optional default)
+  "The boolean BODY states for KEY, see %API-FLAG; DEFAULT when BODY has no
+such key. This is the one reading of a flag for every route."
+  (let ((value (getf body key :missing)))
+    (if (eq value :missing)
+        default
+        (%api-flag value (string-downcase (symbol-name key))))))
+
+(defun %body-required (body key message)
+  "The value BODY gives for KEY. A missing key or JSON null is an error
+that says MESSAGE."
+  (let ((value (getf body key :missing)))
+    (when (member value '(:missing :null))
+      (error "~A" message))
+    value))
+
+(defun %body-interval (body route)
+  "The watch interval BODY states, in seconds; 1 when it states none."
+  (let ((interval (%body-get body :interval 1)))
+    (unless (realp interval)
+      (error "~A requires :interval number" route))
+    interval))
+
+(defun %body-path (body route)
+  "The path string BODY states for ROUTE."
+  (let ((path (%body-get body :path)))
+    (unless (stringp path)
+      (error "~A requires :path string" route))
+    path))
 
 (defun %json-sequence (value)
   "A JSON array is a vector; a Lisp caller may pass a list. One item stays a list."
@@ -394,6 +425,15 @@ nothing changed. Does not disturb the session deliberative trace."
     ((vectorp value) (coerce value 'list))
     ((listp value) value)
     (t (list value))))
+
+(defun %body-sexps (body key)
+  "The facts or goals BODY lists under KEY, each through JSON->SEXP."
+  (mapcar #'json->sexp (%json-sequence (%body-get body key))))
+
+;;; Vocabulary. JSON has no packages: JSON->SEXP reads every word into
+;;; AUTOMA-GP. The facts a user typed at the REPL, or a domain installed,
+;;; may live in another package, so a fact from JSON is rewritten onto the
+;;; symbols the context already uses.
 
 (defun %context-symbols ()
   "Symbols already used in the current facts and goals."
@@ -405,13 +445,27 @@ nothing changed. Does not disturb the session deliberative trace."
             (push term bag)))))
     bag))
 
-(defun %adopt-term (term)
-  "Reuse a context symbol with the same name. Numbers and strings stay."
+(defun %adopt-term (term symbols)
+  "The member of SYMBOLS with the name of TERM, else TERM. Numbers,
+strings and keywords stay."
   (if (and (symbolp term) (not (keywordp term)))
-      (or (find (symbol-name term) (%context-symbols)
-                :key #'symbol-name :test #'string=)
+      (or (find (symbol-name term) symbols :key #'symbol-name :test #'string=)
           term)
       term))
+
+(defun %vocabulary-package (term)
+  "The package a new word joins because TERM is in it, or NIL.
+TERM counts when the context supplied it from a package of its own: a
+symbol that is not the one AUTOMA-GP reads under that name. A word such as
+OPEN or FIRST is the COMMON-LISP symbol in every package that uses CL, so
+it says nothing about where the other words of a fact belong, and nothing
+is ever added to COMMON-LISP."
+  (and (symbolp term)
+       (not (keywordp term))
+       (symbol-package term)
+       (not (eq term (find-symbol (symbol-name term) :automa-gp)))
+       (not (eq (symbol-package term) (find-package :common-lisp)))
+       (symbol-package term)))
 
 (defun %adopt-fact (fact)
   "Rewrite FACT onto the vocabulary already in the context.
@@ -419,582 +473,555 @@ JSON has no packages. A new word joins the package of the facts the
 user is looking at, so a later edit matches them."
   (unless (consp fact)
     (return-from %adopt-fact fact))
-  (let* ((adopted (mapcar #'%adopt-term fact))
-         (home (some (lambda (term)
-                       (and (symbolp term)
-                            (not (keywordp term))
-                            (not (eq (symbol-package term)
-                                     (find-package :automa-gp)))
-                            (symbol-package term)))
-                     adopted)))
+  (let* ((symbols (%context-symbols))
+         (adopted (mapcar (lambda (term) (%adopt-term term symbols)) fact))
+         (home (some #'%vocabulary-package adopted)))
     (if (null home)
         adopted
         (mapcar (lambda (term)
                   (if (and (symbolp term)
-                           (not (keywordp term))
                            (eq (symbol-package term) (find-package :automa-gp)))
                       (intern (symbol-name term) home)
                       term))
                 adopted))))
 
-(defun %fact-same-names-p (a b)
-  "True when two facts use the same names, whatever their packages."
-  (fact-same-names-p a b))
-
 (defun %live-fact (fact)
   "The stored fact whose names match FACT, or NIL."
   (find-fact-by-names fact (gp-facts)))
+
+(defun %domain-designator (value)
+  "The keyword of *KNOWN-DOMAINS* that VALUE names without regard to case,
+else VALUE, so that GP-LOAD-DOMAIN says which domains exist. Nothing is
+interned for a name no domain has."
+  (unless (and value
+               (not (eq value :null))
+               (typep value '(or symbol string)))
+    (error "load-domain requires :domain"))
+  (or (car (assoc value *known-domains* :test #'string-equal))
+      value))
+
+;;; Autonomy policy
+
+(defun %step-count (value)
+  "VALUE, the max-steps of a request, as an integer of at least 1."
+  (unless (realp value)
+    (error "max-steps must be a number, not ~S." value))
+  (max 1 (round value)))
+
+(defun %policy-arguments (body)
+  "The keyword arguments of GP-POLICY that BODY states.
+A key BODY does not have is left out, so GP-POLICY keeps the session value
+for it. The authority goes through as sent: MAKE-AUTONOMY-POLICY accepts a
+string and interns nothing. A flag is read by %BODY-FLAG, so JSON null,
+\"false\" and 0 never open a gate."
+  (let ((arguments nil))
+    (flet ((state (key value)
+             (setf arguments (list* key value arguments))))
+      (let ((authority (getf body :authority :missing))
+            (max-steps (getf body :max-steps :missing)))
+        (unless (eq authority :missing)
+          (state :authority authority))
+        (unless (eq max-steps :missing)
+          (state :max-steps (%step-count max-steps))))
+      (dolist (key '(:adapters :auto-confirm :react-events :learn
+                     :prefer-archive))
+        (unless (eq (getf body key :missing) :missing)
+          (state key (%body-flag body key)))))
+    arguments))
+
+(defun %policy-for-request (body)
+  "The policy one autonomy request runs under: the session policy with the
+keys BODY states in place of its own, as (GP-POLICY ...) merges them at the
+REPL. The session policy itself is not changed."
+  (apply #'gp-policy :set nil (%policy-arguments body)))
+
+;;; Plan gates
+
+(defun %require-runnable-plan (verb gerund)
+  "Signal unless the session plan may go to GP-SIMULATE or GP-RUN.
+These are the gates GET /api/status reports, checked before the mode
+changes: a plan, its success, and its external actions as
+%PLAN-EXTERNAL-GATES reads them. VERB and GERUND name the route in the
+message. The external refusals are the core's PLAN-REFUSED."
+  (let ((plan *current-plan*)
+        (context (ensure-current-context)))
+    (unless (plan-p plan)
+      (error "No plan to ~A; POST /api/plan first" verb))
+    (unless (plan-success plan)
+      (error "The plan did not succeed; plan again before ~A." gerund))
+    (multiple-value-bind (matches supported)
+        (%plan-external-gates plan context)
+      (unless matches
+        (error 'plan-refused :reason :external-mismatch :context context))
+      (unless supported
+        (error 'plan-refused :reason :external-unsupported :context context)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Routes
+;;; ---------------------------------------------------------------------------
+
+(defvar *api-routes* (make-hash-table :test #'equal)
+  "Path string → alist of (METHOD . FUNCTION), filled by DEFINE-API-ROUTE.
+FUNCTION takes the request body plist and the query string.")
+
+(defun %register-api-route (method path function)
+  "Make FUNCTION the answer to METHOD on PATH. Returns PATH."
+  (setf (gethash path *api-routes*)
+        (acons method function
+               (remove method (gethash path *api-routes*) :key #'car)))
+  path)
+
+(defmacro define-api-route (method path (&optional body query) &body forms)
+  "Define what the API answers to METHOD (:GET or :POST) on PATH.
+FORMS run with the variable named by BODY bound to the request body plist
+and the one named by QUERY to the query string or NIL. They return the
+response plist, which is answered 200, or two values: the plist and
+another status code. An error they signal is answered by WEB-API-HANDLE."
+  (let ((body (or body (gensym "BODY")))
+        (query (or query (gensym "QUERY"))))
+    `(%register-api-route ,method ,path
+                          (lambda (,body ,query)
+                            (declare (ignorable ,body ,query))
+                            ,@forms))))
+
+(defun %noticed-response (noticed &rest more)
+  "The answer of a notice or watch route: what was NOTICED, then MORE, then
+the facts and goals as they are now."
+  (append (list :ok t :noticed (json-array noticed))
+          more
+          (list :facts (%facts-json) :goals (%goals-json))))
+
+;;; Reading the session
+
+(define-api-route :get "/api/status" ()
+  (%api-status))
+
+(define-api-route :get "/api/context" ()
+  (%api-context))
+
+(define-api-route :get "/api/facts" ()
+  (list :facts (%facts-json)))
+
+(define-api-route :get "/api/goals" ()
+  (list :goals (%goals-json)))
+
+(define-api-route :get "/api/operators" ()
+  (list :operators (json-array (mapcar #'%serialize-operator (gp-operators)))))
+
+(define-api-route :get "/api/rules" ()
+  (list :rules (json-array (mapcar #'%serialize-rule (gp-rules)))))
+
+(define-api-route :get "/api/events" ()
+  (list :events (json-array (mapcar #'%serialize-event (gp-events)))))
+
+(define-api-route :get "/api/reactions" ()
+  (list :reactions (json-array (mapcar #'%serialize-reaction (gp-reactions)))))
+
+(define-api-route :get "/api/plan" ()
+  (list :plan (%serialize-plan (gp-last-plan))))
+
+(define-api-route :get "/api/execution" ()
+  (list :execution (%serialize-execution (gp-last-execution))))
+
+(define-api-route :get "/api/explain" ()
+  (%api-explain))
+
+(define-api-route :get "/api/reaction" ()
+  (list :reaction (%serialize-last-reaction *last-reaction*)))
+
+(define-api-route :get "/api/autonomy" ()
+  (%api-autonomy-status))
+
+(define-api-route :get "/api/archive" (body query)
+  (%archive-body :include-applies (or (%query-has-flag query "applies")
+                                      (%body-flag body :applies))))
+
+;;; Context, facts and goals
+
+(define-api-route :post "/api/reset" ()
+  (gp-reset)
+  (list :ok t :context (%api-context)))
+
+(define-api-route :post "/api/add-fact" (body)
+  (let ((fact (%adopt-fact (json->sexp (%body-get body :fact)))))
+    (unless (consp fact)
+      (error "add-fact requires :fact array"))
+    (gp-add-fact fact)
+    (list :ok t :fact fact :facts (%facts-json))))
+
+(define-api-route :post "/api/remove-fact" (body)
+  (let* ((raw (json->sexp (%body-get body :fact)))
+         (fact (%live-fact raw)))
+    (unless (consp raw)
+      (error "remove-fact requires :fact array"))
+    (unless fact
+      (error "No fact with those names is in the context."))
+    (gp-remove-fact fact)
+    (list :ok t :fact fact :facts (%facts-json))))
+
+(define-api-route :post "/api/add-goal" (body)
+  (let ((goal (%adopt-fact (json->sexp (%body-get body :goal)))))
+    (unless goal
+      (error "add-goal requires :goal"))
+    (gp-add-goal goal)
+    (list :ok t :goal goal :goals (%goals-json))))
+
+(define-api-route :post "/api/load-domain" (body)
+  (gp-load-domain (%domain-designator (%body-get body :domain))
+                  :seed-demo (%body-flag body :seed-demo t))
+  (list :ok t :domains (json-array (gp-domains)) :context (%api-context)))
+
+;;; Noticing the computer
+
+(define-api-route :post "/api/watch-directory" (body)
+  (let ((path (%body-path body "watch-directory"))
+        (interval (%body-interval body "watch-directory")))
+    (%noticed-response (gp-watch-directory path :interval interval)
+                       :path (gp-directory-watch))))
+
+(define-api-route :post "/api/watch-directory/stop" ()
+  (%noticed-response (gp-stop-directory-watch)))
+
+(define-api-route :post "/api/watch-processes" (body)
+  (%noticed-response
+   (gp-watch-processes :interval (%body-interval body "watch-processes"))
+   :watching (gp-process-watch)))
+
+(define-api-route :post "/api/watch-processes/stop" ()
+  (%noticed-response (gp-stop-process-watch)))
+
+(define-api-route :post "/api/watch-terminals" (body)
+  (%noticed-response
+   (gp-watch-terminals :interval (%body-interval body "watch-terminals"))
+   :watching (gp-terminal-watch)))
+
+(define-api-route :post "/api/watch-terminals/stop" ()
+  (%noticed-response (gp-stop-terminal-watch)))
+
+(define-api-route :post "/api/watch-terminal-text" (body)
+  (%noticed-response
+   (gp-watch-terminal-text
+    :interval (%body-interval body "watch-terminal-text"))
+   :watching (gp-terminal-text-watch)))
+
+(define-api-route :post "/api/watch-terminal-text/stop" ()
+  (%noticed-response (gp-stop-terminal-text-watch)))
+
+(define-api-route :post "/api/watch-terminal-screen" (body)
+  (%noticed-response
+   (gp-watch-terminal-screen
+    :interval (%body-interval body "watch-terminal-screen"))
+   :watching (gp-terminal-screen-watch)))
+
+(define-api-route :post "/api/watch-terminal-screen/stop" ()
+  (%noticed-response (gp-stop-terminal-screen-watch)))
+
+(define-api-route :post "/api/notice-terminal-screen" ()
+  (%noticed-response (gp-notice-terminal-screen) :listening (%listening-p)))
+
+(define-api-route :post "/api/notice-terminal-text" ()
+  (%noticed-response (gp-notice-terminal-text) :listening (%listening-p)))
+
+(define-api-route :post "/api/notice-terminals" ()
+  (%noticed-response (gp-notice-terminals) :listening (%listening-p)))
+
+(define-api-route :post "/api/notice-processes" ()
+  (%noticed-response (gp-notice-processes) :listening (%listening-p)))
+
+(define-api-route :post "/api/notice-directory" (body)
+  (%noticed-response (gp-notice-directory (%body-path body "notice-directory"))
+                     :listening (%listening-p)))
+
+(define-api-route :post "/api/notice-path" (body)
+  (let ((fact (gp-notice-path (%body-path body "notice-path"))))
+    (list :ok t
+          :fact fact
+          :listening (%listening-p)
+          :facts (%facts-json))))
+
+;;; Asking in words
+
+(define-api-route :post "/api/ask" (body)
+  (let ((phrase (%body-get body :phrase)))
+    (unless (stringp phrase)
+      (error "ask requires :phrase string"))
+    (flet ((refused (condition &rest more)
+             (values (list* :ok nil :error (princ-to-string condition) more)
+                     400)))
+      (handler-case
+          (multiple-value-bind (goal plan) (gp-ask phrase)
+            (list :ok t
+                  :goal goal
+                  :plan (%serialize-plan plan)
+                  :listening (%listening-p)
+                  :goals (%goals-json)))
+        (ambiguous-goal (c)
+          (refused c :goals (json-array (ambiguous-goal-goals c))))
+        (unspecific-word (c)
+          (refused c :goals (json-array (unspecific-word-goals c))))
+        (unrelated-word (c)
+          (refused c :goals (json-array (unrelated-word-goals c))))
+        (not-that-name (c)
+          (refused c :word (not-that-name-word c) :name (not-that-name-name c)))
+        (undeclared-word (c)
+          (refused c
+                   :word (undeclared-word-word c)
+                   :choices
+                   (json-array
+                    (mapcar (lambda (choice)
+                              (list :kind (string-downcase
+                                           (%kind-label (first choice)))
+                                    :name (second choice)
+                                    :goal (third choice)))
+                            (undeclared-word-choices c)))))))))
+
+(define-api-route :post "/api/operator/name" (body)
+  (let* ((name (%body-required body :name "The operator needs a name."))
+         (word (%body-required body :word "The operator needs one word."))
+         (kind (%body-get body :kind))
+         (named (gp-name-operator name
+                                  (if (stringp word) word (string word))
+                                  :kind kind)))
+    (cond
+      ((operator-p named)
+       (list :ok t :operator (%serialize-operator named)))
+      ((event-reaction-p named)
+       (list :ok t
+             :reaction (event-reaction-name named)
+             :ask (json-array (getf (event-reaction-meta named) :ask))))
+      ((rule-p named)
+       (list :ok t
+             :rule (rule-name named)
+             :ask (json-array (getf (rule-meta named) :ask))))
+      (t (list :ok t)))))
+
+;;; Planning and running
+
+(define-api-route :post "/api/plan-open-goals" ()
+  (let ((plan (gp-plan-open-goals)))
+    (list :ok t
+          :plan (%serialize-plan plan)
+          :facts (%facts-json)
+          :goals (%goals-json))))
+
+(define-api-route :post "/api/plan" (body)
+  (let* ((goals (%body-sexps body :goals))
+         (plan (if goals
+                   (gp-plan :goals goals)
+                   (gp-plan))))
+    (list :ok t :plan (%serialize-plan plan))))
+
+(define-api-route :post "/api/simulate" ()
+  (%require-runnable-plan "simulate" "simulating")
+  (list :ok t :execution (%serialize-execution (gp-simulate))))
+
+;;; A body that does not say confirm is not a confirmation, as with GP-RUN:
+;;; an irreversible or high-risk step is then not executed.
+(define-api-route :post "/api/run" (body)
+  (%require-runnable-plan "run" "running")
+  (let ((execution (gp-run :confirm (%body-flag body :confirm)
+                           :adapters (%body-flag body :adapters))))
+    (list :ok t
+          :execution (%serialize-execution execution)
+          :facts (%facts-json))))
+
+;;; Events
+
+(define-api-route :post "/api/emit" (body)
+  (let ((event (gp-emit (json->sexp (%body-get body :event))
+                        :react (%body-flag body :react)
+                        :plan (%body-flag body :plan))))
+    (list :ok t
+          :event (%serialize-event event)
+          :reaction (%serialize-last-reaction *last-reaction*)
+          :plan (%serialize-plan *current-plan*)
+          :goals (%goals-json)
+          :facts (%facts-json))))
+
+(define-api-route :post "/api/react" (body)
+  (let ((summary (gp-react :plan (%body-flag body :plan))))
+    (list :ok t
+          :reaction (%serialize-last-reaction summary)
+          :plan (%serialize-plan *current-plan*)
+          :goals (%goals-json))))
+
+;;; Induction
+
+(defun %induction-arguments (body)
+  "What an induce route hands to GP-INDUCE-RULE or GP-LEARN-ACTION: the
+name, then :BEFORE and :AFTER for the lists BODY states."
+  (let ((name (%body-required body :name "induce requires :name")))
+    (list* (if (stringp name) (json->sexp name) name)
+           (loop for key in '(:before :after)
+                 unless (eq (getf body key :missing) :missing)
+                   append (list key (%body-sexps body key))))))
+
+(define-api-route :post "/api/listen" (body)
+  (gp-listen :missing (%body-sexps body :missing) :reason :manual)
+  (list :ok t :listening t :facts (%facts-json)))
+
+(define-api-route :post "/api/induce/rule" (body)
+  (let ((operator (apply #'gp-induce-rule (%induction-arguments body))))
+    (list :ok t
+          :listening (%listening-p)
+          :operator (%serialize-operator operator))))
+
+(define-api-route :post "/api/induce/note" ()
+  (gp-note-state)
+  (list :ok t :facts (%facts-json)))
+
+(define-api-route :post "/api/induce" (body)
+  (let ((operator (apply #'gp-learn-action (%induction-arguments body))))
+    (list :ok t :operator (%serialize-operator operator))))
+
+;;; Procedure archive
+
+(define-api-route :post "/api/archive/remember" (body)
+  (let* ((name (json->sexp (%body-get body :name)))
+         (procedure (if name
+                        (gp-remember-procedure :name name)
+                        (gp-remember-procedure))))
+    (%archive-body :procedure procedure)))
+
+(define-api-route :post "/api/archive/use" (body)
+  (let* ((name (%body-get body :name :missing))
+         (found (unless (eq name :missing)
+                  (or (%find-archived-procedure name)
+                      (error "No archived procedure named ~S." name))))
+         (goals (%body-sexps body :goals))
+         (unchecked (%body-flag body :unchecked))
+         (plan (cond
+                 (found (gp-use-procedure :name (procedure-name found)
+                                          :unchecked unchecked))
+                 (goals (gp-use-procedure :goals goals :unchecked unchecked))
+                 (t (gp-use-procedure :unchecked unchecked)))))
+    (list* :plan (%serialize-plan plan)
+           (%archive-body :procedure found))))
+
+(define-api-route :post "/api/archive/score" (body)
+  (let* ((name (%body-get body :name :missing))
+         (found (unless (eq name :missing)
+                  (%find-archived-procedure name))))
+    (unless found
+      (error "No archived procedure named ~S." name))
+    (gp-score-procedure (procedure-name found)
+                        :success (%body-flag body :success t))
+    (%archive-body :procedure (find-procedure (procedure-name found)))))
+
+;;; Autonomy
+
+(defun %autonomy-response (summary)
+  "The answer of an autonomous step or loop that ended with SUMMARY."
+  (list :ok t
+        :autonomy (%serialize-autonomy summary)
+        :facts (%facts-json)
+        :goals (%goals-json)
+        :plan (%serialize-plan *current-plan*)))
+
+(define-api-route :post "/api/autonomy/policy" (body)
+  (apply #'gp-policy (%policy-arguments body))
+  (%api-autonomy-status))
+
+(define-api-route :post "/api/autonomy/step" (body)
+  (%autonomy-response
+   (gp-autonomous-step :policy (%policy-for-request body))))
+
+(define-api-route :post "/api/autonomy/loop" (body)
+  (%autonomy-response
+   (gp-autonomous-loop :policy (%policy-for-request body))))
+
+;;; ---------------------------------------------------------------------------
+;;; Dispatch
+;;; ---------------------------------------------------------------------------
+
+(defvar *web-api-lock* (sb-thread:make-mutex :name "automa-gp-web-api")
+  "Held while a request is answered, so requests take turns.
+The HTTP layer runs each connection in a thread of its own, and a route
+reads and writes the one session: the context, the plan, the trace, the
+procedure archive and its file.")
+
+(defun %abort-instead-of-asking (condition restart-names)
+  "The *ASK-USER-FN* of a request: give the plan up.
+A failure strategy of :ASK would otherwise read the answer from the
+*QUERY-IO* of the server, where nobody is, and the request would never
+return."
+  (declare (ignore condition restart-names))
+  :abort-execution)
+
+(defun %failure (condition)
+  "The response plist that reports CONDITION."
+  (list :ok nil :error (princ-to-string condition)))
+
+(defun %answer (function body query)
+  "Call the route FUNCTION on BODY and QUERY.
+Returns (VALUES STATUS-CODE RESPONSE-PLIST). An error is the refusal of a
+gate or a body the route cannot use, and is answered 400 with its report.
+An exhausted stack or heap is answered 500: the request is given up and
+the image goes on."
+  (handler-case
+      (sb-thread:with-recursive-lock (*web-api-lock*)
+        (let ((*ask-user-fn* (or *ask-user-fn* #'%abort-instead-of-asking)))
+          (multiple-value-bind (response status) (funcall function body query)
+            (values (or status 200) response))))
+    (storage-condition (condition)
+      (values 500 (%failure condition)))
+    (error (condition)
+      (values 400 (%failure condition)))))
 
 (defun web-api-handle (method path &optional body)
   "Dispatch METHOD (:GET/:POST) and PATH (string) with optional BODY plist
 (from JSON). Returns (VALUES STATUS-CODE RESPONSE-PLIST).
 STATUS-CODE is an integer; RESPONSE-PLIST is encoded by the HTTP layer.
-PATH may include a query string (e.g. /api/archive?applies=1)."
-  (let* ((m (if (stringp method)
-                (intern (string-upcase method) :keyword)
-                method))
-         (body (or body nil)))
-    (multiple-value-bind (p query)
+PATH may include a query string (e.g. /api/archive?applies=1).
+200 is an answer. 400 is a refusal, with :OK NIL and the reason in :ERROR:
+a gate of the REPL function behind the route, or a body the route cannot
+use. 404 is a path the API does not have and 405 a path it has for
+another method, listed in :ALLOW. 500 is a request that exhausted the
+stack or the heap. Requests are answered one at a time."
+  (let ((method (if (stringp method)
+                    (or (find method '(:get :post) :test #'string-equal)
+                        method)
+                    method)))
+    (multiple-value-bind (path query)
         (%split-path-query (string path))
-      (handler-case
-          (cond
-          ((and (eq m :get) (string= p "/api/status"))
-           (values 200 (%api-status)))
-          ((and (eq m :get) (string= p "/api/context"))
-           (values 200 (%api-context)))
-          ((and (eq m :get) (string= p "/api/facts"))
-           (values 200 (list :facts (json-array (gp-facts)))))
-          ((and (eq m :get) (string= p "/api/goals"))
-           (values 200 (list :goals (json-array (gp-goals)))))
-          ((and (eq m :get) (string= p "/api/operators"))
-           (values 200 (list :operators
-                             (json-array
-                              (mapcar #'%serialize-operator (gp-operators))))))
-          ((and (eq m :get) (string= p "/api/rules"))
-           (values 200
-                   (list :rules
-                         (json-array
-                          (mapcar (lambda (r)
-                                    (list :name (rule-name r)
-                                          :if (json-array (rule-if r))
-                                          :then (json-array (rule-then r))
-                                          :ask (json-array (getf (rule-meta r) :ask))))
-                                  (gp-rules))))))
-          ((and (eq m :get) (string= p "/api/events"))
-           (values 200 (list :events
-                             (json-array
-                              (mapcar #'%serialize-event (gp-events))))))
-          ((and (eq m :get) (string= p "/api/reactions"))
-           (values 200
-                   (list :reactions
-                         (json-array
-                          (mapcar #'%serialize-reaction (gp-reactions))))))
-          ((and (eq m :get) (string= p "/api/plan"))
-           (values 200 (list :plan (%serialize-plan (gp-last-plan)))))
-          ((and (eq m :get) (string= p "/api/execution"))
-           (values 200
-                   (list :execution
-                         (%serialize-execution (gp-last-execution)))))
-          ((and (eq m :get) (string= p "/api/explain"))
-           (values 200 (%api-explain)))
-          ((and (eq m :get) (string= p "/api/reaction"))
-           (values 200 (list :reaction
-                             (%serialize-last-reaction *last-reaction*))))
-          ((and (eq m :get) (string= p "/api/autonomy"))
-           (values 200 (%api-autonomy-status)))
-          ((and (eq m :get) (string= p "/api/archive"))
-           (let ((include-applies
-                  (or (%query-has-flag query "applies")
-                      (%api-flag (%body-get body :applies :missing)))))
-             (values 200 (%archive-body :include-applies include-applies))))
-
-          ((and (eq m :post) (string= p "/api/reset"))
-           (gp-reset)
-           (values 200 (list :ok t :context (%api-context))))
-
-          ((and (eq m :post) (string= p "/api/add-fact"))
-           (let ((fact (%adopt-fact (json->sexp (%body-get body :fact)))))
-             (unless (consp fact)
-               (error "add-fact requires :fact array"))
-             (gp-add-fact fact)
-             (values 200 (list :ok t :fact fact
-                               :facts (json-array (gp-facts))))))
-
-          ((and (eq m :post) (string= p "/api/remove-fact"))
-           (let* ((raw (json->sexp (%body-get body :fact)))
-                  (fact (%live-fact raw)))
-             (unless (consp raw)
-               (error "remove-fact requires :fact array"))
-             (unless fact
-               (error "No fact with those names is in the context."))
-             (gp-remove-fact fact)
-             (values 200 (list :ok t :fact fact
-                               :facts (json-array (gp-facts))))))
-
-          ((and (eq m :post) (string= p "/api/watch-directory"))
-           (let ((path (%body-get body :path))
-                 (interval (%body-get body :interval 1)))
-             (unless (stringp path)
-               (error "watch-directory requires :path string"))
-             (unless (realp interval)
-               (error "watch-directory requires :interval number"))
-             (let ((noticed (gp-watch-directory path :interval interval)))
-               (values 200 (list :ok t
-                                 :path (gp-directory-watch)
-                                 :noticed (json-array noticed)
-                                 :facts (json-array (gp-facts))
-                                 :goals (json-array (gp-goals)))))))
-
-          ((and (eq m :post) (string= p "/api/watch-directory/stop"))
-           (let ((noticed (gp-stop-directory-watch)))
-             (values 200 (list :ok t
-                               :noticed (json-array noticed)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/watch-processes"))
-           (let ((interval (%body-get body :interval 1)))
-             (unless (realp interval)
-               (error "watch-processes requires :interval number"))
-             (let ((noticed (gp-watch-processes :interval interval)))
-               (values 200 (list :ok t
-                                 :watching (gp-process-watch)
-                                 :noticed (json-array noticed)
-                                 :facts (json-array (gp-facts))
-                                 :goals (json-array (gp-goals)))))))
-
-          ((and (eq m :post) (string= p "/api/watch-processes/stop"))
-           (let ((noticed (gp-stop-process-watch)))
-             (values 200 (list :ok t
-                               :noticed (json-array noticed)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/watch-terminals"))
-           (let ((interval (%body-get body :interval 1)))
-             (unless (realp interval)
-               (error "watch-terminals requires :interval number"))
-             (let ((noticed (gp-watch-terminals :interval interval)))
-               (values 200 (list :ok t
-                                 :watching (gp-terminal-watch)
-                                 :noticed (json-array noticed)
-                                 :facts (json-array (gp-facts))
-                                 :goals (json-array (gp-goals)))))))
-
-          ((and (eq m :post) (string= p "/api/watch-terminals/stop"))
-           (let ((noticed (gp-stop-terminal-watch)))
-             (values 200 (list :ok t
-                               :noticed (json-array noticed)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/watch-terminal-text"))
-           (let ((interval (%body-get body :interval 1)))
-             (unless (realp interval)
-               (error "watch-terminal-text requires :interval number"))
-             (let ((noticed (gp-watch-terminal-text :interval interval)))
-               (values 200 (list :ok t
-                                 :watching (gp-terminal-text-watch)
-                                 :noticed (json-array noticed)
-                                 :facts (json-array (gp-facts))
-                                 :goals (json-array (gp-goals)))))))
-
-          ((and (eq m :post) (string= p "/api/watch-terminal-text/stop"))
-           (let ((noticed (gp-stop-terminal-text-watch)))
-             (values 200 (list :ok t
-                               :noticed (json-array noticed)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/watch-terminal-screen"))
-           (let ((interval (%body-get body :interval 1)))
-             (unless (realp interval)
-               (error "watch-terminal-screen requires :interval number"))
-             (let ((noticed (gp-watch-terminal-screen :interval interval)))
-               (values 200 (list :ok t
-                                 :watching (gp-terminal-screen-watch)
-                                 :noticed (json-array noticed)
-                                 :facts (json-array (gp-facts))
-                                 :goals (json-array (gp-goals)))))))
-
-          ((and (eq m :post) (string= p "/api/watch-terminal-screen/stop"))
-           (let ((noticed (gp-stop-terminal-screen-watch)))
-             (values 200 (list :ok t
-                               :noticed (json-array noticed)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/notice-terminal-screen"))
-           (let ((noticed (gp-notice-terminal-screen)))
-             (values 200 (list :ok t
-                               :noticed (json-array noticed)
-                               :listening (and (observation-active-p) t)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/notice-terminal-text"))
-           (let ((noticed (gp-notice-terminal-text)))
-             (values 200 (list :ok t
-                               :noticed (json-array noticed)
-                               :listening (and (observation-active-p) t)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/notice-terminals"))
-           (let ((noticed (gp-notice-terminals)))
-             (values 200 (list :ok t
-                               :noticed (json-array noticed)
-                               :listening (and (observation-active-p) t)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/notice-processes"))
-           (let ((noticed (gp-notice-processes)))
-             (values 200 (list :ok t
-                               :noticed (json-array noticed)
-                               :listening (and (observation-active-p) t)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/notice-directory"))
-           (let ((path (%body-get body :path)))
-             (unless (stringp path)
-               (error "notice-directory requires :path string"))
-             (let ((noticed (gp-notice-directory path)))
-               (values 200 (list :ok t
-                                 :noticed (json-array noticed)
-                                 :listening (and (observation-active-p) t)
-                                 :facts (json-array (gp-facts))
-                                 :goals (json-array (gp-goals)))))))
-
-          ((and (eq m :post) (string= p "/api/notice-path"))
-           (let ((path (%body-get body :path)))
-             (unless (stringp path)
-               (error "notice-path requires :path string"))
-             (let ((fact (gp-notice-path path)))
-               (values 200 (list :ok t
-                                 :fact fact
-                                 :listening (and (observation-active-p) t)
-                                 :facts (json-array (gp-facts)))))))
-
-          ((and (eq m :post) (string= p "/api/ask"))
-           (let ((phrase (%body-get body :phrase)))
-             (unless (stringp phrase)
-               (error "ask requires :phrase string"))
-             (handler-case
-                 (multiple-value-bind (goal plan) (gp-ask phrase)
-                   (values 200 (list :ok t
-                                     :goal goal
-                                     :plan (%serialize-plan plan)
-                                     :listening (and (observation-active-p) t)
-                                     :goals (json-array (gp-goals)))))
-               (ambiguous-goal (c)
-                 (values 400 (list :ok nil
-                                   :error (princ-to-string c)
-                                   :goals (json-array (ambiguous-goal-goals c)))))
-               (unspecific-word (c)
-                 (values 400 (list :ok nil
-                                   :error (princ-to-string c)
-                                   :goals (json-array (unspecific-word-goals c)))))
-               (unrelated-word (c)
-                 (values 400 (list :ok nil
-                                   :error (princ-to-string c)
-                                   :goals (json-array (unrelated-word-goals c)))))
-               (not-that-name (c)
-                 (values 400 (list :ok nil
-                                   :error (princ-to-string c)
-                                   :word (not-that-name-word c)
-                                   :name (not-that-name-name c))))
-               (undeclared-word (c)
-                 (values 400
-                         (list :ok nil
-                               :error (princ-to-string c)
-                               :word (undeclared-word-word c)
-                               :choices
-                               (json-array
-                                (mapcar (lambda (choice)
-                                          (list :kind (string-downcase
-                                                       (%kind-label (first choice)))
-                                                :name (second choice)
-                                                :goal (third choice)))
-                                        (undeclared-word-choices c)))))))))
-
-          ((and (eq m :post) (string= p "/api/add-goal"))
-           (let ((goal (%adopt-fact (json->sexp (%body-get body :goal)))))
-             (unless goal
-               (error "add-goal requires :goal"))
-             (gp-add-goal goal)
-             (values 200 (list :ok t :goal goal
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/load-domain"))
-           (let* ((d (%body-get body :domain))
-                  (kw (cond
-                        ((keywordp d) d)
-                        ((symbolp d) (intern (symbol-name d) :keyword))
-                        ((stringp d) (intern (string-upcase d) :keyword))
-                        (t (error "load-domain requires :domain"))))
-                  (seed (%body-get body :seed-demo t)))
-             (gp-load-domain kw :seed-demo (and seed (not (eq seed :null))))
-             (values 200 (list :ok t :domains (json-array (gp-domains))
-                               :context (%api-context)))))
-
-          ((and (eq m :post) (string= p "/api/plan-open-goals"))
-           (let ((plan (gp-plan-open-goals)))
-             (values 200 (list :ok t
-                               :plan (%serialize-plan plan)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/plan"))
-           (let* ((raw (%body-get body :goals :missing))
-                  (goals (unless (eq raw :missing)
-                           (mapcar #'json->sexp (%json-sequence raw))))
-                  (plan (if goals
-                            (gp-plan :goals goals)
-                            (gp-plan))))
-             (values 200 (list :ok t :plan (%serialize-plan plan)))))
-
-          ((and (eq m :post) (string= p "/api/simulate"))
-           (unless (plan-p *current-plan*)
-             (error "No plan to simulate; POST /api/plan first"))
-           (unless (plan-success *current-plan*)
-             (error "The plan did not succeed; plan again before simulating."))
-           (multiple-value-bind (matches supported)
-               (%plan-external-gates *current-plan*)
-             (unless matches
-               (error "The external action no longer matches the plan."))
-             (unless supported
-               (error "The facts no longer support the external action.")))
-           (let ((ex (gp-simulate)))
-             (values 200 (list :ok t
-                               :execution (%serialize-execution ex)))))
-
-          ((and (eq m :post) (string= p "/api/run"))
-           (unless (plan-p *current-plan*)
-             (error "No plan to run; POST /api/plan first"))
-           (unless (plan-success *current-plan*)
-             (error "The plan did not succeed; plan again before running."))
-           (multiple-value-bind (matches supported)
-               (%plan-external-gates *current-plan*)
-             (unless matches
-               (error "The external action no longer matches the plan."))
-             (unless supported
-               (error "The facts no longer support the external action.")))
-           (let* ((confirm (%body-get body :confirm t))
-                  (adapters (%body-get body :adapters nil))
-                  (ex (gp-run :confirm (and confirm (not (eq confirm :null)))
-                              :adapters (and adapters
-                                             (not (eq adapters :null))))))
-             (values 200 (list :ok t
-                               :execution (%serialize-execution ex)
-                               :facts (json-array (gp-facts))))))
-
-          ((and (eq m :post) (string= p "/api/emit"))
-           (let* ((ev (json->sexp (%body-get body :event)))
-                  (react (%body-get body :react nil))
-                  (plan (%body-get body :plan nil))
-                  (event (gp-emit ev
-                                  :react (and react (not (eq react :null)))
-                                  :plan (and plan (not (eq plan :null))))))
-             (values 200
-                     (list :ok t
-                           :event (%serialize-event event)
-                           :reaction (%serialize-last-reaction *last-reaction*)
-                           :plan (%serialize-plan *current-plan*)
-                           :goals (json-array (gp-goals))
-                           :facts (json-array (gp-facts))))))
-
-          ((and (eq m :post) (string= p "/api/react"))
-           (let* ((plan (%body-get body :plan nil))
-                  (summary (gp-react
-                            :plan (and plan (not (eq plan :null))))))
-             (values 200
-                     (list :ok t
-                           :reaction (%serialize-last-reaction summary)
-                           :plan (%serialize-plan *current-plan*)
-                           :goals (json-array (gp-goals))))))
-
-          ((and (eq m :post) (string= p "/api/listen"))
-           (let ((missing (mapcar #'json->sexp
-                                  (%json-sequence (%body-get body :missing nil)))))
-             (gp-listen :missing missing :reason :manual)
-             (values 200 (list :ok t
-                               :listening t
-                               :facts (json-array (gp-facts))))))
-
-          ((and (eq m :post) (string= p "/api/induce/rule"))
-           (let* ((raw-name (%body-get body :name :missing))
-                  (name (cond
-                          ((eq raw-name :missing)
-                           (error "induce requires :name"))
-                          ((stringp raw-name) (json->sexp raw-name))
-                          (t raw-name)))
-                  (before-raw (%body-get body :before :missing))
-                  (after-raw (%body-get body :after :missing))
-                  (kwargs nil))
-             (unless (eq before-raw :missing)
-               (setf kwargs (list* :before
-                                   (mapcar #'json->sexp (%json-sequence before-raw))
-                                   kwargs)))
-             (unless (eq after-raw :missing)
-               (setf kwargs (list* :after
-                                   (mapcar #'json->sexp (%json-sequence after-raw))
-                                   kwargs)))
-             (let ((op (apply #'gp-induce-rule name kwargs)))
-               (values 200 (list :ok t
-                                 :listening (and (observation-active-p) t)
-                                 :operator (%serialize-operator op))))))
-
-          ((and (eq m :post) (string= p "/api/induce/note"))
-           (gp-note-state)
-           (values 200 (list :ok t
-                             :facts (json-array (gp-facts)))))
-
-          ((and (eq m :post) (string= p "/api/induce"))
-           (let* ((raw-name (%body-get body :name :missing))
-                  (name (cond
-                          ((eq raw-name :missing)
-                           (error "induce requires :name"))
-                          ((stringp raw-name) (json->sexp raw-name))
-                          (t raw-name)))
-                  (before-raw (%body-get body :before :missing))
-                  (after-raw (%body-get body :after :missing))
-                  (kwargs nil))
-             (unless (eq before-raw :missing)
-               (setf kwargs (list* :before
-                                   (mapcar #'json->sexp (%json-sequence before-raw))
-                                   kwargs)))
-             (unless (eq after-raw :missing)
-               (setf kwargs (list* :after
-                                   (mapcar #'json->sexp (%json-sequence after-raw))
-                                   kwargs)))
-             (let ((op (apply #'gp-learn-action name kwargs)))
-               (values 200 (list :ok t
-                                 :operator (%serialize-operator op))))))
-
-          ((and (eq m :post) (string= p "/api/operator/name"))
-           (let* ((raw-name (%body-get body :name :missing))
-                  (raw-word (%body-get body :word :missing))
-                  (raw-kind (%body-get body :kind :missing))
-                  (name (cond
-                          ((eq raw-name :missing)
-                           (error "The operator needs a name."))
-                          (t raw-name)))
-                  (word (cond
-                          ((eq raw-word :missing)
-                           (error "The operator needs one word."))
-                          ((stringp raw-word) raw-word)
-                          (t (string raw-word))))
-                  (kind (if (eq raw-kind :missing) nil raw-kind))
-                  (named (gp-name-operator name word :kind kind)))
-             (values 200
-                     (cond
-                       ((operator-p named)
-                        (list :ok t :operator (%serialize-operator named)))
-                       ((event-reaction-p named)
-                        (list :ok t
-                              :reaction (event-reaction-name named)
-                              :ask (json-array
-                                    (getf (event-reaction-meta named) :ask))))
-                       ((rule-p named)
-                        (list :ok t
-                              :rule (rule-name named)
-                              :ask (json-array
-                                    (getf (rule-meta named) :ask))))
-                       (t (list :ok t))))))
-
-          ((and (eq m :post) (string= p "/api/archive/remember"))
-           (let* ((raw (%body-get body :name :missing))
-                  (name (if (eq raw :missing) nil (json->sexp raw)))
-                  (proc (if name
-                            (gp-remember-procedure :name name)
-                            (gp-remember-procedure))))
-             (values 200 (%archive-body :procedure proc))))
-
-          ((and (eq m :post) (string= p "/api/archive/use"))
-           (let* ((raw-name (%body-get body :name :missing))
-                  (raw-goals (%body-get body :goals :missing))
-                  (found (unless (eq raw-name :missing)
-                           (or (%find-archived-procedure raw-name)
-                               (error "No archived procedure named ~S." raw-name))))
-                  (goals (unless (eq raw-goals :missing)
-                           (mapcar #'json->sexp (%json-sequence raw-goals))))
-                  (unchecked (and (%body-get body :unchecked nil)
-                                  (not (eq (%body-get body :unchecked nil) :null))))
-                  (plan (cond
-                          (found (gp-use-procedure :name (procedure-name found)
-                                                   :unchecked unchecked))
-                          (goals (gp-use-procedure :goals goals
-                                                   :unchecked unchecked))
-                          (t (gp-use-procedure :unchecked unchecked)))))
-             (values 200 (list* :plan (%serialize-plan plan)
-                                (%archive-body :procedure found)))))
-
-          ((and (eq m :post) (string= p "/api/archive/score"))
-           (let* ((raw (%body-get body :name :missing))
-                  (success (%body-get body :success t))
-                  (found (unless (eq raw :missing)
-                           (%find-archived-procedure raw))))
-             (unless found
-               (error "No archived procedure named ~S." raw))
-             (gp-score-procedure (procedure-name found)
-                                 :success (and success (not (eq success :null))))
-             (values 200 (%archive-body
-                          :procedure (find-procedure (procedure-name found))))))
-
-          ((and (eq m :post) (string= p "/api/autonomy/policy"))
-           (let* ((auth (%body-get body :authority :missing))
-                  (args nil))
-             (unless (eq auth :missing)
-               (setf args (list* :authority
-                                 (if (stringp auth)
-                                     (intern (string-upcase auth) :keyword)
-                                     auth)
-                                 args)))
-             (dolist (key '(:max-steps :adapters :auto-confirm
-                            :react-events :learn :prefer-archive))
-               (let ((v (%body-get body key :missing)))
-                 (unless (eq v :missing)
-                   (setf args (list* key v args)))))
-             (apply #'gp-policy args)
-             (values 200 (%api-autonomy-status))))
-
-          ((and (eq m :post) (string= p "/api/autonomy/step"))
-           (let* ((auth (%body-get body :authority :missing))
-                  (pol (if (eq auth :missing)
-                           (ensure-autonomy-policy)
-                           (%autonomy-policy-from-body body)))
-                  (summary (gp-autonomous-step :policy pol)))
-             (values 200 (list :ok t
-                               :autonomy (%serialize-autonomy summary)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))
-                               :plan (%serialize-plan *current-plan*)))))
-
-          ((and (eq m :post) (string= p "/api/autonomy/loop"))
-           (let* ((pol (%autonomy-policy-from-body body))
-                  (summary (gp-autonomous-loop :policy pol
-                                               :max-steps (policy-max-steps pol))))
-             (values 200 (list :ok t
-                               :autonomy (%serialize-autonomy summary)
-                               :facts (json-array (gp-facts))
-                               :goals (json-array (gp-goals))
-                               :plan (%serialize-plan *current-plan*)))))
-
-          (t (values 404 (list :ok nil
-                               :error "not-found"
-                               :method m
-                               :path p))))
-        (error (e)
-          (values 400 (list :ok nil
-                            :error (princ-to-string e))))))))
+      (let* ((routes (gethash path *api-routes*))
+             (route (cdr (assoc method routes))))
+        (cond
+          ((null routes)
+           (values 404 (list :ok nil
+                             :error "not-found"
+                             :method method
+                             :path path)))
+          ((null route)
+           (values 405 (list :ok nil
+                             :error "method-not-allowed"
+                             :method method
+                             :path path
+                             :allow (json-array (mapcar #'car routes)))))
+          ((not (listp body))
+           (values 400 (list :ok nil
+                             :error "The request body must be a JSON object.")))
+          (t (%answer route body query)))))))
 
 (defun web-api-handle-json (method path &optional json-body)
-  "Like WEB-API-HANDLE but BODY is a JSON string; returns JSON string body."
-  (let ((body (when (and json-body (plusp (length (string-trim '(#\Space #\Newline)
-                                                              json-body))))
-                (json->lisp json-body))))
-    (multiple-value-bind (code plist)
-        (web-api-handle method path body)
-      (values code "application/json; charset=utf-8" (lisp->json plist)))))
+  "Like WEB-API-HANDLE, with the body as JSON text and the answer as JSON
+text. Returns (VALUES STATUS-CODE CONTENT-TYPE JSON-STRING).
+A JSON-BODY that is NIL or only whitespace is no body. One that is not
+JSON is answered 400 in the same envelope as any other refusal."
+  (flet ((answer (code response)
+           (values code "application/json; charset=utf-8"
+                   (lisp->json response))))
+    (handler-case
+        (when (and json-body
+                   (< (%skip-ws json-body 0) (length json-body)))
+          (json->lisp json-body))
+      (json-parse-error (condition)
+        (answer 400 (list :ok nil
+                          :error (format nil "The request body is not JSON: ~A"
+                                         condition))))
+      (:no-error (body)
+        ;; The response is made of session objects, so it is written as
+        ;; text before another request may change them.
+        (sb-thread:with-recursive-lock (*web-api-lock*)
+          (multiple-value-call #'answer
+            (web-api-handle method path body)))))))
