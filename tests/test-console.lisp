@@ -174,6 +174,7 @@ that exhausts the stack; the page never writes server data as markup."
     (dolist (literal '(":address \"127.0.0.1\""
                        "(address \"127.0.0.1\")"
                        ":persistent-connections-p nil"
+                       ":request-class 'gp-request"
                        ":want-stream t"
                        "(sb-thread:with-mutex (*session-lock*)"
                        "(storage-condition (condition)"))

@@ -18,8 +18,15 @@
 
 (ql:quickload :automa-gp/web :silent t)
 
-(let ((port (parse-integer (or (uiop:getenvp "AUTOMA_GP_WEB_PORT") "47391"))))
-  (uiop:symbol-call :automa-gp/web :start-web :port port)
+(let ((port (or (uiop:getenvp "AUTOMA_GP_WEB_PORT") "47391")))
+  ;; A port that is not a number or is already taken ends the script with
+  ;; one line and status 1, whether or not a debugger is available.
+  (handler-case
+      (uiop:symbol-call :automa-gp/web :start-web :port (parse-integer port))
+    (error (condition)
+      (format *error-output* "~&The console did not start on port ~A: ~A~%"
+              port condition)
+      (uiop:quit 1)))
   (format t "~&Serving until Ctrl-C. URL: ~A~%"
           (uiop:symbol-call :automa-gp/web :web-url))
   (handler-case (loop (sleep 3600))

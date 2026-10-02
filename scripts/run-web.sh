@@ -17,6 +17,6 @@ if [[ ! -f "$QL_SETUP" ]]; then
   exit 1
 fi
 
-# --non-interactive: a failed start (port taken, bad AUTOMA_GP_WEB_PORT) ends
-# the process with a non-zero status instead of waiting in the debugger.
+# --non-interactive: a failure to load or start ends the process with a
+# non-zero status instead of waiting in the debugger for input.
 exec sbcl --noinform --non-interactive --load "$QL_SETUP" --load "$ROOT/scripts/run-web.lisp"

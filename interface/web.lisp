@@ -51,7 +51,8 @@ is read.")
       (and (member address '("0.0.0.0" "::") :test #'string=) t)))
 
 (defun %loopback-address-p (address)
-  "True when a socket bound to ADDRESS is reachable from this machine only."
+  "True when ADDRESS is 127.0.0.1, ::1 or localhost, the names under which
+START-WEB binds without a warning."
   (and (stringp address)
        (member address '("127.0.0.1" "::1" "localhost") :test #'string-equal)
        t))
@@ -654,10 +655,28 @@ updateEmitFactButtons();
 </body>
 </html>")
 
+(defclass gp-request (hunchentoot:request)
+  ()
+  (:documentation "A request to the console. One whose body may not be
+read, by %BODY-REFUSAL, is created with that body already claimed."))
+
+(defun %request-body-refusal (request)
+  "%BODY-REFUSAL for the headers of REQUEST."
+  (%body-refusal (hunchentoot:header-in :content-length request)
+                 (hunchentoot:header-in :transfer-encoding request)))
+
+(defmethod initialize-instance :after ((request gp-request) &key)
+  ;; Before it answers any request, served or not, Hunchentoot reads an
+  ;; unclaimed body to its declared end, allocating the declared length at
+  ;; once. Taking the body as a stream claims it without reading a byte.
+  (when (%request-body-refusal request)
+    (hunchentoot:raw-post-data :request request :want-stream t)))
+
 (defclass gp-acceptor (hunchentoot:acceptor)
   ()
   (:default-initargs
    :address "127.0.0.1"
+   :request-class 'gp-request
    ;; One request per connection: a refused body is left unread, and on a
    ;; kept connection its octets would be taken for the next request.
    :persistent-connections-p nil
@@ -674,22 +693,16 @@ updateEmitFactButtons();
 
 (defun %refusal (acceptor request)
   "Why ACCEPTOR does not serve REQUEST: NIL when it does, else
-\(VALUES STATUS MESSAGE). A body that may not be read is left on the wire."
-  (flet ((header (name) (hunchentoot:header-in name request)))
-    (multiple-value-bind (status message)
-        (%body-refusal (header :content-length) (header :transfer-encoding))
-      (cond (status
-             ;; Hunchentoot reads an unclaimed body to its declared end
-             ;; before it answers, allocating the declared length at once.
-             ;; Taking the body as a stream claims it without reading.
-             (hunchentoot:raw-post-data :request request :want-stream t)
-             (values status message))
-            (t
-             (%request-refusal (hunchentoot:request-method request)
-                               (header :host) (header :origin)
-                               (header :content-type)
-                               (hunchentoot:acceptor-address acceptor)
-                               (hunchentoot:acceptor-port acceptor)))))))
+\(VALUES STATUS MESSAGE)."
+  (multiple-value-bind (status message) (%request-body-refusal request)
+    (if status
+        (values status message)
+        (flet ((header (name) (hunchentoot:header-in name request)))
+          (%request-refusal (hunchentoot:request-method request)
+                            (header :host) (header :origin)
+                            (header :content-type)
+                            (hunchentoot:acceptor-address acceptor)
+                            (hunchentoot:acceptor-port acceptor))))))
 
 (defun %api-response (method path request)
   "Answer the /api/ request METHOD PATH from the session. Returns
@@ -738,12 +751,14 @@ instead of taking the image down."
 (defun start-web (&key (port *default-web-port*) (address "127.0.0.1"))
   "Start the operator console on ADDRESS:PORT (default 127.0.0.1:47391).
 Returns the acceptor. Idempotent if already running on the same port.
-The console has no authentication. It answers one request at a time, and
-only a request whose Host header names the console, whose Origin header,
-if any, is the console's own, whose body, if any, is declared as
-application/json and is at most *MAX-REQUEST-BODY-OCTETS* octets long.
+The console has no authentication. It answers one request at a time and
+refuses a request whose Host header does not name the console (ADDRESS or
+a loopback name, with PORT), whose Origin header is not the console's own,
+whose body is not declared as application/json, or whose body is longer
+than *MAX-REQUEST-BODY-OCTETS*.
 An ADDRESS other than a loopback address puts the session within reach of
-other machines; START-WEB then signals a WARNING and goes on."
+other machines: START-WEB signals a WARNING and goes on. Bound to every
+interface, the console cannot know its names and takes any Host."
   (when (web-running-p)
     (let ((p (hunchentoot:acceptor-port *web-acceptor*)))
       (when (and (= p port)
