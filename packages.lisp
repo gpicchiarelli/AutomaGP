@@ -531,6 +531,7 @@
    #:gp-adapters
    ;; domain packs (Phase 9)
    #:*known-domains*
+   #:install-domain-pack
    #:gp-load-domain
    #:gp-domains
    ;; events (Phase 10)

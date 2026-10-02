@@ -13,34 +13,39 @@
 
 (defun adapter-hostname ()
   "Return the system hostname string."
-  (string-trim '(#\Newline #\Return #\Space)
-               (nth-value 0 (run-program '("hostname") :output :string))))
+  (uiop:hostname))
 
 (defun adapter-uname ()
-  "Return `uname -s` (e.g. Darwin)."
-  (string-trim '(#\Newline #\Return #\Space)
-               (nth-value 0 (run-program '("uname" "-s") :output :string))))
+  "Return the name of the operating system as `uname -s` prints it
+(e.g. Darwin). Asks the Lisp image; no process is run."
+  (software-type))
 
 (defun adapter-open (target &key (wait nil))
   "macOS `open` TARGET (path or URL). Real side effect — use with care.
-WAIT when true passes -W. Returns result plist."
+WAIT when true passes -W. TARGET is handed to `open` as one argument after
+\"--\", so a target that starts with \"-\" is not read as an option.
+Returns result plist; on another system :OK is NIL and nothing is run."
   (unless (macos-p)
     (return-from adapter-open
       (list :ok nil :error :not-macos :target target)))
   (multiple-value-bind (out code)
-      (run-program (if wait
-                       (list "open" "-W" (princ-to-string target))
-                       (list "open" (princ-to-string target)))
+      (run-program `("open" ,@(when wait '("-W"))
+                            "--" ,(%argument-string target))
                    :output :string
                    :ignore-error-status t)
     (list :ok (eql code 0) :exit-code code :output out :target target)))
 
 (defun macos-dispatch (op args)
-  (ecase op
+  "Dispatch macOS OP with ARGS plist. Returns a result plist.
+Signals ACTION-FAILED for an OP this adapter does not have and for an
+:OPEN without a :TARGET."
+  (case op
     (:hostname (list :ok t :hostname (adapter-hostname)))
     (:uname (list :ok t :uname (adapter-uname)))
     (:macos-p (list :ok t :macos (macos-p)))
-    (:open (adapter-open (getf args :target) :wait (getf args :wait)))))
+    (:open (adapter-open (%required-argument args :target :macos op)
+                         :wait (getf args :wait)))
+    (t (%adapter-failure "unknown macos op ~S" op))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; External specs on operators
@@ -77,14 +82,21 @@ Does not invoke adapters."
                        (bindings-from-step step))
                       :null)))))
 
+(defun %external-context (context operators)
+  "The context the external actions of a plan are grounded against:
+CONTEXT when the caller names one; otherwise the session context, when
+there is one and the caller gave no OPERATORS. OPERATORS without a context
+stand alone, so a plan made elsewhere is not read against the operators
+and facts of whatever session happens to be open. No session is created."
+  (or context
+      (and (null operators) *current-context*)))
+
 (defun %plan-external-entries (plan &key context operators effects-only)
   "Grounded external actions of PLAN whose effects-only flag matches.
 EFFECTS-ONLY selects steps that execute will not hand to an adapter.
 Does not invoke adapters and does not change facts."
   (when (plan-p plan)
-    (let ((ctx (or context
-                   (and (fboundp 'ensure-current-context)
-                        (funcall 'ensure-current-context))))
+    (let ((ctx (%external-context context operators))
           (want (and effects-only t)))
       (loop for step in (plan-steps plan)
             for action = (%external-action-for-step step ctx operators)
@@ -95,6 +107,8 @@ Does not invoke adapters and does not change facts."
 (defun plan-external-actions (plan &key context operators)
   "Actions PLAN would hand to an adapter if a later execute asks for them.
 Does not invoke adapters and does not change facts.
+Operators are looked up in CONTEXT, then in OPERATORS. With neither, the
+session context is used; OPERATORS alone are used without it.
 Each item is (:operator :adapter :op :args). Args are grounded with the
 step bindings. A step with no operator, or an operator with no :external
 spec, is omitted. An effects-only step is omitted: its preconditions no
@@ -172,18 +186,25 @@ cannot be applied. Does not change the live context."
              (values nil nil)
              (values (transition-facts facts op b) t)))))))
 
-(defun plan-external-actions-supported-p (plan &key context operators)
+(defun plan-external-actions-supported-p (plan &key context operators
+                                                 (facts nil facts-p))
   "True when every action PLAN would hand to an adapter is reachable.
 Earlier steps are applied symbolically, so a precondition produced by a
 previous step still counts. Does not invoke adapters and does not change
 facts. A plan with no such action is supported. An effects-only step is
-not handed to an adapter."
+not handed to an adapter.
+The walk starts from FACTS when supplied: a caller that runs PLAN from
+facts of its own passes them, so the answer is about that run. Otherwise
+it starts from the facts visible in CONTEXT, which defaults as in
+PLAN-EXTERNAL-ACTIONS, and from the initial state PLAN recorded when
+there is no context at all."
   (unless (plan-p plan)
     (return-from plan-external-actions-supported-p nil))
-  (let* ((ctx (or context
-                  (and (fboundp 'ensure-current-context)
-                       (funcall 'ensure-current-context))))
-         (facts (copy-list (if ctx (context-all-facts ctx) nil))))
+  (let* ((ctx (%external-context context operators))
+         (facts (copy-list (cond
+                             (facts-p facts)
+                             (ctx (context-all-facts ctx))
+                             (t (plan-initial-state plan))))))
     (loop for tail on (plan-steps plan)
           for step = (car tail)
           do (multiple-value-bind (new applied)
@@ -209,26 +230,37 @@ compared: execute does not hand them to an adapter. Does not invoke adapters."
        (equal (getf (plan-meta plan) :external-actions)
               (plan-external-actions plan :context context :operators operators))))
 
-(defun invoke-external-spec (spec bindings)
+(defun invoke-external-spec (spec bindings &key operator)
   "Run an external SPEC (:ADAPTER :OP :ARGS …) with BINDINGS substituted.
-Signals ACTION-FAILED on unknown adapter or failed :OK NIL (unless :SOFT T)."
+Returns the result plist of the adapter. An adapter that signals an error
+yields (:OK NIL :ERROR text :ADAPTER :OP) in its place.
+Signals ACTION-FAILED on unknown adapter or failed :OK NIL (unless :SOFT T).
+The condition names OPERATOR, the operator the spec belongs to, when given."
   (let* ((adapter (getf spec :adapter))
          (op (getf spec :op))
          (args (substitute-external-tree (copy-tree (getf spec :args)) bindings))
          (soft (getf spec :soft))
          (result
-          (handler-case
-              (ecase adapter
-                ((:filesystem :fs) (filesystem-dispatch op args))
-                ((:processes :process) (processes-dispatch op args))
-                ((:macos :os) (macos-dispatch op args)))
-            (error (e)
-              (list :ok nil :error (format nil "~A" e) :adapter adapter :op op)))))
+          (flet ((failure (text)
+                   (list :ok nil :error text :adapter adapter :op op)))
+            (handler-case
+                (case adapter
+                  ((:filesystem :fs) (filesystem-dispatch op args))
+                  ((:processes :process) (processes-dispatch op args))
+                  ((:macos :os) (macos-dispatch op args))
+                  (t (%adapter-failure "unknown adapter ~S" adapter)))
+              (action-failed (c)
+                (failure (action-failed-reason c)))
+              (error (e)
+                (failure (princ-to-string e)))))))
     (unless (or soft (getf result :ok))
       (error 'action-failed
              :reason (or (getf result :error)
                          (format nil "adapter ~A op ~A failed: ~S"
-                                 adapter op result))))
+                                 adapter op result))
+             :operator operator
+             :bindings bindings
+             :mode :execute))
     result))
 
 (defun maybe-invoke-external! (operator bindings)
@@ -237,7 +269,7 @@ Returns the adapter result plist, or NIL when skipped."
   (when *invoke-adapters*
     (let ((spec (operator-external-spec operator)))
       (when spec
-        (invoke-external-spec spec bindings)))))
+        (invoke-external-spec spec bindings :operator operator)))))
 
 (defun with-adapters-enabled (fn)
   "Call FN with *INVOKE-ADAPTERS* bound to T."

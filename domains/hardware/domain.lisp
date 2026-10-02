@@ -7,12 +7,6 @@
 
 (defparameter *hardware-domain-name* :hardware)
 
-(defun %tag-domains (context name)
-  (let ((meta (copy-list (context-meta context))))
-    (setf (getf meta :domains)
-          (adjoin name (getf meta :domains) :test #'equal))
-    (setf (context-meta context) meta)))
-
 (defun %hardware-operators ()
   (list
    (make-operator
@@ -41,28 +35,23 @@
               :meta (list :domain *hardware-domain-name*))))
 
 (defun install-hardware-domain (context &key (seed-demo nil) &allow-other-keys)
-  "Install hardware-domain operators/rules into CONTEXT."
-  (unless (context-p context)
-    (error "install-hardware-domain requires a context"))
-  (dolist (op (%hardware-operators))
-    (register-operator! context op))
-  (dolist (r (%hardware-rules))
-    (register-rule! context r))
-  (when seed-demo
-    (dolist (f '((automa-gp::device automa-gp::interface-01)
-                 (automa-gp::power-state automa-gp::interface-01 automa-gp::off)))
-      (setf (context-facts context)
-            (add-fact! (context-facts context) f))))
-  (%tag-domains context *hardware-domain-name*)
-  context)
+  "Install hardware-domain operators/rules into CONTEXT. Returns CONTEXT.
+When SEED-DEMO, assert the device interface-01 with its power off, if
+missing. Unlike the other packs, this one does not seed by default."
+  (install-domain-pack
+   context *hardware-domain-name*
+   :operators (%hardware-operators)
+   :rules (%hardware-rules)
+   :facts (when seed-demo
+            '((automa-gp::device automa-gp::interface-01)
+              (automa-gp::power-state automa-gp::interface-01
+               automa-gp::off)))))
 
 (defun hardware-demo-plan (context &key (device 'automa-gp::interface-01))
   "Seed device off and plan for (device-configured DEVICE)."
   (install-hardware-domain context)
-  (setf (context-facts context)
-        (add-fact! (context-facts context) (list 'automa-gp::device device)))
-  (setf (context-facts context)
-        (add-fact! (context-facts context)
-                   (list 'automa-gp::power-state device 'automa-gp::off)))
+  (context-add-fact! context (list 'automa-gp::device device))
+  (context-add-fact! context
+                     (list 'automa-gp::power-state device 'automa-gp::off))
   (plan-from-context context
                      :goals (list (list 'automa-gp::device-configured device))))
