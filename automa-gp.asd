@@ -122,6 +122,7 @@
                              (:file "test-narration")
                              (:file "test-events")
                              (:file "test-notice")
+                             (:file "test-notice-watch")
                              (:file "test-ask")
                              (:file "test-memory")
                              (:file "test-persistence")

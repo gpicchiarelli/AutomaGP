@@ -785,10 +785,18 @@ otherwise OVERRIDE is a synthetic name for *NOTICE-OPEN-TERMINALS-OVERRIDE*."
       (when (gp-terminal-text-watch)
         (ignore-errors (gp-stop-terminal-text-watch))))))
 
+(defun %test-slow-read (timeout)
+  "A read that takes five seconds unless TIMEOUT or a stop cuts it short.
+osascript where it exists, so the Terminal.app read itself is the one cut."
+  (if (macos-p)
+      (automa-gp::%osascript "delay 5" :timeout timeout)
+      (automa-gp::%cancellable-program '("perl" "-e" "sleep 5")
+                                       :timeout timeout :output t)))
+
 (test notice-stop-drops-the-read-still-open
   (let ((started (get-internal-real-time)))
     (let ((automa-gp::*notice-halt* (lambda () t)))
-      (is (null (automa-gp::%osascript "delay 5" :timeout 2))))
+      (is (null (%test-slow-read 2))))
     (is (< (/ (- (get-internal-real-time) started)
               internal-time-units-per-second)
            0.5)))
@@ -801,7 +809,7 @@ otherwise OVERRIDE is a synthetic name for *NOTICE-OPEN-TERMINALS-OVERRIDE*."
                    :name "automa-gp-halt-setter")))
       (unwind-protect
            (let ((automa-gp::*notice-halt* (lambda () (car box))))
-             (is (null (automa-gp::%osascript "delay 5" :timeout 2)))
+             (is (null (%test-slow-read 2)))
              (is (< (/ (- (get-internal-real-time) started)
                        internal-time-units-per-second)
                     1.5)))
@@ -840,7 +848,7 @@ otherwise OVERRIDE is a synthetic name for *NOTICE-OPEN-TERMINALS-OVERRIDE*."
       (unwind-protect
            (let ((automa-gp::*notice-halt* (lambda () (car box))))
              (is (null (automa-gp::%cancellable-program
-                        '("/usr/bin/perl" "-e" "sleep 5"))))
+                        '("perl" "-e" "sleep 5"))))
              (is (< (/ (- (get-internal-real-time) started)
                        internal-time-units-per-second)
                     1.5)))
@@ -888,70 +896,85 @@ otherwise OVERRIDE is a synthetic name for *NOTICE-OPEN-TERMINALS-OVERRIDE*."
              (is (null (gp-goals)))))
       (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
 
+(defun %test-screen-reaction ()
+  "A TERMINAL-SCREEN reaction on a tab no host has."
+  (make-event-reaction :name 'on-screen
+                       :when '(automa-gp::terminal-screen
+                               "ttys99999"
+                               "automa-gp-screen-missing")
+                       :assert '((screen heard))
+                       :goals '((noted-screen up))))
+
+(test terminal-screen-is-refused-where-there-is-no-terminal-app
+  ;; MACOS-P reads *FEATURES*, so the refusal is checked on every host.
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-reaction (%test-screen-reaction))
+  (let ((*features* (remove :darwin *features*)))
+    (is (not (macos-p)))
+    (signals notice-refused (gp-notice-terminal-screen))
+    (signals notice-refused (gp-watch-terminal-screen :interval 0.2))
+    (is (not (gp-terminal-screen-watch)))
+    (multiple-value-bind (code body)
+        (web-api-handle :post "/api/notice-terminal-screen")
+      (is (= 400 code))
+      (is (search "only on macOS" (getf body :error)))))
+  (is (null (gp-facts)))
+  (is (null (gp-events))))
+
 (test notice-terminal-screen-skips-a-tab-that-does-not-answer
   (gp-clear-memory)
   (gp-reset)
-  (signals error (gp-notice-terminal-screen))
+  (signals notice-refused (gp-notice-terminal-screen))
   (is (null (gp-facts)))
-  (let ((started (get-internal-real-time)))
-    (is (null (automa-gp::%osascript "delay 5" :timeout 1)))
-    (is (< (/ (- (get-internal-real-time) started)
-              internal-time-units-per-second)
-           3)))
-  (gp-add-reaction
-   (make-event-reaction :name 'on-screen
-                        :when '(automa-gp::terminal-screen
-                                "ttys99999"
-                                "automa-gp-screen-missing")
-                        :assert '((screen heard))
-                        :goals '((noted-screen up))))
-  (gp-add-reaction
-   (make-event-reaction :name 'on-bad
-                        :when '(automa-gp::terminal-screen
-                                "ttys000; say hi"
-                                "x")))
-  (gp-add-fact '(bench clear))
-  (gp-listen :reason :manual)
-  (let ((before (copy-tree *observed-before*)))
-    (let ((noticed (gp-notice-terminal-screen)))
-      (is (null noticed))
-      (is (not (fact-p '(screen heard) (gp-facts))))
-      (is (not (fact-p '(noted-screen up) (gp-goals))))
-      (is (equal before *observed-before*))))
-  (multiple-value-bind (code ctype json)
-      (web-api-handle-json :post "/api/notice-terminal-screen" "{}")
-    (declare (ignore ctype))
-    (is (= 200 code))
-    (is (not (search "automa-gp-screen-missing" json)))
-    (is (not (search "say hi" json))))
-  (gp-reset)
-  (gp-add-reaction
-   (make-event-reaction :name 'only-var
-                        :when '(automa-gp::terminal-screen ?tty ?text)))
-  (signals error (gp-notice-terminal-screen))
-  (gp-reset)
-  (gp-add-reaction
-   (make-event-reaction :name 'only-bad
-                        :when '(automa-gp::terminal-screen "not-a-tty" "x")))
-  (signals error (gp-notice-terminal-screen))
-  (is (null (gp-facts))))
+  (when (macos-p)
+    (let ((started (get-internal-real-time)))
+      (is (null (automa-gp::%osascript "delay 5" :timeout 1)))
+      (is (< (/ (- (get-internal-real-time) started)
+                internal-time-units-per-second)
+             3)))
+    (gp-add-reaction (%test-screen-reaction))
+    (gp-add-reaction
+     (make-event-reaction :name 'on-bad
+                          :when '(automa-gp::terminal-screen
+                                  "ttys000; say hi"
+                                  "x")))
+    (gp-add-fact '(bench clear))
+    (gp-listen :reason :manual)
+    (let ((before (copy-tree *observed-before*)))
+      (let ((noticed (gp-notice-terminal-screen)))
+        (is (null noticed))
+        (is (not (fact-p '(screen heard) (gp-facts))))
+        (is (not (fact-p '(noted-screen up) (gp-goals))))
+        (is (equal before *observed-before*))))
+    (multiple-value-bind (code ctype json)
+        (web-api-handle-json :post "/api/notice-terminal-screen" "{}")
+      (declare (ignore ctype))
+      (is (= 200 code))
+      (is (not (search "automa-gp-screen-missing" json)))
+      (is (not (search "say hi" json))))
+    (gp-reset)
+    (gp-add-reaction
+     (make-event-reaction :name 'only-var
+                          :when '(automa-gp::terminal-screen ?tty ?text)))
+    (signals notice-refused (gp-notice-terminal-screen))
+    (gp-reset)
+    (gp-add-reaction
+     (make-event-reaction :name 'only-bad
+                          :when '(automa-gp::terminal-screen "not-a-tty" "x")))
+    (signals notice-refused (gp-notice-terminal-screen))
+    (is (null (gp-facts)))))
 
 (test watch-terminal-screen-stays-until-stopped
   (gp-clear-memory)
   (gp-reset)
-  (gp-add-reaction
-   (make-event-reaction :name 'on-screen
-                        :when '(automa-gp::terminal-screen
-                                "ttys99999"
-                                "automa-gp-screen-missing")
-                        :assert '((screen heard))
-                        :goals '((noted-screen up))))
+  (gp-add-reaction (%test-screen-reaction))
   (unwind-protect
-       (progn
+       (when (macos-p)
          (let ((noticed (gp-watch-terminal-screen :interval 0.2)))
            (is (null noticed))
            (is (gp-terminal-screen-watch)))
-         (signals error (gp-watch-terminal-screen :interval 0.2))
+         (signals notice-refused (gp-watch-terminal-screen :interval 0.2))
          (is (not (fact-p '(screen heard) (gp-facts))))
          (gp-stop-terminal-screen-watch)
          (is (not (gp-terminal-screen-watch)))
@@ -1149,3 +1172,196 @@ otherwise OVERRIDE is a synthetic name for *NOTICE-OPEN-TERMINALS-OVERRIDE*."
       (when (automa-gp::%notice-watch-active-p '*notice-watch-probe* lock)
         (ignore-errors
          (automa-gp::%end-notice-watch '*notice-watch-probe* lock "absent"))))))
+
+;;; Regressions from the engineering pass.
+
+(defmacro with-notice-directory ((dir) &body body)
+  "Run BODY with DIR bound to a fresh, empty temporary directory."
+  `(let ((,dir (ensure-directories-exist
+                (uiop:ensure-directory-pathname
+                 (merge-pathnames
+                  (format nil "automa-gp-notice-~D-~D/"
+                          (get-universal-time) (random 1000000))
+                  (uiop:temporary-directory))))))
+     (unwind-protect
+          (progn ,@body)
+       (uiop:delete-directory-tree ,dir :validate t
+                                        :if-does-not-exist :ignore))))
+
+(defun %test-file-reaction ()
+  "A FILE-CREATED reaction that asserts (SEEN path) and wants (FILED path)."
+  (make-event-reaction :name 'on-file
+                       :when '(automa-gp::file-created ?path)
+                       :assert '((seen ?path))
+                       :goals '((filed ?path))))
+
+(defun %test-lowest-free-descriptor ()
+  "The file descriptor the next open in this image would get."
+  (let ((descriptor (sb-posix:open "/dev/null" sb-posix:o-rdonly)))
+    (sb-posix:close descriptor)
+    descriptor))
+
+(test notice-command-closes-its-pipe-on-every-way-out
+  (let ((before (%test-lowest-free-descriptor)))
+    (is (every (lambda (text) (equal "hi" (string-right-trim '(#\Newline) text)))
+               (loop repeat 12
+                     collect (automa-gp::%cancellable-program '("echo" "hi")
+                                                              :output t))))
+    (is (<= (%test-lowest-free-descriptor) before))
+    ;; A read cut short by its timeout, and one cut short by a stop.
+    (is (every #'null
+               (loop repeat 3
+                     collect (automa-gp::%cancellable-program
+                              '("perl" "-e" "$| = 1; print 'x'; sleep 5")
+                              :timeout 0.2 :output t))))
+    (let ((looks 0))
+      (let ((automa-gp::*notice-halt* (lambda () (> (incf looks) 2))))
+        (is (null (automa-gp::%cancellable-program '("perl" "-e" "sleep 5")
+                                                   :output t)))))
+    (is (<= (%test-lowest-free-descriptor) before))
+    (is (not (find "automa-gp-command-read" (sb-thread:list-all-threads)
+                   :key #'sb-thread:thread-name :test #'string=))))
+  ;; A program that cannot be started is an error, not an empty answer.
+  (signals error
+    (automa-gp::%cancellable-program '("automa-gp-no-such-program-xyzzy")))
+  (signals error
+    (automa-gp::%cancellable-program '("automa-gp-no-such-program-xyzzy")
+                                     :output t)))
+
+(test notice-processes-pid-names-one-process
+  (dolist (pid '(0 -1 -4242))
+    (is (null (automa-gp::%process-target pid)))
+    (is (null (automa-gp::%notice-process-running-p pid))))
+  (is-true (automa-gp::%notice-process-running-p (current-process-id)))
+  (is-true (automa-gp::%notice-process-running-p (sb-posix:getppid)))
+  (is (null (automa-gp::%notice-process-running-p (expt 10 12))))
+  ;; Pid 1 belongs to another user: it runs although it cannot be signalled.
+  (when (eql 0 (nth-value 2 (uiop:run-program '("ps" "-p" "1" "-o" "pid=")
+                                              :ignore-error-status t)))
+    (is-true (automa-gp::%notice-process-running-p 1)))
+  (gp-clear-memory)
+  (gp-reset)
+  (dolist (pid '(0 -1))
+    (gp-add-reaction
+     (make-event-reaction :name (list 'on-group pid)
+                          :when (list 'automa-gp::process-running pid)
+                          :assert '((group heard)))))
+  (signals notice-refused (gp-notice-processes))
+  (is (null (gp-facts)))
+  (is (null (gp-events))))
+
+(test notice-processes-name-is-literal-text
+  (let ((self (current-process-id))
+        (other (1+ (current-process-id)))
+        (listing automa-gp::*process-listing*))
+    (loop for (name pid command expected)
+            in `(("nginx" ,other "nginx: worker process" t)
+                 ("nginx" ,other "/usr/sbin/nginx -g daemon off;" t)
+                 ("ngin.x" ,other "/usr/sbin/nginx -g daemon off;" nil)
+                 ("." ,other "nginx" nil)
+                 ("ps" ,other ,listing nil)
+                 ("pid=,command=" ,other ,listing nil)
+                 ("nginx" ,self "sbcl --eval (watch \"nginx\")" nil)
+                 ("sbcl" ,self "sbcl --eval (watch \"nginx\")" t)
+                 ("sbcl" ,self "/usr/local/bin/sbcl --eval x" t)
+                 ("/usr/local/bin/sbcl" ,self "/usr/local/bin/sbcl" t)
+                 ("bin/sbcl" ,self "/usr/local/bin/sbcl --eval x" nil))
+          do (is (eq expected
+                     (and (automa-gp::%command-names-p name pid command) t))
+                 "~S on ~S should be ~S" name command expected))
+    (is (equal (list 42 "perl -e sleep 60")
+               (multiple-value-list
+                (automa-gp::%process-line "   42 perl -e sleep 60"))))
+    (is (null (automa-gp::%process-line "")))
+    (is (null (automa-gp::%process-line "COMMAND"))))
+  (let* ((token (format nil "automa-gp-lit-~D-~D"
+                        (get-universal-time) (random 100000)))
+         (process (uiop:launch-program
+                   (list "perl" "-e" (format nil "sleep 60; # ~A" token))
+                   :output #P"/dev/null" :error-output #P"/dev/null")))
+    (unwind-protect
+         (progn
+           (loop repeat 80
+                 until (automa-gp::%notice-process-running-p token)
+                 do (sleep 0.05))
+           (is-true (automa-gp::%notice-process-running-p token))
+           ;; Each dot would match the hyphen it replaces in a pattern.
+           (is (null (automa-gp::%notice-process-running-p
+                      (substitute #\. #\- token))))
+           ;; Only the ps that lists the processes carries these.
+           (is (null (automa-gp::%notice-process-running-p "pid=,command=")))
+           (is (null (automa-gp::%notice-process-running-p "-o command=")))
+           (is-true (automa-gp::%notice-process-running-p
+                     (file-namestring sb-ext:*runtime-pathname*))))
+      (ignore-errors (uiop:terminate-process process :urgent t))
+      (ignore-errors (uiop:wait-process process)))))
+
+(test notice-terminal-text-reads-past-bytes-that-are-not-utf-8
+  (gp-clear-memory)
+  (gp-reset)
+  (with-notice-directory (dir)
+    (let ((path (namestring (merge-pathnames "transcript.bin" dir))))
+      (with-open-file (out path :direction :output
+                                :element-type '(unsigned-byte 8))
+        (write-sequence #(255 254 27 91) out)
+        (write-sequence (map 'vector #'char-code "MARKER here") out)
+        (write-sequence #(10 255) out))
+      (gp-add-reaction
+       (make-event-reaction :name 'on-marker
+                            :when (list 'automa-gp::terminal-text path "MARKER here")
+                            :assert '((marker heard))))
+      (is (equal (list (list 'automa-gp::terminal-text path "MARKER here"))
+                 (gp-notice-terminal-text)))
+      (is (fact-p '(marker heard) (gp-facts)))
+      ;; A transcript that is not there yet is absent, not an error.
+      (gp-add-reaction
+       (make-event-reaction :name 'on-later
+                            :when (list 'automa-gp::terminal-text
+                                        (namestring (merge-pathnames "later" dir))
+                                        "x")))
+      (is (= 1 (length (gp-notice-terminal-text)))))))
+
+(test notice-directory-reacts-a-file-notice-path-recorded
+  (gp-clear-memory)
+  (gp-reset)
+  (with-notice-directory (dir)
+    (let ((path (namestring (merge-pathnames "report.txt" dir))))
+      (adapter-write-file-string path "x")
+      (gp-add-reaction (%test-file-reaction))
+      (let ((fact (gp-notice-path path)))
+        (is (equal (list fact) (gp-facts)))
+        (is (= 1 (length (gp-events :status :pending))))
+        (is (null (gp-goals)))
+        (is (equal (list fact) (gp-notice-directory (namestring dir))))
+        (is (fact-p (list 'seen path) (gp-facts)))
+        (is (equal (list (list 'filed path)) (gp-goals)))
+        (is (= 1 (length (gp-events))))
+        (is (null (gp-events :status :pending)))
+        ;; Neither entry point records or reacts the file a second time.
+        (gp-notice-path path)
+        (gp-notice-directory (namestring dir))
+        (is (= 1 (length (gp-events))))
+        (is (= 2 (length (gp-facts))))
+        (is (= 1 (length (gp-goals))))))))
+
+(test notice-leaves-working-memory-and-last-reaction-current
+  (gp-clear-memory)
+  (gp-reset)
+  (with-notice-directory (dir)
+    (let ((path (namestring (merge-pathnames "report.txt" dir))))
+      (adapter-write-file-string path "x")
+      (gp-add-reaction (%test-file-reaction))
+      (gp-notice-path path)
+      (is (equal (gp-facts) (working-memory-facts *working-memory*)))
+      (is (null (gp-last-reaction)))
+      (gp-notice-directory (namestring dir))
+      (is (equal (gp-facts) (working-memory-facts *working-memory*)))
+      (is (equal (gp-goals) (working-memory-goals *working-memory*)))
+      (let ((reaction (gp-last-reaction)))
+        (is (= 1 (getf reaction :processed)))
+        (is (equal '(on-file) (getf reaction :matched)))
+        (is (equal (list (list 'seen path)) (getf reaction :facts-added)))
+        (is (equal (list (list 'filed path)) (getf reaction :goals-added))))
+      (multiple-value-bind (code body) (web-api-handle :get "/api/reaction")
+        (is (= 200 code))
+        (is (getf body :reaction))))))
