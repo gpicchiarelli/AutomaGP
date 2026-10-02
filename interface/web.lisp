@@ -2,10 +2,19 @@
 ;;;;
 ;;;; Optional web layer. Load via (ql:quickload :automa-gp/web).
 ;;;; All reasoning delegates to WEB-API-HANDLE → core/REPL.
+;;;;
+;;;; The console has no authentication. A request is answered only when it
+;;;; passes the request policy below, and the session answers one request
+;;;; at a time.
 
 (defpackage #:automa-gp/web
-  (:use #:cl #:automa-gp)
+  (:use #:cl)
+  (:import-from #:automa-gp
+                #:gp-context
+                #:lisp->json
+                #:web-api-handle-json)
   (:export #:*default-web-port*
+           #:*max-request-body-octets*
            #:*web-acceptor*
            #:start-web
            #:stop-web
@@ -22,12 +31,119 @@
 (defvar *web-acceptor* nil
   "Current Hunchentoot acceptor, or NIL.")
 
+;;;; Request policy
+;;;;
+;;;; With no authentication, these checks are what keeps a page open in the
+;;;; operator's browser, or a body of any size, away from the session. They
+;;;; are functions of the request line and headers alone and name nothing
+;;;; from Hunchentoot: tests/test-console.lisp reads this section as text,
+;;;; down to the line "End of the request policy", and runs it without the
+;;;; web system loaded.
+
+(defparameter *max-request-body-octets* (* 1024 1024)
+  "Largest request body the console reads, in octets.
+A request that declares a longer body is refused before any of the body
+is read.")
+
+(defun %wildcard-address-p (address)
+  "True when a socket bound to ADDRESS listens on every interface."
+  (or (null address)
+      (and (member address '("0.0.0.0" "::") :test #'string=) t)))
+
+(defun %loopback-address-p (address)
+  "True when a socket bound to ADDRESS is reachable from this machine only."
+  (and (stringp address)
+       (member address '("127.0.0.1" "::1" "localhost") :test #'string-equal)
+       t))
+
+(defun %url-host (address)
+  "ADDRESS as a URL and a Host header write it: an IPv6 literal in brackets."
+  (if (find #\: address)
+      (format nil "[~A]" address)
+      address))
+
+(defun %console-host-p (host address port)
+  "True when HOST, a Host header value or NIL, names the console bound to
+ADDRESS and PORT: the bound address or a loopback name, with the port
+\(which a client may leave out when it is 80). A console bound to every
+interface cannot know its names and takes any HOST."
+  (or (%wildcard-address-p address)
+      (and host
+           (some (lambda (name)
+                   (or (string-equal host (format nil "~A:~D" name port))
+                       (and (= port 80) (string-equal host name))))
+                 (list (%url-host address) "127.0.0.1" "localhost" "[::1]"))
+           t)))
+
+(defun %json-content-type-p (content-type)
+  "True when CONTENT-TYPE, a header value or NIL, is application/json, with
+or without parameters."
+  (and content-type
+       (string-equal "application/json"
+                     (string-trim '(#\Space #\Tab)
+                                  (subseq content-type
+                                          0 (position #\; content-type))))))
+
+(defun %request-refusal (method host origin content-type address port)
+  "Why the console bound to ADDRESS and PORT does not serve a request: NIL
+when it does, else (VALUES STATUS MESSAGE). METHOD is a keyword; HOST,
+ORIGIN and CONTENT-TYPE are header values or NIL.
+The Host header must name the console, so a foreign name re-pointed at this
+machine reaches nothing. An Origin header, which a browser adds to the
+requests one site makes to another, must be the console's own. A request
+other than GET or HEAD must declare application/json: a page of another
+origin cannot send that type without first asking the console, which never
+agrees."
+  (cond ((not (%console-host-p host address port))
+         (values 403 (format nil "The Host header ~:[is missing~;~:*~S does ~
+                                  not name this console~]."
+                             host)))
+        ((and origin
+              (not (and host
+                        (string-equal origin (format nil "http://~A" host)))))
+         (values 403 (format nil "Requests from the origin ~S are refused."
+                             origin)))
+        ((not (or (member method '(:get :head))
+                  (%json-content-type-p content-type)))
+         (values 415 (format nil "A request other than GET or HEAD must ~
+                                  declare the Content-Type application/json.")))))
+
+(defun %body-refusal (content-length transfer-encoding)
+  "Why the body of a request is not read: NIL when it may be, else
+\(VALUES STATUS MESSAGE). CONTENT-LENGTH and TRANSFER-ENCODING are header
+values or NIL. A body must declare its length, in decimal digits, and the
+length must not exceed *MAX-REQUEST-BODY-OCTETS*."
+  (cond ((null content-length)
+         (when transfer-encoding
+           (values 411 "A request body must declare its Content-Length.")))
+        ((not (and (plusp (length content-length))
+                   (every #'digit-char-p content-length)))
+         (values 400 "The Content-Length header is not a number."))
+        ((> (parse-integer content-length) *max-request-body-octets*)
+         (values 413 (format nil "The request body is longer than ~D octets."
+                             *max-request-body-octets*)))))
+
+;;;; End of the request policy
+
+(defvar *session-lock* (sb-thread:make-mutex :name "automa-gp-web-session")
+  "Held while an /api/ request is answered. The session state of the core
+is not locked and Hunchentoot answers each connection on its own thread,
+so the console serialises its calls into the session here.")
+
 (defun web-running-p ()
+  "True when the operator console is listening."
   (and *web-acceptor* (hunchentoot:started-p *web-acceptor*)))
 
 (defun web-url (&optional (acceptor *web-acceptor*))
+  "The URL of ACCEPTOR's console, or NIL without an acceptor. A console
+bound to every interface is named by its loopback address."
   (when acceptor
-    (format nil "http://127.0.0.1:~A/" (hunchentoot:acceptor-port acceptor))))
+    (let ((address (hunchentoot:acceptor-address acceptor)))
+      (format nil "http://~A:~D/"
+              (cond ((equal address "::") "[::1]")
+                    ((%wildcard-address-p address) "127.0.0.1")
+                    (t (%url-host address)))
+              (hunchentoot:acceptor-port acceptor)))))
 
 (defun %console-html ()
   "Single-page operator console — inspect/control only, no chatbot."
@@ -260,8 +376,9 @@ function goalsInputFilled() {
   return document.getElementById('goals').value.trim().length > 0;
 }
 function termKey(t) {
-  if (typeof t === 'string') return t.toUpperCase();
-  if (typeof t === 'number' || typeof t === 'boolean') return String(t);
+  // Tagged by type: the server keeps the number 1 and the string '1' apart.
+  if (typeof t === 'string') return 's:' + t.toUpperCase();
+  if (typeof t === 'number' || typeof t === 'boolean') return typeof t + ':' + String(t);
   return JSON.stringify(t);
 }
 function factKey(f) {
@@ -541,46 +658,102 @@ updateEmitFactButtons();
   ()
   (:default-initargs
    :address "127.0.0.1"
+   ;; One request per connection: a refused body is left unread, and on a
+   ;; kept connection its octets would be taken for the next request.
+   :persistent-connections-p nil
    :document-root nil
    :error-template-directory nil
    :access-log-destination nil
    :message-log-destination nil))
 
+(defun %json-refusal (status message)
+  "A refusal in the envelope of the JSON façade:
+\(VALUES STATUS CONTENT-TYPE BODY)."
+  (values status "application/json; charset=utf-8"
+          (lisp->json (list :ok nil :error message))))
+
+(defun %refusal (acceptor request)
+  "Why ACCEPTOR does not serve REQUEST: NIL when it does, else
+\(VALUES STATUS MESSAGE). A body that may not be read is left on the wire."
+  (flet ((header (name) (hunchentoot:header-in name request)))
+    (multiple-value-bind (status message)
+        (%body-refusal (header :content-length) (header :transfer-encoding))
+      (cond (status
+             ;; Hunchentoot reads an unclaimed body to its declared end
+             ;; before it answers, allocating the declared length at once.
+             ;; Taking the body as a stream claims it without reading.
+             (hunchentoot:raw-post-data :request request :want-stream t)
+             (values status message))
+            (t
+             (%request-refusal (hunchentoot:request-method request)
+                               (header :host) (header :origin)
+                               (header :content-type)
+                               (hunchentoot:acceptor-address acceptor)
+                               (hunchentoot:acceptor-port acceptor)))))))
+
+(defun %api-response (method path request)
+  "Answer the /api/ request METHOD PATH from the session. Returns
+\(VALUES STATUS CONTENT-TYPE BODY), always with a JSON body: an error the
+façade does not answer itself, such as a body that is not JSON, is a 400,
+and a request that exhausts the stack or the heap is abandoned with a 500
+instead of taking the image down."
+  (handler-case
+      (let ((body (when (eq method :post)
+                    (or (hunchentoot:raw-post-data :request request
+                                                   :force-text t)
+                        ""))))
+        (sb-thread:with-mutex (*session-lock*)
+          (web-api-handle-json method path body)))
+    (error (condition)
+      (%json-refusal 400 (princ-to-string condition)))
+    (storage-condition (condition)
+      (%json-refusal 500 (format nil "The request was abandoned: it ~
+                                      exhausted the memory of the Lisp ~
+                                      image (~A)."
+                                 (type-of condition))))))
+
 (defmethod hunchentoot:acceptor-dispatch-request ((acceptor gp-acceptor) request)
-  (let* ((method (hunchentoot:request-method* request))
-         (uri (hunchentoot:script-name* request))
-         (qs (hunchentoot:query-string* request))
+  (let* ((method (hunchentoot:request-method request))
+         (uri (hunchentoot:script-name request))
+         (qs (hunchentoot:query-string request))
          (path (if (and qs (plusp (length qs)))
                    (format nil "~A?~A" uri qs)
                    uri)))
-    (cond
-      ((and (eq method :get) (or (string= uri "/") (string= uri "/index.html")))
-       (setf (hunchentoot:content-type*) "text/html; charset=utf-8")
-       (%console-html))
-      ((and (>= (length uri) 5) (string= uri "/api/" :end1 5))
-       (multiple-value-bind (code ctype body)
-           (web-api-handle-json
-            method path
-            (when (member method '(:post :put :patch))
-              (or (hunchentoot:raw-post-data :force-text t :request request)
-                  "")))
-         (setf (hunchentoot:return-code*) code
-               (hunchentoot:content-type*) ctype)
-         body))
-      (t
-       (setf (hunchentoot:return-code*) 404
-             (hunchentoot:content-type*) "text/plain; charset=utf-8")
-       "Not found"))))
+    (flet ((answer (status content-type body)
+             (setf (hunchentoot:return-code*) status
+                   (hunchentoot:content-type*) content-type)
+             body))
+      (multiple-value-bind (status message) (%refusal acceptor request)
+        (cond
+          (status
+           (multiple-value-call #'answer (%json-refusal status message)))
+          ((and (member method '(:get :head))
+                (or (string= uri "/") (string= uri "/index.html")))
+           (answer 200 "text/html; charset=utf-8" (%console-html)))
+          ((and (>= (length uri) 5) (string= uri "/api/" :end1 5))
+           (multiple-value-call #'answer (%api-response method path request)))
+          (t
+           (answer 404 "text/plain; charset=utf-8" "Not found")))))))
 
 (defun start-web (&key (port *default-web-port*) (address "127.0.0.1"))
   "Start the operator console on ADDRESS:PORT (default 127.0.0.1:47391).
-Returns the acceptor. Idempotent if already running on the same port."
+Returns the acceptor. Idempotent if already running on the same port.
+The console has no authentication. It answers one request at a time, and
+only a request whose Host header names the console, whose Origin header,
+if any, is the console's own, whose body, if any, is declared as
+application/json and is at most *MAX-REQUEST-BODY-OCTETS* octets long.
+An ADDRESS other than a loopback address puts the session within reach of
+other machines; START-WEB then signals a WARNING and goes on."
   (when (web-running-p)
     (let ((p (hunchentoot:acceptor-port *web-acceptor*)))
       (when (and (= p port)
                  (equal address (hunchentoot:acceptor-address *web-acceptor*)))
         (return-from start-web *web-acceptor*))
       (stop-web)))
+  (unless (%loopback-address-p address)
+    (warn "The console has no authentication: bound to ~:[every interface~;~:*~A~], ~
+           the session can be read and driven from other machines."
+          (unless (%wildcard-address-p address) address)))
   (gp-context) ; ensure session context exists
   (let ((acceptor (make-instance 'gp-acceptor :port port :address address)))
     (hunchentoot:start acceptor)
@@ -589,10 +762,10 @@ Returns the acceptor. Idempotent if already running on the same port."
     acceptor))
 
 (defun stop-web ()
-  "Stop the operator console if running."
-  (when *web-acceptor*
-    (ignore-errors (hunchentoot:stop *web-acceptor*))
-    (setf *web-acceptor* nil))
+  "Stop the operator console if it is running. Returns T."
+  (let ((acceptor (shiftf *web-acceptor* nil)))
+    (when (and acceptor (hunchentoot:started-p acceptor))
+      (hunchentoot:stop acceptor)))
   t)
 
 (defun gp-start-web (&rest args &key &allow-other-keys)
