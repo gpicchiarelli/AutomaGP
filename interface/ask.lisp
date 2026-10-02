@@ -32,6 +32,8 @@
 ;;;; prontezza, and pronto share a stem. A noun in -SIONE from a verb in
 ;;;; -ERE restores the final D, so accensione shares the stem of accendi.
 ;;;; A noun in -MENTO does the same, so accendimento shares that stem.
+;;;; A stem keeps at least four letters. A verb with a shorter root has
+;;;; none, so apri and aprire are two words, each declared on its own.
 ;;;;
 ;;;; A word in a variable's place is the symbol the facts of this context
 ;;;; already use under that name. A new word is interned beside the fixed
@@ -510,14 +512,15 @@ Anything else is an UNKNOWN-KEYWORD; its USE-VALUE restart takes a kind."
 
 (defun gp-name-operator (name word &key kind)
   "Declare that WORD names the operator, reaction, or rule NAME.
-NAME must pick out one of those, unless KIND says which. The same stem
-counts, as with GP-ASK. Declaring the same word again keeps a single
-entry. Returns the object.
+NAME must pick out one of those, unless KIND says which: :OPERATOR,
+:REACTION, or :RULE, as a keyword, a symbol, or a string. The same stem
+counts, as with GP-ASK, when it keeps at least four letters. Declaring
+the same word again keeps a single entry. Returns the object.
 Signals WORD-REFUSED, and changes nothing, when WORD is not one word or is
 a word GP-ASK reads as its own, when nothing or more than one thing has
 NAME, when another one already answers to WORD, and when NAME is an
 action that planning lifts: the context holds no operator to keep the
-word on."
+word on. A KIND that is none of the three is an UNKNOWN-KEYWORD."
   (let* ((token (%declared-word word))
          (label (%ask-label name))
          (wanted (%name-kind kind))

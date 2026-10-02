@@ -700,6 +700,42 @@ every string of PRESENT and none of ABSENT.")
              (is (consp goal))
              (is (null (gp-goals))))))
 
+(test ask-use-value-reads-the-goal-at-the-terminal
+  (%add-operators '((power-on (power-state ?d on))
+                    (power-off (power-state ?d off))))
+  (let* ((*package* (find-package :automa-gp/tests))
+         (*query-io* (make-two-way-stream
+                      (make-string-input-stream "(power-state lamp off)")
+                      (make-broadcast-stream)))
+         (goal (handler-bind ((ambiguous-goal
+                                (lambda (c)
+                                  (invoke-restart-interactively
+                                   (find-restart 'use-value c)))))
+                 (gp-interpret "power-state lamp"))))
+    (is (equal '(power-state lamp off) goal))
+    (is (null (gp-goals)))))
+
+(test ask-conditions-are-public-and-documented
+  (let ((refusals '(ambiguous-goal undeclared-word unspecific-word
+                    unrelated-word not-that-name)))
+    (dolist (type refusals)
+      (is (subtypep type 'phrase-refused)))
+    (dolist (type (list* 'phrase-refused 'word-refused refusals))
+      (is (subtypep type 'error))
+      (is (documentation type 'type))
+      (is (eq :external
+              (nth-value 1 (find-symbol (symbol-name type) :automa-gp))))))
+  (dolist (reader '(phrase-refused-reason ambiguous-goal-goals
+                    undeclared-word-word undeclared-word-choices
+                    unspecific-word-word unspecific-word-goals
+                    unrelated-word-word unrelated-word-goals
+                    not-that-name-word not-that-name-name
+                    word-refused-word word-refused-name word-refused-kind
+                    word-refused-reason word-refused-holder))
+    (is (fboundp reader))
+    (is (eq :external
+            (nth-value 1 (find-symbol (symbol-name reader) :automa-gp))))))
+
 (test ask-refuses-two-operators-that-share-a-word
   (gp-clear-memory)
   (gp-reset)
