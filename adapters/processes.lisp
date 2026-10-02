@@ -99,17 +99,21 @@ not be made, which is not the same answer as not running."
   "Dispatch process OP with ARGS plist. Returns a result plist.
 :RUN runs :COMMAND, a list of the program and its arguments: strings,
 pathnames, numbers and symbols, each handed to the program as one
-argument. A string :COMMAND and :FORCE-SHELL are not accepted: nothing
+argument. A string :COMMAND and a true :FORCE-SHELL are refused: nothing
 that comes from a fact reaches a shell. :OK is true only for exit status
 0; :IGNORE-ERROR-STATUS keeps a non-zero status from being signalled, so
 the result still carries :OUTPUT and :EXIT-CODE, and does not turn it
 into a success.
 :RUNNING reports whether :NAME (a PID or a process name) is running.
 Signals ACTION-FAILED for an OP this adapter does not have, for a missing
-argument, for a command that is not such a list, and when the lookup of
-:RUNNING could not be made."
+argument, for a command that is not such a list or asks for a shell, and
+when the lookup of :RUNNING could not be made."
   (case op
     (:run
+     (when (getf args :force-shell)
+       (%adapter-failure
+        "processes :RUN does not hand a command to a shell: ~
+         :FORCE-SHELL is not accepted"))
      (multiple-value-bind (out code)
          (run-program (%command-argv
                        (%required-argument args :command :processes op))

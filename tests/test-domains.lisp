@@ -28,27 +28,20 @@
                (%op-names plan)))))
 
 (test documents-archive-with-adapter-temp
-  (let* ((dir (uiop:ensure-directory-pathname
-               (merge-pathnames
-                (format nil "automa-gp-doc-~A/" (get-universal-time))
-                (uiop:temporary-directory))))
-         (marker (merge-pathnames "archived.txt" dir)))
-    (unwind-protect
-         (progn
-           (ensure-directories-exist dir)
-           (gp-clear-memory)
-           (gp-reset)
-           (let* ((plan (automa-gp/domain/documents:documents-demo-plan
-                         (gp-context)
-                         :source "note.txt"
-                         :archive-path (namestring marker)))
-                  (*current-plan* plan)
-                  (ex (gp-run :plan plan :adapters t :confirm t)))
-             (is-true (plan-success plan))
-             (is-true (execution-success ex))
-             (is-true (file-exists-p marker))
-             (is (equal "archived" (adapter-read-file-string marker)))))
-      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
+  (%with-adapter-directory (dir)
+    (let ((marker (merge-pathnames "archived.txt" dir)))
+      (gp-clear-memory)
+      (gp-reset)
+      (let* ((plan (automa-gp/domain/documents:documents-demo-plan
+                    (gp-context)
+                    :source "note.txt"
+                    :archive-path (namestring marker)))
+             (*current-plan* plan)
+             (ex (gp-run :plan plan :adapters t :confirm t)))
+        (is-true (plan-success plan))
+        (is-true (execution-success ex))
+        (is-true (file-exists-p marker))
+        (is (equal "archived" (adapter-read-file-string marker)))))))
 
 (test hardware-domain-demo-plan
   (gp-clear-memory)

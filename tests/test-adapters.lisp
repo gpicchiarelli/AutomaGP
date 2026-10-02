@@ -5,137 +5,8 @@
 (def-suite adapters-suite :in automa-gp-suite)
 (in-suite adapters-suite)
 
-(test filesystem-primitives-temp
-  (let* ((dir (uiop:ensure-directory-pathname
-               (merge-pathnames
-                (format nil "automa-gp-fs-~A/" (get-universal-time))
-                (uiop:temporary-directory))))
-         (file (merge-pathnames "marker.txt" dir)))
-    (unwind-protect
-         (progn
-           (adapter-ensure-directory dir)
-           (is-false (file-exists-p file))
-           (adapter-write-file-string file "hello-gp")
-           (is-true (file-exists-p file))
-           (is (equal "hello-gp" (adapter-read-file-string file)))
-           (is (plusp (length (directory-files dir "*.txt"))))
-           (is-true (adapter-delete-file file))
-           (is-false (file-exists-p file)))
-      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
-
-(test process-run-and-running-p
-  (multiple-value-bind (out code)
-      (run-program '("echo" "automa-gp") :output :string)
-    (is (eql 0 code))
-    (is (search "automa-gp" out)))
-  ;; Current image PID must be running (ps -p). The name lookup of a
-  ;; process that does run is tested below with a child of this test.
-  (is-true (process-running-p (current-process-id)))
-  (is-false (process-running-p "automa-gp-no-such-process-xyzzy")))
-
-(test macos-dispatch-safe
-  (let ((r (macos-dispatch :macos-p nil)))
-    (is (getf r :ok))
-    (is (eq (macos-p) (getf r :macos))))
-  (let ((r (macos-dispatch :uname nil)))
-    (is (getf r :ok))
-    (is (stringp (getf r :uname)))))
-
-(test simulate-never-invokes-adapters
-  (let* ((dir (uiop:ensure-directory-pathname
-               (merge-pathnames "automa-gp-sim-adapt/"
-                                (uiop:temporary-directory))))
-         (file (merge-pathnames "should-not-exist.txt" dir))
-         (*invoke-adapters* t))
-    (unwind-protect
-         (progn
-           (ensure-directories-exist dir)
-           (gp-clear-memory)
-           (gp-reset)
-           (gp-add-fact '(path-ready marker))
-           (gp-add-operator
-            (make-operator
-             :name 'write-marker
-             :preconditions '((path-ready ?name))
-             :add-list '((file-created ?name))
-             :meta (list :external
-                         (list :adapter :filesystem
-                               :op :write-string
-                               :args (list :path file
-                                           :content "from-sim")))))
-           (gp-plan :goals '((file-created marker)))
-           (gp-simulate)
-           (is-false (file-exists-p file))
-           (is (fact-p '(path-ready marker) (gp-facts))))
-      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
-
-(test execute-with-adapters-writes-temp-file
-  (let* ((dir (uiop:ensure-directory-pathname
-               (merge-pathnames
-                (format nil "automa-gp-run-adapt-~A/" (get-universal-time))
-                (uiop:temporary-directory))))
-         (file (merge-pathnames "created.txt" dir)))
-    (unwind-protect
-         (progn
-           (ensure-directories-exist dir)
-           (gp-clear-memory)
-           (gp-reset)
-           (gp-adapters nil)
-           (gp-add-fact '(path-ready marker))
-           (gp-add-operator
-            (make-operator
-             :name 'write-marker
-             :preconditions '((path-ready ?name))
-             :add-list '((file-created ?name))
-             :meta (list :external
-                         (list :adapter :filesystem
-                               :op :write-string
-                               :args (list :path file
-                                           :content "from-execute")))))
-           (gp-plan :goals '((file-created marker)))
-           ;; adapters off → symbolic only
-           (gp-run :adapters nil)
-           (is-false (file-exists-p file))
-           (is (fact-p '(file-created marker) (gp-facts)))
-           ;; reset facts and run with adapters
-           (gp-reset)
-           (gp-add-fact '(path-ready marker))
-           (gp-add-operator
-            (make-operator
-             :name 'write-marker
-             :preconditions '((path-ready ?name))
-             :add-list '((file-created ?name))
-             :meta (list :external
-                         (list :adapter :filesystem
-                               :op :write-string
-                               :args (list :path file
-                                           :content "from-execute")))))
-           (gp-plan :goals '((file-created marker)))
-           (let ((ex (gp-run :adapters t)))
-             (is-true (execution-success ex))
-             (is-true (file-exists-p file))
-             (is (equal "from-execute" (adapter-read-file-string file)))
-             (is (getf (first (execution-steps ex)) :external))))
-      (uiop:delete-directory-tree dir :validate t :if-does-not-exist :ignore))))
-
-(test symbolic-path-unaffected-by-adapter-flag
-  "Planner/MEA stay free of OS calls."
-  (gp-clear-memory)
-  (gp-reset)
-  (let ((*invoke-adapters* t))
-    (gp-add-fact '(device interface-01))
-    (gp-add-fact '(power-state interface-01 off))
-    (gp-add-operator
-     (make-operator :name 'power-on
-                    :preconditions '((device ?d) (power-state ?d off))
-                    :add-list '((power-state ?d on))
-                    :delete-list '((power-state ?d off))))
-    (let ((plan (gp-plan :goals '((power-state interface-01 on)))))
-      (is-true (plan-success plan))
-      (is (fact-p '(power-state interface-01 off) (gp-facts))))))
-
 ;;; ---------------------------------------------------------------------------
-;;; Fixtures
+;;; Fixtures (also used by tests/test-domains.lisp)
 ;;; ---------------------------------------------------------------------------
 
 (defun %call-with-adapter-directory (thunk)
@@ -159,6 +30,103 @@ the PID, so two test runs at the same time do not share it."
   "The reason of the ACTION-FAILED that THUNK signals, or :RETURNED."
   (handler-case (progn (funcall thunk) :returned)
     (action-failed (c) (action-failed-reason c))))
+
+(defun %write-marker-operator (file content)
+  "An operator whose :EXTERNAL spec writes CONTENT to FILE."
+  (make-operator
+   :name 'write-marker
+   :preconditions '((path-ready ?name))
+   :add-list '((file-created ?name))
+   :meta (list :external
+               (list :adapter :filesystem
+                     :op :write-string
+                     :args (list :path file :content content)))))
+
+;;; ---------------------------------------------------------------------------
+;;; The adapters stay off unless an execute asks for them
+;;; ---------------------------------------------------------------------------
+
+(test filesystem-primitives-temp
+  (%with-adapter-directory (dir)
+    (let ((file (merge-pathnames "marker.txt" dir)))
+      (adapter-ensure-directory dir)
+      (is-false (file-exists-p file))
+      (adapter-write-file-string file "hello-gp")
+      (is-true (file-exists-p file))
+      (is (equal "hello-gp" (adapter-read-file-string file)))
+      (is (plusp (length (directory-files dir "*.txt"))))
+      (is-true (adapter-delete-file file))
+      (is-false (file-exists-p file)))))
+
+(test process-run-and-running-p
+  (multiple-value-bind (out code)
+      (run-program '("echo" "automa-gp") :output :string)
+    (is (eql 0 code))
+    (is (search "automa-gp" out)))
+  ;; Current image PID must be running (ps -p). The name lookup of a
+  ;; process that does run is tested below with a child of this test.
+  (is-true (process-running-p (current-process-id)))
+  (is-false (process-running-p "automa-gp-no-such-process-xyzzy")))
+
+(test macos-dispatch-safe
+  (let ((r (macos-dispatch :macos-p nil)))
+    (is (getf r :ok))
+    (is (eq (macos-p) (getf r :macos))))
+  (let ((r (macos-dispatch :uname nil)))
+    (is (getf r :ok))
+    (is (stringp (getf r :uname)))))
+
+(test simulate-never-invokes-adapters
+  (%with-adapter-directory (dir)
+    (let ((file (merge-pathnames "should-not-exist.txt" dir))
+          (*invoke-adapters* t))
+      (gp-clear-memory)
+      (gp-reset)
+      (gp-add-fact '(path-ready marker))
+      (gp-add-operator (%write-marker-operator file "from-sim"))
+      (gp-plan :goals '((file-created marker)))
+      (gp-simulate)
+      (is-false (file-exists-p file))
+      (is (fact-p '(path-ready marker) (gp-facts))))))
+
+(test execute-with-adapters-writes-temp-file
+  (%with-adapter-directory (dir)
+    (let ((file (merge-pathnames "created.txt" dir)))
+      (flet ((plan-the-marker ()
+               (gp-reset)
+               (gp-add-fact '(path-ready marker))
+               (gp-add-operator (%write-marker-operator file "from-execute"))
+               (gp-plan :goals '((file-created marker)))))
+        (gp-clear-memory)
+        (gp-adapters nil)
+        ;; adapters off → symbolic only
+        (plan-the-marker)
+        (gp-run :adapters nil)
+        (is-false (file-exists-p file))
+        (is (fact-p '(file-created marker) (gp-facts)))
+        ;; reset facts and run with adapters
+        (plan-the-marker)
+        (let ((ex (gp-run :adapters t)))
+          (is-true (execution-success ex))
+          (is-true (file-exists-p file))
+          (is (equal "from-execute" (adapter-read-file-string file)))
+          (is (getf (first (execution-steps ex)) :external)))))))
+
+(test symbolic-path-unaffected-by-adapter-flag
+  "Planner/MEA stay free of OS calls."
+  (gp-clear-memory)
+  (gp-reset)
+  (let ((*invoke-adapters* t))
+    (gp-add-fact '(device interface-01))
+    (gp-add-fact '(power-state interface-01 off))
+    (gp-add-operator
+     (make-operator :name 'power-on
+                    :preconditions '((device ?d) (power-state ?d off))
+                    :add-list '((power-state ?d on))
+                    :delete-list '((power-state ?d off))))
+    (let ((plan (gp-plan :goals '((power-state interface-01 on)))))
+      (is-true (plan-success plan))
+      (is (fact-p '(power-state interface-01 off) (gp-facts))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Filesystem
@@ -278,6 +246,8 @@ them comes back as an :OK result."
                (filesystem-dispatch :format-disk () ":FORMAT-DISK")
                (processes-dispatch :run () ":COMMAND")
                (processes-dispatch :run (:command "echo no shell") "echo no shell")
+               (processes-dispatch :run (:command ("true") :force-shell t)
+                ":FORCE-SHELL")
                (processes-dispatch :run (:command ("echo" ?word)) "?WORD")
                (processes-dispatch :run (:command ("echo" nil)) "NIL")
                (processes-dispatch :run (:command ("echo" ("nested"))) "nested")
@@ -400,22 +370,22 @@ line, and is gone once it has been stopped."
 
 (test processes-dispatch-run-takes-a-list-and-never-a-shell
   "Strings, symbols, numbers and pathnames each become one argument.
-:FORCE-SHELL is not honoured and a string command is not run at all.
+A string command and a command with :FORCE-SHELL are not run at all.
 :OK follows the exit status even when the status is ignored."
   (%with-adapter-directory (dir)
-    (let ((file (merge-pathnames "made by a shell.txt" dir)))
+    (let* ((file (merge-pathnames "made by a shell.txt" dir))
+           (native (uiop:native-namestring file)))
       (is (equal (list :ok t
-                       :output (format nil "MARKER 3 1.5 ~A $HOME~%"
-                                       (uiop:native-namestring file))
+                       :output (format nil "MARKER 3 1.5 ~A $HOME~%" native)
                        :exit-code 0)
                  (processes-dispatch
-                  :run (list :command (list "echo" 'marker 3 1.5 file "$HOME")
-                             :force-shell t))))
-      (signals action-failed
-        (processes-dispatch
-         :run (list :command (format nil "touch '~A'"
-                                     (uiop:native-namestring file)))))
-      (is-false (file-exists-p file))
+                  :run (list :command
+                             (list "echo" 'marker 3 1.5 file "$HOME")))))
+      (loop for args in (list (list :command (format nil "touch '~A'" native))
+                              (list :command (list "touch" native)
+                                    :force-shell t))
+            do (signals action-failed (processes-dispatch :run args))
+               (is-false (file-exists-p file) "~S ran" args))
       (is (equal '(:ok nil :output "" :exit-code 1)
                  (processes-dispatch
                   :run '(:command ("false") :ignore-error-status t))))
