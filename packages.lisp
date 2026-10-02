@@ -605,6 +605,9 @@
    #:json-parse-error
    #:json-parse-error-reason
    #:json-parse-error-position
+   #:*json-max-depth*
+   #:*json-max-digits*
+   #:*json-max-symbol-length*
    #:json-string->symbol
    #:json->sexp
    #:web-api-handle
