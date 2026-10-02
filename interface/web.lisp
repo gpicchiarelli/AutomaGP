@@ -742,6 +742,11 @@ instead of taking the image down."
            (multiple-value-call #'answer (%json-refusal status message)))
           ((and (member method '(:get :head))
                 (or (string= uri "/") (string= uri "/index.html")))
+           ;; Framed by a page of another origin, the console would take
+           ;; the clicks that page draws onto its controls.
+           (setf (hunchentoot:header-out :x-frame-options) "DENY"
+                 (hunchentoot:header-out :content-security-policy)
+                 "frame-ancestors 'none'")
            (answer 200 "text/html; charset=utf-8" (%console-html)))
           ((and (>= (length uri) 5) (string= uri "/api/" :end1 5))
            (multiple-value-call #'answer (%api-response method path request)))
@@ -766,8 +771,9 @@ interface, the console cannot know its names and takes any Host."
         (return-from start-web *web-acceptor*))
       (stop-web)))
   (unless (%loopback-address-p address)
-    (warn "The console has no authentication: bound to ~:[every interface~;~:*~A~], ~
-           the session can be read and driven from other machines."
+    (warn "The console has no authentication: bound to ~
+           ~:[every interface~;~:*~A~], the session can be read and driven ~
+           from other machines."
           (unless (%wildcard-address-p address) address)))
   (gp-context) ; ensure session context exists
   (let ((acceptor (make-instance 'gp-acceptor :port port :address address)))

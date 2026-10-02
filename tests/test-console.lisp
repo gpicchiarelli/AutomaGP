@@ -169,7 +169,8 @@ is the console's own, and anything but GET and HEAD declares JSON."
 (test console-acceptor-keeps-its-guards
   "The acceptor binds loopback, takes one request per connection, leaves a
 refused body unread, answers under the session lock and survives a request
-that exhausts the stack; the page never writes server data as markup."
+that exhausts the stack; the page may not be framed and never writes server
+data as markup."
   (let ((source (%console-source)))
     (dolist (literal '(":address \"127.0.0.1\""
                        "(address \"127.0.0.1\")"
@@ -177,7 +178,9 @@ that exhausts the stack; the page never writes server data as markup."
                        ":request-class 'gp-request"
                        ":want-stream t"
                        "(sb-thread:with-mutex (*session-lock*)"
-                       "(storage-condition (condition)"))
+                       "(storage-condition (condition)"
+                       "(hunchentoot:header-out :x-frame-options) \"DENY\""
+                       "\"frame-ancestors 'none'\""))
       (is (search literal source) "interface/web.lisp lost ~S" literal))
     (dolist (sink '("innerHTML" "outerHTML" "insertAdjacentHTML"
                     "document.write"))
