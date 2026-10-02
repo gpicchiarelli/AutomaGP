@@ -1178,8 +1178,8 @@ stays open."
     (is (eq t (getf body :ok)))
     (let ((op (getf body :operator)))
       (is (eq 'free-port (getf op :name)))
-      (is (equal '((port-bound 47391)) (getf op :preconditions)))
-      (is (equal '((port-free 47391)) (getf op :add-list)))))
+      (is (equalp #((port-bound 47391)) (getf op :preconditions)))
+      (is (equalp #((port-free 47391)) (getf op :add-list)))))
   (is (operator-p (find-operator (gp-context) 'free-port)))
   (multiple-value-bind (code ctype json)
       (web-api-handle-json :post "/api/induce"

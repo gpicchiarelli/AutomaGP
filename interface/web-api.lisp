@@ -118,9 +118,9 @@ simulate/run. MATCHES and SUPPORTED use the same rules as GET /api/plan."
 
 (defun %serialize-operator (op)
   (list :name (operator-name op)
-        :preconditions (operator-preconditions op)
-        :add-list (operator-add-list op)
-        :delete-list (operator-delete-list op)
+        :preconditions (json-array (operator-preconditions op))
+        :add-list (json-array (operator-add-list op))
+        :delete-list (json-array (operator-delete-list op))
         :cost (operator-cost op)
         :meta (operator-meta op)
         :ask (json-array (getf (operator-meta op) :ask))))
@@ -212,6 +212,15 @@ simulate/run. MATCHES and SUPPORTED use the same rules as GET /api/plan."
             :graph (json-array nodes)
             :has-trace (and (deliberative-trace-p trace) t)))))
 
+(defun %summary-with-arrays (summary keys)
+  "The plist SUMMARY with the list under each of KEYS as a JSON array, so
+that an empty one is written [] and not false. No summary is :NULL."
+  (if (null summary)
+      :null
+      (loop for (key value) on summary by #'cddr
+            collect key
+            collect (if (member key keys) (json-array value) value))))
+
 (defun %serialize-autonomy (summary)
   "SUMMARY of an autonomous step or loop, as *LAST-AUTONOMY* keeps it.
 A loop summary is that of its last step with :ITERATIONS added, so one
@@ -227,8 +236,10 @@ shape serves both."
            :authorize-reason (getf summary :authorize-reason)
            :iterations (getf summary :iterations)
            :phases (json-array (getf summary :phases))
-           :plan (or (getf summary :plan) :null)
-           :execution (or (getf summary :execution) :null)
+           :plan (%summary-with-arrays (getf summary :plan)
+                                       '(:operators :remaining))
+           :execution (%summary-with-arrays (getf summary :execution)
+                                            '(:divergences))
            :goals (json-array (getf summary :goals))
            :pending-events (or (getf summary :pending-events) 0)))))
 
@@ -458,14 +469,17 @@ strings and keywords stay."
 TERM counts when the context supplied it from a package of its own: a
 symbol that is not the one AUTOMA-GP reads under that name. A word such as
 OPEN or FIRST is the COMMON-LISP symbol in every package that uses CL, so
-it says nothing about where the other words of a fact belong, and nothing
-is ever added to COMMON-LISP."
-  (and (symbolp term)
-       (not (keywordp term))
-       (symbol-package term)
-       (not (eq term (find-symbol (symbol-name term) :automa-gp)))
-       (not (eq (symbol-package term) (find-package :common-lisp)))
-       (symbol-package term)))
+it says nothing about where the other words of a fact belong. Nothing is
+ever added to COMMON-LISP or to another locked package: a word such as
+EXIT typed in COMMON-LISP-USER is the symbol of SB-EXT, which is not the
+user's to extend."
+  (let ((package (and (symbolp term) (symbol-package term))))
+    (and package
+         (not (keywordp term))
+         (not (eq term (find-symbol (symbol-name term) :automa-gp)))
+         (not (eq package (find-package :common-lisp)))
+         (not (sb-ext:package-locked-p package))
+         package)))
 
 (defun %adopt-fact (fact)
   "Rewrite FACT onto the vocabulary already in the context.
@@ -899,9 +913,8 @@ name, then :BEFORE and :AFTER for the lists BODY states."
            (%archive-body :procedure found))))
 
 (define-api-route :post "/api/archive/score" (body)
-  (let* ((name (%body-get body :name :missing))
-         (found (unless (eq name :missing)
-                  (%find-archived-procedure name))))
+  (let* ((name (%body-required body :name "archive/score requires :name"))
+         (found (%find-archived-procedure name)))
     (unless found
       (error "No archived procedure named ~S." name))
     (gp-score-procedure (procedure-name found)
@@ -957,16 +970,39 @@ return."
 Returns (VALUES STATUS-CODE RESPONSE-PLIST). An error is the refusal of a
 gate or a body the route cannot use, and is answered 400 with its report.
 An exhausted stack or heap is answered 500: the request is given up and
-the image goes on."
-  (handler-case
-      (sb-thread:with-recursive-lock (*web-api-lock*)
-        (let ((*ask-user-fn* (or *ask-user-fn* #'%abort-instead-of-asking)))
-          (multiple-value-bind (response status) (funcall function body query)
-            (values (or status 200) response))))
-    (storage-condition (condition)
-      (values 500 (%failure condition)))
-    (error (condition)
-      (values 400 (%failure condition)))))
+the image goes on.
+A procedure archive file that cannot be read or written does not end the
+request. The error comes with the SKIP restart, after which session memory
+is coherent and the file is as it was; a request has nobody at a debugger
+to choose it, and giving up instead would answer a refusal for a run or a
+remembered procedure that did happen. So SKIP is taken, and the response
+says what went wrong with the file under :ARCHIVE-ERROR."
+  (let ((archive-errors nil))
+    (flet ((skip-archive-file (condition)
+             (let ((skip (find-restart :skip condition)))
+               (when skip
+                 (pushnew (princ-to-string condition) archive-errors
+                          :test #'string=)
+                 (invoke-restart skip))))
+           (noting-archive (response)
+             (if archive-errors
+                 (append response
+                         (list :archive-error
+                               (format nil "~{~A~^ ~}"
+                                       (reverse archive-errors))))
+                 response)))
+      (handler-case
+          (sb-thread:with-recursive-lock (*web-api-lock*)
+            (let ((*ask-user-fn* (or *ask-user-fn*
+                                     #'%abort-instead-of-asking)))
+              (multiple-value-bind (response status)
+                  (handler-bind ((procedure-archive-error #'skip-archive-file))
+                    (funcall function body query))
+                (values (or status 200) (noting-archive response)))))
+        (storage-condition (condition)
+          (values 500 (noting-archive (%failure condition))))
+        (error (condition)
+          (values 400 (noting-archive (%failure condition))))))))
 
 (defun web-api-handle (method path &optional body)
   "Dispatch METHOD (:GET/:POST) and PATH (string) with optional BODY plist
@@ -977,7 +1013,10 @@ PATH may include a query string (e.g. /api/archive?applies=1).
 a gate of the REPL function behind the route, or a body the route cannot
 use. 404 is a path the API does not have and 405 a path it has for
 another method, listed in :ALLOW. 500 is a request that exhausted the
-stack or the heap. Requests are answered one at a time."
+stack or the heap. An answer with :ARCHIVE-ERROR was given while the
+procedure archive file could not be read or written: the session went on
+without the file, and the text says which file and why.
+Requests are answered one at a time."
   (let ((method (if (stringp method)
                     (or (find method '(:get :post) :test #'string-equal)
                         method)

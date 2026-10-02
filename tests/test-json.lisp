@@ -127,6 +127,28 @@
     (is (eql 10 (json->lisp "10"))))
   (is (integerp (json->lisp (make-string 400 :initial-element #\7)))))
 
+(test json-bounds-the-digits-of-a-number
+  ;; Reading digits costs the square of their count, so a run of them has a
+  ;; limit wherever a number has one: integer part, fraction, exponent.
+  (let ((limit automa-gp::*json-max-digits*))
+    (flet ((sevens (count) (make-string count :initial-element #\7)))
+      (loop for (before after) in '(("" "") ("-" "") ("0." "") ("" ".5")
+                                    ("1e-" "") ("1.5E" ""))
+            do (flet ((numeral (count)
+                        (concatenate 'string before (sevens count) after)))
+                 (is (numberp (handler-case (json->lisp (numeral limit))
+                                ;; 1e777…7 has its digits, and no float.
+                                (json-parse-error (c)
+                                  (if (search "too large" (princ-to-string c))
+                                      0
+                                      c))))
+                     "~A<~D digits>~A is refused" before limit after)
+                 (dolist (count (list (1+ limit) 2000000))
+                   (handler-case (progn (json->lisp (numeral count))
+                                        (fail "~D digits were read" count))
+                     (json-parse-error (c)
+                       (is (search "digits" (princ-to-string c)))))))))))
+
 (test json-decodes-objects-without-interning-keys
   (let ((obj (json->lisp "{\"seed_demo\":true,\"domain\":\"documents\"}")))
     (is (eq t (getf obj :seed-demo)))
@@ -244,7 +266,16 @@ Returns (VALUES STATUS-CODE DECODED-BODY)."
       (%post-json "/api/add-fact" :fact (vector "lamp" "open" "zq-new-word"))
     (is (= 200 code) "~A" (getf body :error))
     (is (fact-p (list 'lamp 'open (find-symbol "ZQ-NEW-WORD" :automa-gp/tests))
-                (gp-facts)))))
+                (gp-facts))))
+  ;; A word of the context may be the symbol of another locked package, as
+  ;; EXIT typed in COMMON-LISP-USER is SB-EXT's: nothing joins that either.
+  (gp-reset)
+  (gp-add-fact '(lamp sb-ext:exit))
+  (multiple-value-bind (code body)
+      (%post-json "/api/add-fact" :fact (vector "zq-window" "exit"))
+    (is (= 200 code) "~A" (getf body :error))
+    (is (fact-p '(automa-gp::zq-window sb-ext:exit) (gp-facts)))
+    (is (null (find-symbol "ZQ-WINDOW" :sb-ext)))))
 
 (test web-api-reads-every-flag-one-way
   (let ((keys '(:adapters :auto-confirm :react-events :learn :prefer-archive)))
@@ -563,3 +594,107 @@ Returns (VALUES STATUS-CODE DECODED-BODY)."
   (multiple-value-bind (code body) (web-api-handle :post "/api/react")
     (is (= 200 code))
     (is (equalp #() (getf (getf body :reaction) :dropped)))))
+
+(test web-api-writes-an-empty-list-as-an-empty-array
+  (gp-clear-memory)
+  (gp-reset)
+  (gp-add-operator (make-operator :name 'notice-it :add-list '((noticed))))
+  (let ((operator (aref (getf (nth-value 1 (web-api-handle :get "/api/operators"))
+                              :operators)
+                        0)))
+    (is (equalp #((noticed)) (getf operator :add-list)))
+    (dolist (key '(:preconditions :delete-list))
+      (is (equalp #() (getf operator key)) "~S is ~S" key (getf operator key))))
+  (let ((autonomy (automa-gp::%serialize-autonomy
+                   '(:status :done
+                     :plan (:success t :length 0 :operators nil :remaining nil)
+                     :execution (:success t :mode :simulate :divergences nil)))))
+    (is (equalp '(:success t :length 0 :operators #() :remaining #())
+                (getf autonomy :plan)))
+    (is (equalp #() (getf (getf autonomy :execution) :divergences))))
+  (let ((autonomy (automa-gp::%serialize-autonomy '(:status :halted))))
+    (is (eq :null (getf autonomy :plan)))
+    (is (eq :null (getf autonomy :execution)))))
+
+(test web-api-autonomy-loop-reports-its-last-step
+  ;; A loop answers with what its last step planned and ran, and GET
+  ;; /api/autonomy says the same afterwards.
+  (%power-session)
+  (gp-add-goal '(power-state interface-01 on))
+  (multiple-value-bind (code body)
+      (web-api-handle :post "/api/autonomy/loop" '(:authority "simulate"))
+    (is (= 200 code) "~A" (getf body :error))
+    (dolist (autonomy (list (getf body :autonomy)
+                            (getf (nth-value 1 (web-api-handle :get "/api/autonomy"))
+                                  :last)))
+      (is (eql 1 (getf autonomy :iterations)))
+      (is (eq :simulate (getf autonomy :authority)))
+      (is (eq t (getf autonomy :authorized)))
+      (is (plusp (length (getf autonomy :phases))))
+      (is (eq t (getf (getf autonomy :plan) :success)))
+      (is (equalp #(power-on) (getf (getf autonomy :plan) :operators)))
+      (is (eq t (getf (getf autonomy :execution) :success)))
+      (is (equalp #((power-state interface-01 on)) (getf autonomy :goals))))))
+
+(test web-api-goes-on-when-the-archive-file-cannot-be-used
+  ;; The file cannot be written. What the request did is answered as done,
+  ;; with the reason the file was left as it is.
+  (with-archive-file (blocker)
+    (%write-archive-text blocker "not a directory")
+    (let ((*procedure-archive-path*
+            (format nil "~A/archive.agp" (namestring blocker))))
+      (flet ((not-written (body)
+               (is (eq t (getf body :ok)) "~A" (getf body :error))
+               (is (search "Cannot write the procedure archive"
+                           (getf body :archive-error)))
+               (is (search (namestring blocker) (getf body :archive-error)))))
+        (%archive-studio)
+        (multiple-value-bind (code body)
+            (web-api-handle :post "/api/archive/remember" '(:name "kept"))
+          (is (= 200 code))
+          (not-written body)
+          (is (= 1 (length (getf body :procedures)))))
+        (is (procedure-p (gp-find-procedure 'automa-gp::kept)))
+        ;; A run that reuses the procedure scores it, and so writes the file.
+        (%archive-studio)
+        (is (eq 'automa-gp::kept
+                (getf (plan-meta (gp-last-plan)) :from-procedure)))
+        (multiple-value-bind (code body)
+            (web-api-handle :post "/api/run" '(:confirm t))
+          (is (= 200 code))
+          (not-written body)
+          (is (eq t (getf (getf body :execution) :success))))
+        (is (fact-p '(connection interface-01 computer) (gp-facts)))
+        (multiple-value-bind (code ctype json)
+            (web-api-handle-json :post "/api/archive/score"
+                                 "{\"name\":\"kept\",\"success\":false}")
+          (declare (ignore ctype))
+          (is (= 200 code))
+          (not-written (json->lisp json)))
+        (is (= 1 (procedure-failure-count
+                  (gp-find-procedure 'automa-gp::kept)))))
+      ;; A request that leaves the archive alone says nothing about it.
+      (is (eq :absent (getf (nth-value 1 (web-api-handle :get "/api/archive"))
+                            :archive-error :absent)))))
+  ;; The file cannot be read. The session goes on without it, a refusal
+  ;; says so too, and a later change does not replace the file.
+  (dolist (text '("(" "(:kind :not-an-archive)"))
+    (with-archive-file (path :autoload t)
+      (%write-archive-text path text)
+      (flet ((not-read (body)
+               (is (search "Cannot read the procedure archive"
+                           (getf body :archive-error)))
+               (is (search (namestring path) (getf body :archive-error)))))
+        (multiple-value-bind (code body)
+            (web-api-handle :post "/api/archive/use" '(:name "absent"))
+          (is (= 400 code))
+          (is (search "No archived procedure" (getf body :error)))
+          (not-read body))
+        (%archive-studio)
+        (multiple-value-bind (code body)
+            (web-api-handle :post "/api/archive/remember" '(:name "new"))
+          (is (= 200 code))
+          (is (eq t (getf body :ok)))
+          (not-read body)))
+      (is (procedure-p (gp-find-procedure 'automa-gp::new)))
+      (is (string= text (uiop:read-file-string path))))))

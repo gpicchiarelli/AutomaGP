@@ -9,9 +9,9 @@
 ;;;;
 ;;;; JSON → Lisp. An object is a plist, an array a vector, null is :NULL.
 ;;;; The text comes from outside the image, so reading it is bounded: the
-;;;; nesting has a limit, an object key never creates a symbol, and a word
-;;;; that becomes a symbol has a length limit. Nothing is handed to the Lisp
-;;;; reader.
+;;;; nesting has a limit, a number has a limit of digits, an object key never
+;;;; creates a symbol, and a word that becomes a symbol has a length limit.
+;;;; Nothing is handed to the Lisp reader.
 
 (in-package #:automa-gp)
 
@@ -23,6 +23,12 @@ exhaust the control stack. The bodies of the console API nest three deep.")
 (defparameter *json-max-symbol-length* 128
   "Longest JSON string JSON-STRING->SYMBOL turns into a symbol.
 Symbols are never collected, so the names a request can create are bounded.")
+
+(defparameter *json-max-digits* 1024
+  "Longest run of digits in a number JSON->LISP reads.
+Turning digits into an integer takes time that grows with the square of
+their count: a numeral of a million digits holds a thread for most of a
+minute, one of ten million for over an hour.")
 
 (define-condition json-parse-error (parse-error)
   ((reason
@@ -39,8 +45,9 @@ Symbols are never collected, so the names a request can create are bounded.")
                      (json-parse-error-reason condition)
                      (json-parse-error-position condition))))
   (:documentation "A text is not JSON, or it is JSON this codec refuses:
-nested deeper than *JSON-MAX-DEPTH*, a number no float can hold, a name
-longer than *JSON-MAX-SYMBOL-LENGTH*."))
+nested deeper than *JSON-MAX-DEPTH*, a number no float can hold or with
+more than *JSON-MAX-DIGITS* digits in a row, a name longer than
+*JSON-MAX-SYMBOL-LENGTH*."))
 
 (defun %json-error (position control &rest arguments)
   "Signal JSON-PARSE-ERROR for POSITION with the reason CONTROL and
@@ -180,8 +187,13 @@ which are not JSON."
   (char<= #\0 char #\9))
 
 (defun %digits-end (s i)
-  "Index after the run of ASCII digits that starts at I in S."
-  (or (position-if-not #'%ascii-digit-p s :start i) (length s)))
+  "Index after the run of ASCII digits that starts at I in S.
+A run longer than *JSON-MAX-DIGITS* is a JSON-PARSE-ERROR, signalled before
+any of it is read as a number."
+  (let ((end (or (position-if-not #'%ascii-digit-p s :start i) (length s))))
+    (when (> (- end i) *json-max-digits*)
+      (%json-error i "A JSON number has more than ~D digits" *json-max-digits*))
+    end))
 
 (defun %parse-hex4 (s i)
   "The code unit that the four hexadecimal digits at I in S write."
@@ -281,10 +293,11 @@ which no float format reaches, so a numeral like 1e999999999 costs nothing."
 
 (defun %parse-number (s i)
   "Parse the JSON number at I in S. Returns (VALUES NUMBER NEXT-INDEX).
-A numeral with neither fraction nor exponent is an integer of any size.
-Any other is a float, see %JSON-FLOAT. The grammar is that of RFC 8259:
-a bare minus sign, a leading zero, a point or an exponent with no digit
-after it are errors."
+A numeral with neither fraction nor exponent is an integer, a bignum when
+it needs to be. Any other is a float, see %JSON-FLOAT. The grammar is that
+of RFC 8259: a bare minus sign, a leading zero, a point or an exponent with
+no digit after it are errors. So is a run of more than *JSON-MAX-DIGITS*
+digits, see %DIGITS-END."
   (let* ((start i)
          (negative (%char-at-p s i #\-))
          (digits (if negative (1+ i) i))
@@ -410,8 +423,9 @@ any other the float the Lisp reader would make of it. An object is a plist
 whose key is a keyword when the image already has one of that name (in
 upper case, _ read as -) and the key string otherwise, so a text cannot
 create keywords; {} is NIL.
-Signals JSON-PARSE-ERROR for a text that is not JSON, or that nests deeper
-than *JSON-MAX-DEPTH*."
+Signals JSON-PARSE-ERROR for a text that is not JSON, that nests deeper
+than *JSON-MAX-DEPTH*, or that writes a number with more than
+*JSON-MAX-DIGITS* digits in a row."
   (let ((s (string string)))
     (multiple-value-bind (v i) (%parse-value s 0 0)
       (setf i (%skip-ws s i))
