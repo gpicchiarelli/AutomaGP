@@ -139,7 +139,8 @@ Also drops the last plan and execution, the listening session, working and
 episodic session memory, the deliberative trace buffer, the failure
 strategy and the autonomy policy (back to the safe default on next use),
 and stops the notice watches.
-Knowledge and procedural memory are kept (use GP-CLEAR-MEMORY to drop them).
+Knowledge and procedural memory are kept (use GP-CLEAR-MEMORY to drop them),
+and so is the adapters setting (GP-ADAPTERS).
 Returns the new context."
   (%install-session-context (create-context :name 'default :mode :read))
   (setf *deliberative-strategy* nil
