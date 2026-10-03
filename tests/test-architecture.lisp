@@ -149,3 +149,55 @@ after it; with the registry nothing needs it."
                         (%sources-in "adapters")))
     (is (null (search "(fboundp '" (%source-text file)))
         "~A tests a function with FBOUNDP" file)))
+
+;;; ---------------------------------------------------------------------------
+;;; The public surface
+;;; ---------------------------------------------------------------------------
+
+(defun %slot-accessor-names ()
+  "Every reader, writer and accessor name that a class, condition or
+structure of AUTOMA-GP defines for a slot. Their documentation belongs to
+the slot, so they are not asked for a docstring of their own."
+  (let ((names (make-hash-table :test #'eq))
+        (package (find-package :automa-gp)))
+    (do-all-symbols (symbol package)
+      (when (and (eq (symbol-package symbol) package) (find-class symbol nil))
+        (let ((class (find-class symbol)))
+          (if (typep class 'structure-class)
+              (dolist (slot (sb-kernel:dd-slots
+                             (sb-kernel:find-defstruct-description symbol)))
+                (setf (gethash (sb-kernel:dsd-accessor-name slot) names) t))
+              (progn
+                (ignore-errors (sb-mop:finalize-inheritance class))
+                (dolist (slot (sb-mop:class-direct-slots class))
+                  (dolist (name (append (sb-mop:slot-definition-readers slot)
+                                        (sb-mop:slot-definition-writers slot)))
+                    (setf (gethash (if (consp name) (second name) name) names)
+                          t))))))))
+    names))
+
+(test every-exported-symbol-is-defined-and-documented
+  "PROMPT-FASE-2 §4: every public function is exported and has a docstring;
+and nothing is exported that does not exist."
+  (let ((accessors (%slot-accessor-names))
+        (undefined nil) (undocumented nil))
+    (do-external-symbols (symbol :automa-gp)
+      (let ((function (fboundp symbol))
+            (macro (macro-function symbol))
+            (variable (and (boundp symbol) (not (constantp symbol))))
+            (class (find-class symbol nil)))
+        (cond
+          ((not (or function variable class (constantp symbol)))
+           (push symbol undefined))
+          ((gethash symbol accessors))
+          (t
+           (when (and function (not (special-operator-p symbol))
+                      (null (documentation symbol 'function)))
+             (push (list (if macro :macro :function) symbol) undocumented))
+           (when (and variable (null (documentation symbol 'variable)))
+             (push (list :variable symbol) undocumented))
+           (when (and class (null (documentation symbol 'type)))
+             (push (list :class symbol) undocumented))))))
+    (is (null undefined) "exported but never defined: ~{~S~^ ~}" undefined)
+    (is (null undocumented) "exported without a docstring: ~{~S~^ ~}"
+        undocumented)))
