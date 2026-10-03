@@ -2,7 +2,7 @@
 # run on the whole tree with `pre-commit run --all-files`.
 # The Lisp sources have no hook: `make load` and `make test` cover them.
 
-exclude: ^(macos/AutomaGPWorkbench/\.build/|docs/PROMPT\.md$)
+exclude: ^(macos/AutomaGPWorkbench/\.build/|docs/PROMPT(-SEMANTICA)?\.md$)
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

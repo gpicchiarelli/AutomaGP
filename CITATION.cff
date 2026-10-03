@@ -12,7 +12,7 @@ authors:
   - family-names: Picchiarelli
     given-names: Giacomo
     email: gpicchiarelli@gmail.com
-version: "0.196.0"
+version: "0.197.0"
 date-released: 2026-10-03
 license: BSD-2-Clause
 repository-code: "https://github.com/gpicchiarelli/AutomaGP"

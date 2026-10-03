@@ -2,5 +2,5 @@
 
 (in-package #:automa-gp)
 
-(defparameter *version* "0.196.0"
-  "AUTOMA GP version (engineering pass over the interfaces, persistence and adapters).")
+(defparameter *version* "0.197.0"
+  "AUTOMA GP version (semantic standards platform: foundation and specification).")

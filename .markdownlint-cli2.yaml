@@ -1,7 +1,8 @@
 # markdownlint-cli2 runner options. Rules live in .markdownlint.yaml.
 ignores:
-  # The master prompt is kept verbatim; its heading levels are not linted.
+  # The master prompts are kept verbatim; they are not linted.
   - "docs/PROMPT.md"
+  - "docs/PROMPT-SEMANTICA.md"
   - "**/.build/**"
   - "**/node_modules/**"
   - "**/DerivedData/**"

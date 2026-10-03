@@ -87,6 +87,16 @@ It is a SwiftPM app for macOS 13 or later and needs the Xcode command line
 tools. Start the web console first: the Workbench talks to
 `http://127.0.0.1:47391/`.
 
+## Does it support OWL, SHACL or SPARQL?
+
+No. None of them is implemented. The repository has the foundation for
+implementing them, in [`semantic`](../semantic): a registry that says which
+standards are known, at which version, with which documents and test suites,
+and what has been done with each, using six levels of support from `parsed`
+to `conformant`, each needing its own evidence. `scripts/modelc standard
+list` prints the state; today no standard has any level. The plan and the
+order are in [`piattaforma-semantica.md`](piattaforma-semantica.md).
+
 ## Which version am I running?
 
 `automa-gp:*version*` in the REPL. The same string sits in

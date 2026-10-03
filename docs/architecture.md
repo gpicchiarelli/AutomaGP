@@ -496,9 +496,94 @@ adapters, and only when its operator is still the one recorded; the
 section above states the full rule. A high-risk or irreversible step still
 requires confirmation on a live run.
 
+## Semantic platform foundation (`semantic/`)
+
+The system `automa-gp/semantic` is the foundation of the platform specified in
+[`PROMPT-SEMANTICA.md`](PROMPT-SEMANTICA.md) and integrated in
+[`piattaforma-semantica.md`](piattaforma-semantica.md). It depends on
+`automa-gp` only for `gp-error`, and no standard is implemented in it yet.
+Each sentence below corresponds to a tested behaviour.
+
+**Registry.** A `standard-definition` records an identifier (a keyword), a
+name, a version, a release, a maturity (`:recommendation`,
+`:candidate-recommendation`, `:note`, `:rfc`, `:living-document`), the URL of
+the official specification, its documents (normative or informative), its
+dependencies, its test suites, its constructs, the status of its catalog of
+constructs (`:pending`, `:partial`, `:complete`) and its evidence. A standard
+is named `identifier@version`. A dependency must name a version, because one
+that does not is not reproducible. `find-standard` with no version returns the
+only registered version, and with several signals a
+`standard-resolution-error` that lists them. A duplicate is refused unless
+`:replace` is given or the restart `:replace-standard` is taken.
+`standard-closure` lists a standard and everything it depends on,
+dependencies first, in the same order every time; a dependency that is not
+registered signals `dependency-missing`, which names what required it, and a
+cycle signals `dependency-cycle` with its path.
+
+**Shipped catalog.** The registry is loaded with 16 standards: RDF 1.1,
+RDF Schema 1.1, N-Triples, N-Quads, Turtle, RDF/XML, JSON-LD 1.1, OWL 2,
+SHACL, SPARQL 1.1, PROV-O, the Wikibase data model, XSD 1.1 datatypes, RFC
+3987, BCP 47 and RDF 1.2. Titles, releases and URLs were read from the
+publishers' pages. RDF 1.2 is registered as a Candidate Recommendation. A
+dependency is declared only where the specification's own list of normative
+references says so, which was read for RDF 1.1, N-Triples and SHACL; OWL 2
+and SPARQL declare none, and say why. No shipped standard has a construct, a
+requirement, evidence or a level: the tests assert that.
+
+**Levels of support.** In order, `:parsed`, `:represented`, `:validated`,
+`:semantically-implemented`, `:executable`, `:conformant`. `evidence`
+establishes a level only if it is of the right kind and came out right:
+a `:test-run` with passes and no failures for the first four, a `:build`
+with passes and no failures for `:executable`, and a `:conformance-report`
+whose verdict is `:pass` for `:conformant`. `evidenced-level` reaches a level
+only if it and every level below it are established, so evidence for a high
+level alone proves nothing. A conformance verdict is `:pass`, `:fail`,
+`:partial` (something passed, nothing failed, something was left out) or
+`:none` (nothing passed and nothing failed). `standard-support` gives the
+lowest level among the cataloged constructs and says the standard is
+`:claimable` only when the catalog is `:complete` and every construct has a
+level. `construct-status` turns a level into the answer the prompt asks of a
+construct: `:not-implemented`, `:partially-implemented` up to `:validated`,
+`:implemented` from `:semantically-implemented`.
+
+**Requirements.** A requirement has an id such as `REQ-OWL2-SYNTAX-0001`, a
+standard with its version, a section, a summary in the maintainer's words
+(the specification text is not copied), a modality, a construct, tests and
+implementation symbols. It can be registered only for a registered standard,
+and for a construct the standard's catalog contains once the catalog has any.
+`requirements-implemented-by` answers which requirements a function
+implements, `tests-for-requirement` which tests check one, and
+`traceability-gaps` which requirements have no test, no implementation, or
+name a symbol that does not exist.
+
+**Diagnostics.** Every failure is a `standards-error`, a `gp-error` carrying
+a code, a message, a source, a location, a standard, a version, a construct and
+a suggestion, with one subtype each for a parse error, a resolution error, a
+dependency error, a semantic error, an unsupported construct, an
+implementation error, a conformance failure and a runtime error. A
+construct that is not implemented is never dropped silently: `report-unsupported`
+records a `:not-implemented` diagnostic in the active collector and signals
+`unsupported-construct` with the restart `:continue-unsupported`, unless
+`*unsupported-policy*` is `:record` and a collector is active. With no collector
+the policy cannot let it vanish, and a diagnostic of severity `:error` or
+`:warning` noted with nowhere to go is signalled instead.
+
+**Command line.** `scripts/modelc` answers `standard list`, `standard show`,
+`standard closure` and `requirements`. A command the prompt lists and that
+does not exist yet names the phase that brings it and exits with status 3;
+an unknown command exits with 2, a failure with 1, success with 0.
+
+**Layering.** `tests/test-architecture.lisp` fails when a source in `core/`
+or `semantic/` names an operating-system primitive, when `core/` or `memory/`
+names an adapter, and when an exported symbol of `automa-gp` or
+`automa-gp/semantic` is undefined or has no docstring.
+
 ## Dependency policy
 
 Core: ANSI Common Lisp, ASDF, UIOP; on SBCL the notices also use `sb-posix`.
+Semantic platform foundation (`automa-gp/semantic`): the core, nothing else.
+The platform's later systems may depend on further libraries, each in a
+system of its own (`piattaforma-semantica.md` §9).
 Web (optional): Hunchentoot.
 Tests: FiveAM.
 Workbench: Swift 5.9, macOS 13 or later, no packages.

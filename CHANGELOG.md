@@ -9,7 +9,59 @@ versions are the increments listed in `ROADMAP.md`.
 
 ## [Unreleased]
 
+## [0.197.0] — 2026-10-03
+
+The semantic standards platform enters the project: first as a specification
+joined to the earlier prompts, then as its foundation in code. No standard is
+implemented in this version, and the registry says so. It also carries the
+Workbench engineering fixes that were waiting under Unreleased. The suite
+goes from 22173 to 22950 checks, and from 612 to 673 tests.
+
+### Added
+
+- `docs/PROMPT-SEMANTICA.md`, the owner's prompt for a platform that implements
+  semantic standards completely in Common Lisp, kept verbatim, and
+  `docs/piattaforma-semantica.md`, which integrates it: the order of
+  precedence among the three prompts, every point where it supersedes or
+  absorbs `docs/PROMPT-FASE-2.md`, where each of its 38 sections lives, the
+  phases S0 to S9 and how Phase 2 attaches to them, the six levels of support,
+  a proposed first target (N-Triples 1.1 to `conformant`), the external
+  dependencies checked on Quicklisp, the security rules for acquisition, the
+  risks, and the open decisions D1 to D7.
+- The system `automa-gp/semantic`, in `semantic/`:
+  - a registry of standards with `standard@version` designators, documents,
+    test suites, dependencies and catalogs of constructs, loaded with 16
+    standards whose titles, releases and URLs were read from their publishers;
+  - six levels of support and the evidence each needs: a level is reached only
+    with evidence for it and for every level below it, a conformance report
+    that left tests out is `:partial`, and a standard is called supported at a
+    level only when its catalog is complete and every construct has it;
+  - requirements with traceability in both directions, and a list of what no
+    test or implementation covers;
+  - typed diagnostics for the eight kinds of failure the prompt names, and
+    `report-unsupported`, which never lets an unimplemented construct vanish;
+  - `dependency-closure`, a deterministic closure with cycle detection that
+    ontology imports will use;
+  - `scripts/modelc` with `standard list`, `standard show`, `standard closure`
+    and `requirements`; the thirteen commands the prompt lists that do not
+    exist yet name their phase and exit with status 3.
+- `tests/test-architecture.lisp` also holds `semantic/` to the rule that
+  nothing outside `adapters/` names an operating-system primitive, and checks
+  the exported symbols of `automa-gp/semantic` as it does those of
+  `automa-gp`.
+
 ### Changed
+
+- `docs/PROMPT-FASE-2.md` carries a note and marks what the new prompt
+  supersedes or absorbs: the ban on implementing RDF, OWL and SPARQL fully
+  (2.0, §6), the single-dependency rule as far as the platform is concerned
+  (§4), and phases 2.0, 2.1, 2.3 and 2.5, which now attach to the platform.
+  RDF 1.2 is registered as the Candidate Recommendation it is, and is not a
+  target.
+- The README, the roadmap (a new Ahead section, nothing in it ticked), the
+  FAQ, the architecture document, the contributing guide, the docs index, the
+  labeler and the lint configuration describe the platform, and say that none
+  of it beyond the foundation exists.
 
 - Workbench (engineering fixes only, no change to what the window says or
   shows): every request goes through one function on a session of its own,
@@ -26,6 +78,18 @@ versions are the increments listed in `ROADMAP.md`.
   dialog showed it, the dialog keeps the words it opened with while a
   refresh clears the live list, and only one run or autonomous step is in
   flight at a time.
+
+### Limits
+
+- No standard has a construct catalog, a requirement, evidence or a level of
+  support; the tests assert it, and the day one does the assertion is where it
+  is recorded.
+- The normative references of OWL 2 and SPARQL 1.1 have not been read, so the
+  registry declares no dependency for them rather than guess.
+- The URL of the OWL 2 test cases has not been located.
+- Conformance of an implementation of OWL 2 cannot be shown by its test cases
+  alone: the specification declares them incomplete. `conformant` means no
+  known failure on the available suite.
 
 ## [0.196.0] — 2026-10-03
 

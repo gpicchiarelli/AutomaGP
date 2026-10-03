@@ -198,6 +198,28 @@ after that deepens memory, observation, adapters, and the autonomy policy.
 - [x] Engineering pass over the core and the memory layers: audited defects fixed test-first, typed conditions with restarts, parametric tests (v0.195.0)
 - [x] Engineering pass over persistence, the session commands, notices, phrases, the JSON façade, the console and the adapters; one session lock and an adapter registry (v0.196.0)
 
+- [x] Semantic platform foundation (S0): registry of standards, support levels and evidence, requirements and traceability, typed diagnostics, dependency closure, `modelc` (v0.197.0)
+
+## Ahead
+
+Not delivered, and not claimed anywhere else in this repository. The
+semantic platform of [`docs/PROMPT-SEMANTICA.md`](docs/PROMPT-SEMANTICA.md)
+is built in the order below; [`docs/piattaforma-semantica.md`](docs/piattaforma-semantica.md)
+gives the contents, the exit criteria and the open decisions of each step,
+and the Phase 2 items of [`docs/PROMPT-FASE-2.md`](docs/PROMPT-FASE-2.md)
+attach to it as shown there. A box is ticked, and the item moves up, when
+the code is loadable and tested.
+
+- [ ] S1: RDF 1.1 terms, graphs and datasets; N-Triples and N-Quads, then Turtle, RDF/XML and JSON-LD; RDFS entailment. First target: N-Triples 1.1 to `conformant` (proposed, decision D1)
+- [ ] S2: acquisition of standards and ontologies, immutable archive, `owl:imports` resolver, cache, lock files
+- [ ] S3: OWL 2 by steps: structural model and functional syntax, mapping to RDF, profile checks, RL reasoning, Direct Semantics, RDF-Based Semantics
+- [ ] S4: SHACL and the Constraint Engine, with the CSP of Phase 2.3 under one `constraint` object
+- [ ] S5: SPARQL 1.1 query, update, property paths, remote endpoints
+- [ ] S6: the Wikibase model in full and the `KnowledgeSource` abstraction; read-only Wikidata adapter (Phase 2.5)
+- [ ] S7: behavior model independent of Lisp; HTN (Phase 2.2)
+- [ ] S8: statements with truth and provenance, the World Model, learning, restricted Italian, the professional layer (Phases 2.0, 2.1, 2.4, 2.6 and §3)
+- [ ] S9: semantic compilation: implementation model, generated S-expressions, SBCL, conformance
+
 ---
 
 Priority: correctness, then clarity, then testability, then performance.

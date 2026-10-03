@@ -1,5 +1,19 @@
 # AUTOMA GP — Prompt di Fase 2: conoscenza, verità, apprendimento, riproduzione
 
+> **Aggiornamento del 2026-10-03.** Dopo questo prompt il proprietario ha
+> aggiunto [`PROMPT-SEMANTICA.md`](PROMPT-SEMANTICA.md), la piattaforma che
+> implementa standard semantici completi. Dove i due si contraddicono vale
+> il più recente per il suo ambito, e [`piattaforma-semantica.md`](piattaforma-semantica.md)
+> elenca ogni punto. In breve: le fasi 2.0 (rappresentazione), 2.1 (verità e
+> provenienza), 2.3 (vincoli) e 2.5 (Wikidata) si innestano su quella
+> piattaforma e non sono più un binario indipendente; sono **superati** il
+> divieto di implementare RDF, OWL e SPARQL per intero (§2.0, §6) e il limite
+> "UIOP unica dipendenza" nella parte che riguarda la piattaforma (§4: il
+> core la mantiene). Restano invariati 2.2, 2.4, 2.6, lo strato
+> professionale (§3), le regole di sviluppo non citate sopra, i criteri di
+> accettazione (§5) e tutte le regole di sicurezza. Le righe interessate
+> sono marcate **[superato]** o **[innestato]** nel testo.
+
 Questo prompt continua `docs/PROMPT.md`. Non lo sostituisce. Tutto ciò che
 lì è vincolante resta vincolante: contesto come unità fondamentale, Common
 Lisp ANSI su SBCL, nessun chatbot, REPL come superficie primaria, policy a
@@ -72,6 +86,12 @@ la precedente non è caricabile, testata e documentata.
 
 ### Fase 2.0 — Rappresentazione a triple con affermazioni (statement)
 
+**[innestato]** Questa fase si costruisce sopra il modello RDF della fase
+S1 (esportazione in Turtle e N-Triples) e sul modello di statement di
+Wikibase (S6). La forma canonica del fatto di AutomaGP è lo statement
+descritto qui; la tripla RDF è il modello del modulo RDF, non lo stesso
+oggetto. Vedi `piattaforma-semantica.md` §3 e §4.
+
 Il formato dei fatti cambia. Oggi un fatto è una lista ad arità libera:
 `(device interface-01)`, `(power-state interface-01 off)`. Da ora la forma
 canonica è la **tripla** soggetto–predicato–oggetto, e ogni tripla vive
@@ -117,6 +137,11 @@ Regole:
   `gp-import`) per interoperabilità. La persistenza primaria resta `.agp`.
 
 ### Fase 2.1 — Verità, provenienza e Truth Maintenance
+
+**[innestato]** I quattro valori sono lo strato epistemico di AutomaGP e
+non alterano la relazione di conseguenza di uno standard, che per RDFS e OWL
+è a due valori e a mondo aperto. I tipi di provenienza diventano sette,
+con `:inferred` e `:hypothesis` (`piattaforma-semantica.md` §4).
 
 Ogni affermazione porta:
 
@@ -225,6 +250,11 @@ Vincoli:
 
 ### Fase 2.3 — Vincoli (cosa è accettabile, separato da in che ordine)
 
+**[innestato]** Il risolutore CSP descritto qui è una delle due famiglie del
+Constraint Engine (vincoli di soddisfacimento); l'altra è la validità
+(SHACL e predicati nativi). Stesso oggetto `constraint`, con ambito,
+condizione, gravità, messaggio, fonte e provenienza.
+
 Implementa un risolutore CSP minimo in Lisp puro: variabili con domini
 finiti, vincoli come predicati o tabelle, propagazione di consistenza
 d'arco, backtracking con scelta della variabile più vincolata. Niente
@@ -289,6 +319,11 @@ Superficie REPL minima:
 ```
 
 ### Fase 2.5 — Radicamento esterno: Wikidata come contesto pubblico
+
+**[innestato]** Il modello diventa quello completo di Wikibase (item,
+proprietà, statement, snak, qualificatori, riferimenti, ranghi, valori
+sconosciuti e assenti) dietro l'astrazione `KnowledgeSource` della fase S6.
+Restano tutte le regole di questa sezione sulla policy e sulla sola lettura.
 
 Wikidata entra come **adapter di lettura**, nel sistema opzionale
 `automa-gp/wikidata` (come `automa-gp/web` è opzionale). Il core non
@@ -525,8 +560,10 @@ tre casi, gli allineamenti iniziali, e i test che riproducono i casi in
   viola questa regola e lo tocchi, lo riscrivi.
 - **Test senza rete.** I test dell'adapter Wikidata usano risposte
   registrate su file. Nessun test apre una connessione.
-- **Nessuna dipendenza nuova** per il core. UIOP resta l'unica. Il client
-  HTTP vive solo in `automa-gp/wikidata`.
+- **Nessuna dipendenza nuova** per il core. UIOP resta l'unica. **[aggiornato]**
+  Il client HTTP non vive più in `automa-gp/wikidata` ma nel sistema di
+  acquisizione della piattaforma semantica; le dipendenze della piattaforma
+  stanno in sistemi ASDF separati e opzionali (`piattaforma-semantica.md` §9).
 - **Ogni condizione ha restart.** Disputa nel TMS, metodo senza
   applicabilità, CSP insoddisfacibile, operatore discordante, disaccordo
   con la fonte esterna: tutte condizioni con almeno un restart che lascia
@@ -589,9 +626,11 @@ La fase 2 è finita quando questi otto scenari passano come test in
 - Nessun parser statistico, nessun embedding, nessun dizionario esterno
   scaricato. L'italiano ristretto è una grammatica scritta a mano e un
   lessico dichiarato: ciò che non è dichiarato non è capito.
-- Nessuna implementazione completa di RDF, OWL o SPARQL locale. Il
+- ~~Nessuna implementazione completa di RDF, OWL o SPARQL locale. Il
   sottoinsieme della fase 2.0 basta; l'interoperabilità passa per
-  l'export.
+  l'export.~~ **[superato]** dal 2026-10-03: `PROMPT-SEMANTICA.md` chiede
+  l'implementazione completa, per livelli e con prove. Il rigore di questa
+  frase si conserva: un livello di supporto non si dichiara senza evidenza.
 - Nessun motore Rete. Il matcher attuale basta per il volume di regole
   previsto.
 - Nessuna scrittura su Wikidata, nessun invio di affermazioni private,

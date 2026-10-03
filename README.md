@@ -24,7 +24,7 @@
   <a href="version.lisp"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgpicchiarelli%2FAutomaGP%2Fmain%2Fversion.lisp-expr&search=%22(%5B0-9.%5D%2B)%22&replace=%241&label=version&color=214237" alt="Version, read from version.lisp-expr on main"></a>
   <a href="automa-gp.asd"><img src="https://img.shields.io/badge/Common%20Lisp-SBCL-3f5f72.svg" alt="Common Lisp on SBCL"></a>
   <a href="adapters"><img src="https://img.shields.io/badge/target-macOS-111412.svg" alt="Target: macOS"></a>
-  <a href="tests"><img src="https://img.shields.io/badge/tests-612%20passing-63735f.svg" alt="612 tests passing"></a>
+  <a href="tests"><img src="https://img.shields.io/badge/tests-673%20passing-63735f.svg" alt="673 tests passing"></a>
   <a href="https://github.com/gpicchiarelli/AutomaGP/commits/main"><img src="https://img.shields.io/github/last-commit/gpicchiarelli/AutomaGP?color=3f5f72" alt="Last commit"></a>
 </p>
 
@@ -181,7 +181,7 @@ You need SBCL and Quicklisp. On macOS, `brew install sbcl` and the [Quicklisp in
 ```bash
 git clone https://github.com/gpicchiarelli/AutomaGP.git
 cd AutomaGP
-./scripts/run-tests.sh      # FiveAM suite: 612 tests, 22171 checks
+./scripts/run-tests.sh      # FiveAM suite: 673 tests, 22950 checks
 ./scripts/run-web.sh        # operator console on http://127.0.0.1:47391/
 ```
 
@@ -196,19 +196,43 @@ From a REPL, or from SLIME or SLY:
 
 Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The web system adds Hunchentoot. Tests add FiveAM. The Workbench needs Xcode command line tools for `swift run`. CI runs the same suite on Ubuntu, macOS, and FreeBSD 14.x, so the core is portable; the `macos` adapter and the Terminal.app look are the parts that need a Mac. Day-to-day wrappers live in the root `Makefile` (`make test`, `make coverage`, `make load`, `make web`, `make lint`).
 
+## Standards: where this is going, and what is true today
+
+The next body of work, specified in [`docs/PROMPT-SEMANTICA.md`](docs/PROMPT-SEMANTICA.md), is a platform that implements semantic standards (RDF, OWL 2, SHACL, SPARQL, the Wikibase model) in Common Lisp, verifies them against the publishers' conformance suites, and gives AutomaGP their semantics as part of its model of the world. [`docs/piattaforma-semantica.md`](docs/piattaforma-semantica.md) says how it joins the rest of the project and in which order it is built.
+
+None of those standards is implemented yet. What exists is the foundation in [`semantic`](semantic): a registry of 16 standards with their versions, documents, test suites and verified dependencies; six levels of support and the evidence each needs; requirements traced to code and tests; typed diagnostics that never drop a construct silently; and the `modelc` command line.
+
+| Level | Means | Needs |
+| --- | --- | --- |
+| `parsed` | the format can be read | a test run with passes and no failures |
+| `represented` | a construct is kept without loss | a round trip |
+| `validated` | a construct is checked by the standard's rules | positive and negative tests |
+| `semantically-implemented` | the semantics the standard defines is implemented | tests tied to requirements |
+| `executable` | that semantics runs on SBCL | a build, loaded and run |
+| `conformant` | the implementation passes the available conformance tests | a PASS report of an official suite |
+
+A level is claimed only on evidence for it and for every level below it, and a standard is called supported at a level only when its catalog of constructs is complete and every construct has it. `scripts/modelc standard list` prints the truth: today, `16 standards registered, 0 with some support, 0 with a claimable level.`
+
+```bash
+./scripts/modelc standard list
+./scripts/modelc standard show owl2@2
+./scripts/modelc standard closure shacl@1.0
+```
+
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
 | [`core`](core) | Context, facts, matcher, unification, rules, queries, operators, MEA, planner, executor, conditions, trace, events, induction, autonomy |
 | [`memory`](memory) | Working, knowledge, episodic, procedural memory and `.agp` s-expression persistence |
+| [`semantic`](semantic) | The semantic platform's foundation: registry of standards, support levels and evidence, requirements and traceability, diagnostics, dependency closure, the `modelc` command line |
 | [`adapters`](adapters) | Filesystem, processes, and macOS adapters; each registers itself with the core, which never names one |
 | [`domains`](domains) | Five domain packs and the `gp-load-domain` registry |
 | [`interface`](interface) | REPL commands, notice and watch, `gp-ask`, narration, JSON, the web API façade, and the Hunchentoot console |
 | [`macos/AutomaGPWorkbench`](macos/AutomaGPWorkbench) | Native SwiftUI shell over the JSON API |
 | [`tests`](tests) | FiveAM suite, one file per component; `support.lisp` holds the shared fixtures and `test-docs.lisp` runs the examples in this README |
-| [`scripts`](scripts) | `run-tests.sh` and `run-web.sh` with the Lisp files they load, and `coverage.lisp` for `make coverage` |
-| [`docs`](docs) | [Architecture](docs/architecture.md), the [master prompt](docs/PROMPT.md), the [phase 2 prompt](docs/PROMPT-FASE-2.md), and two worked REPL setups |
+| [`scripts`](scripts) | `run-tests.sh` and `run-web.sh` with the Lisp files they load, `modelc`, and `coverage.lisp` for `make coverage` |
+| [`docs`](docs) | [Architecture](docs/architecture.md), the [master prompt](docs/PROMPT.md), the [phase 2 prompt](docs/PROMPT-FASE-2.md), the [semantic platform prompt](docs/PROMPT-SEMANTICA.md) and [its integration](docs/piattaforma-semantica.md), and two worked REPL setups |
 | [`examples`](examples) | Loadable versions of those worked setups |
 | [`assets/img`](assets/img) | Hero image and logo |
 

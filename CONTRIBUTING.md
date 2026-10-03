@@ -20,6 +20,10 @@ in [`ROADMAP.md`](ROADMAP.md); the detailed behavioural contract is
    roadmap item when the work is still ahead.
 5. A conversational surface, a planner shortcut, or a new operating-system
    adapter needs a roadmap item and tests of its own.
+6. A standard is called supported only at the level its evidence shows
+   (`parsed`, `represented`, `validated`, `semantically-implemented`,
+   `executable`, `conformant`), never by what it compiles to. See
+   [`docs/piattaforma-semantica.md`](docs/piattaforma-semantica.md) §5.
 
 ## Setting up
 
