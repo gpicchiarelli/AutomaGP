@@ -594,6 +594,28 @@
    #:gp-interpret
    #:gp-ask
    #:gp-name-operator
+   #:phrase-refused
+   #:phrase-refused-reason
+   #:ambiguous-goal
+   #:ambiguous-goal-goals
+   #:undeclared-word
+   #:undeclared-word-word
+   #:undeclared-word-choices
+   #:unspecific-word
+   #:unspecific-word-word
+   #:unspecific-word-goals
+   #:unrelated-word
+   #:unrelated-word-word
+   #:unrelated-word-goals
+   #:not-that-name
+   #:not-that-name-word
+   #:not-that-name-name
+   #:word-refused
+   #:word-refused-word
+   #:word-refused-name
+   #:word-refused-kind
+   #:word-refused-reason
+   #:word-refused-holder
    #:gp-emit
    #:gp-events
    #:gp-react
