@@ -501,6 +501,8 @@
    #:gp-save-context
    #:gp-load-context
    #:gp-clear-memory
+   #:command-refused
+   #:command-refused-reason
    ;; OS adapters (Phase 8)
    #:*invoke-adapters*
    #:file-exists-p

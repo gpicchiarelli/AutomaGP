@@ -909,12 +909,14 @@ store in its place, without the procedures read before the damage."
     (gp-clear-memory)
     (%archive-studio)
     (gp-remember-procedure :name 'once)
-    (let ((plan (gp-plan :goals goals)))
+    (let ((plan (plan-consulting-archive (gp-context) :goals goals)))
       (is (null (plan-steps plan)) "goals ~S: the plan has steps" goals)
       (is (null (plan-reused-procedure-names plan))
           "goals ~S: a procedure was replayed" goals))
     (is (null (plan-from-ranked-procedures (gp-context) nil (gp-operators))))
-    (signals error (gp-use-procedure :goals goals))))
+    ;; The session commands refuse a request that asks for nothing.
+    (signals command-refused (gp-plan :goals goals))
+    (signals command-refused (gp-use-procedure :goals goals))))
 
 (test default-procedure-name-ignores-package-and-print-case
   (gp-clear-memory)
