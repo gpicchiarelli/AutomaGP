@@ -37,6 +37,7 @@ struct WorkbenchView: View {
         .frame(minWidth: 980, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.start() }
+        .onDisappear { model.stop() }
         .onChange(of: model.listening) { listening in
             if listening { nameFocused = true }
         }
@@ -322,7 +323,10 @@ struct WorkbenchView: View {
                               : !model.externalSupported
                               ? "I fatti non sostengono più l'azione sul computer. Pianifica di nuovo."
                               : "Applica il piano su una copia. I fatti del contesto restano fermi.")
-                    Button("Esegui…") { confirmExecute = true }
+                    Button("Esegui…") {
+                        model.armExecute()
+                        confirmExecute = true
+                    }
                         .disabled(!model.connected || !model.canExecute)
                         .tint(.red)
                         .help(!model.hasPlan
@@ -429,7 +433,7 @@ struct WorkbenchView: View {
                     Stepper(value: Binding(
                         get: { model.autonomyMaxSteps },
                         set: { model.setMaxSteps($0) }
-                    ), in: 1...32) {
+                    ), in: WorkbenchModel.maxStepsRange) {
                         Text("\(model.autonomyMaxSteps)")
                             .font(.caption.monospacedDigit())
                             .frame(minWidth: 24, alignment: .trailing)

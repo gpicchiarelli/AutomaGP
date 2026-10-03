@@ -68,9 +68,63 @@ struct AliasTarget: Identifiable, Equatable {
     }
 }
 
+/// What the Esegui confirmation puts to the user: whether the run touches the
+/// computer, which actions, and the words that say so. The model keeps it from
+/// the moment the dialog opens, and a run goes ahead only if the plan still
+/// reads the same when the user answers.
+struct ExecutionPrompt: Equatable {
+    let touchesComputer: Bool
+    let actions: String
+    let withheld: String
+    let message: String
+}
+
+/// A way the server's answer can be unusable that URLSession does not report:
+/// an HTTP error status without the façade's envelope, or a body that is not
+/// a JSON object. The text is what the notice shows, so it names the status
+/// and keeps the server's own reason.
+enum APIError: LocalizedError {
+    case invalidURL(String)
+    case bodyTooLarge
+    case status(Int, String?)
+    case notJSONObject(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL(let text):
+            return "L'indirizzo del server non è valido: \(text)"
+        case .bodyTooLarge:
+            return "La richiesta supera il limite di \(WorkbenchModel.maxRequestBodyOctets) byte del server."
+        case .status(let code, let message):
+            return message.map { "HTTP \(code): \($0)" } ?? "Il server ha risposto HTTP \(code)."
+        case .notJSONObject(let code):
+            return "Il server ha risposto HTTP \(code) con un corpo che non è un oggetto JSON."
+        }
+    }
+}
+
 @MainActor
 final class WorkbenchModel: ObservableObject {
-    @Published var baseURL = "http://127.0.0.1:47391"
+    /// Where the Lisp server listens (interface/web.lisp, *default-web-port*)
+    /// unless the environment names another address.
+    nonisolated static let defaultBaseURL = "http://127.0.0.1:47391"
+    nonisolated static let baseURLVariable = "AUTOMA_GP_URL"
+    /// Seconds between two automatic refreshes.
+    nonisolated static let pollInterval: TimeInterval = 2
+    /// Seconds a read may wait for the server before it counts as unreachable.
+    nonisolated static let readTimeout: TimeInterval = 10
+    /// Seconds an action may wait: a run with adapters or an autonomous loop
+    /// answers only when it ends.
+    nonisolated static let actionTimeout: TimeInterval = 300
+    /// The longest request body the server reads
+    /// (interface/web.lisp, *max-request-body-octets*).
+    nonisolated static let maxRequestBodyOctets = 1024 * 1024
+    /// The loop limits the workbench offers for Ciclo.
+    nonisolated static let maxStepsRange = 1...32
+    /// Seconds between two looks of a watch the workbench starts.
+    nonisolated static let watchInterval = 1
+
+    @Published var baseURL = WorkbenchModel.defaultBaseURL
     @Published var connected = false
     @Published var statusLine = "In attesa del server Lisp."
     @Published var repairDepth = 0
@@ -117,6 +171,12 @@ final class WorkbenchModel: ObservableObject {
     @Published var planExternalPending = false
 
     private var archiveGateSnapshot = ""
+    /// What the open Esegui dialog said; see `armExecute`.
+    @Published private(set) var executeConfirmation: ExecutionPrompt?
+    /// True while a run or an autonomous step is in flight. The server would
+    /// queue a second one and then run it on what the first left, and a run
+    /// can drive the computer.
+    @Published private(set) var executing = false
 
     var externalSummary: String {
         externalActions.map(\.label).joined(separator: " · ")
@@ -150,9 +210,19 @@ final class WorkbenchModel: ObservableObject {
     }
 
     /// Esegui also waits for this refresh's plan GET (live external list).
-    var canExecute: Bool { canSimulate && !planExternalPending }
+    var canExecute: Bool { planIsCurrent && !executing }
 
+    /// A plan that may run, whose external actions this refresh has read.
+    private var planIsCurrent: Bool { canSimulate && !planExternalPending }
+
+    /// The words of the open dialog. Held from the click that opened it, not
+    /// read live: a refresh clears the external actions while it runs, and
+    /// the dialog would then say "Non tocca il computer." over a plan that does.
     var executeDialogMessage: String {
+        executeConfirmation?.message ?? liveExecuteDialogMessage
+    }
+
+    private var liveExecuteDialogMessage: String {
         if executeConfirmsComputer {
             return "I fatti del contesto cambiano. Sul computer: \(externalSummary)."
         }
@@ -198,135 +268,226 @@ final class WorkbenchModel: ObservableObject {
     }
 
     init() {
-        if let env = ProcessInfo.processInfo.environment["AUTOMA_GP_URL"], !env.isEmpty {
-            baseURL = env
+        let configured = Self.normalizedBaseURL(
+            ProcessInfo.processInfo.environment[Self.baseURLVariable] ?? "")
+        if !configured.isEmpty {
+            baseURL = configured
         }
     }
 
+    /// The address without surrounding blanks or a trailing slash. The server
+    /// prints its address with that slash, and a path joined to it would start
+    /// with two, which the server answers 404.
+    nonisolated static func normalizedBaseURL(_ text: String) -> String {
+        var address = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while address.hasSuffix("/") {
+            address.removeLast()
+        }
+        return address
+    }
+
     private var timer: Timer?
+    private var refreshTask: Task<Void, Never>?
+    private var refreshAgain = false
+    /// Counts the stops, so a refresh that was given up cannot end the one a
+    /// later start began.
+    private var refreshEpoch = 0
+    /// The archive fault the last poll reported, so a standing fault is shown
+    /// once and not again every poll.
+    private var reportedArchiveFault: String?
 
     func start() {
         timer?.invalidate()
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+        timer = Timer.scheduledTimer(withTimeInterval: Self.pollInterval, repeats: true) { [weak self] timer in
+            // The model goes with its window, and a timer outlives it.
+            guard let self else {
+                timer.invalidate()
+                return
+            }
+            Task { @MainActor in self.poll() }
         }
     }
 
+    /// Ends the polling and gives up the refresh in flight. The window calls
+    /// it when it goes away; `start` begins again.
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        refreshEpoch += 1
+        refreshTask?.cancel()
+        refreshTask = nil
+        refreshAgain = false
+    }
+
+    /// A tick of the timer: refreshes unless a refresh is already running, so
+    /// a slow server is not asked again before it has answered.
+    private func poll() {
+        if refreshTask == nil {
+            refresh()
+        }
+    }
+
+    /// Refreshes now. One refresh runs at a time: overlapping ones let an old
+    /// answer land after a newer one, and let one clear the external actions
+    /// while another has already ended the wait for them. A call made while a
+    /// refresh runs, such as the one an action makes after it changed the
+    /// session, asks for another when this one ends, because what this one
+    /// read may be older than the change.
     func refresh() {
-        Task {
-            do {
-                let wasConnected = connected
-                let wasListening = listening
-                let status = try await get("/api/status")
-                let version = string(status["version"]) ?? "?"
-                repairDepth = int(status["repair-depth"])
-                listening = (status["listening"] as? Bool) ?? false
-                watchingDirectory = status["directory-watch"] is String
-                watchingProcesses = (status["process-watch"] as? Bool) ?? false
-                watchingTerminals = (status["terminal-watch"] as? Bool) ?? false
-                watchingTerminalText = (status["terminal-text-watch"] as? Bool) ?? false
-                watchingTerminalScreen = (status["terminal-screen-watch"] as? Bool) ?? false
-                openGoals = int(status["open-goals"])
-                if openGoals == 0, status["open-goals"] == nil {
-                    openGoals = int(status["goals"])
+        guard refreshTask == nil else {
+            refreshAgain = true
+            return
+        }
+        let epoch = refreshEpoch
+        refreshTask = Task { [weak self] in
+            await self?.refreshWhileWanted(epoch)
+        }
+    }
+
+    private func refreshWhileWanted(_ epoch: Int) async {
+        repeat {
+            refreshAgain = false
+            await refreshOnce()
+        } while refreshAgain && epoch == refreshEpoch
+        if epoch == refreshEpoch {
+            refreshTask = nil
+        }
+    }
+
+    private func refreshOnce() async {
+        do {
+            let wasConnected = connected
+            let wasListening = listening
+            let status = try await get("/api/status")
+            let version = string(status["version"]) ?? "?"
+            repairDepth = int(status["repair-depth"])
+            listening = (status["listening"] as? Bool) ?? false
+            watchingDirectory = status["directory-watch"] is String
+            watchingProcesses = (status["process-watch"] as? Bool) ?? false
+            watchingTerminals = (status["terminal-watch"] as? Bool) ?? false
+            watchingTerminalText = (status["terminal-text-watch"] as? Bool) ?? false
+            watchingTerminalScreen = (status["terminal-screen-watch"] as? Bool) ?? false
+            openGoals = int(status["open-goals"])
+            if openGoals == 0, status["open-goals"] == nil {
+                openGoals = int(status["goals"])
+            }
+            pendingEvents = int(status["pending-events"])
+            hasPlan = (status["plan-p"] as? Bool) ?? false
+            planSuccess = (status["plan-success"] as? Bool) ?? false
+            // Apply external gates from status before the plan GET so
+            // Simula/Esegui stay idle while later requests are in flight.
+            externalMatches = (status["external-matches"] as? Bool) ?? true
+            externalSupported = (status["external-supported"] as? Bool) ?? true
+            // Drop prior plan's external lists until this refresh's plan GET
+            // returns, so Esegui cannot confirm adapters from a stale plan.
+            externalActions = []
+            externalWithheld = []
+            planExternalPending = true
+            let gateSnap = "\(int(status["facts"]))|\(openGoals)|\(planSuccess)|\(externalMatches)|\(externalSupported)"
+            if gateSnap != archiveGateSnapshot {
+                archiveProbePending = true
+            }
+            let missing = factLines(from: status["listening-missing"])
+            missingLabel = missing.map(\.label).joined(separator: " · ")
+            if listening && !wasListening && actionName.trimmingCharacters(in: .whitespaces).isEmpty,
+               let predicate = missing.first?.parts.first {
+                actionName = predicate.lowercased()
+            }
+            let planBody = try await get("/api/plan")
+            if let plan = planBody["plan"] as? [String: Any] {
+                externalActions = externalActions(from: plan, key: "external")
+                externalWithheld = externalActions(from: plan, key: "external-withheld")
+                externalMatches = (plan["external-matches"] as? Bool) ?? externalMatches
+                externalSupported = (plan["external-supported"] as? Bool) ?? externalSupported
+                if status["plan-success"] == nil {
+                    planSuccess = (plan["success"] as? Bool) ?? false
                 }
-                pendingEvents = int(status["pending-events"])
-                hasPlan = (status["plan-p"] as? Bool) ?? false
-                planSuccess = (status["plan-success"] as? Bool) ?? false
-                // Apply external gates from status before the plan GET so
-                // Simula/Esegui stay idle while later requests are in flight.
-                externalMatches = (status["external-matches"] as? Bool) ?? true
-                externalSupported = (status["external-supported"] as? Bool) ?? true
-                // Drop prior plan's external lists until this refresh's plan GET
-                // returns, so Esegui cannot confirm adapters from a stale plan.
-                externalActions = []
-                externalWithheld = []
-                planExternalPending = true
-                let gateSnap = "\(int(status["facts"]))|\(openGoals)|\(planSuccess)|\(externalMatches)|\(externalSupported)"
-                if gateSnap != archiveGateSnapshot {
-                    archiveProbePending = true
-                }
-                let missing = factLines(from: status["listening-missing"])
-                missingLabel = missing.map(\.label).joined(separator: " · ")
-                if listening && !wasListening && actionName.trimmingCharacters(in: .whitespaces).isEmpty,
-                   let predicate = missing.first?.parts.first {
-                    actionName = predicate.lowercased()
-                }
-                let planBody = try await get("/api/plan")
-                if let plan = planBody["plan"] as? [String: Any] {
-                    externalActions = externalActions(from: plan, key: "external")
-                    externalWithheld = externalActions(from: plan, key: "external-withheld")
-                    externalMatches = (plan["external-matches"] as? Bool) ?? externalMatches
-                    externalSupported = (plan["external-supported"] as? Bool) ?? externalSupported
-                    if status["plan-success"] == nil {
-                        planSuccess = (plan["success"] as? Bool) ?? false
-                    }
-                } else {
-                    externalActions = []
-                    externalWithheld = []
-                    externalMatches = true
-                    externalSupported = true
-                    hasPlan = false
-                    planSuccess = false
-                }
-                planExternalPending = false
-                let explain = try await get("/api/explain")
-                narration = string(explain["narration"]) ?? ""
-                nodes = nodes(from: explain["graph"])
-                let archive = try await get("/api/archive?applies=1")
-                cards = cards(from: archive["procedures"])
-                archiveGateSnapshot = gateSnap
-                archiveProbePending = false
-                let factsBody = try await get("/api/facts")
-                factLines = factLines(from: factsBody["facts"])
-                let operators = try await get("/api/operators")
-                let reactions = try await get("/api/reactions")
-                let rules = try await get("/api/rules")
-                let nextAliases = aliasTargets(
-                    operators: operators["operators"],
-                    reactions: reactions["reactions"],
-                    rules: rules["rules"])
-                if !nextAliases.contains(where: { $0.id == aliasTarget }) {
-                    aliasTarget = nextAliases.first?.id ?? ""
-                }
-                aliases = nextAliases
-                let autonomy = try await get("/api/autonomy")
-                if let policy = autonomy["policy"] as? [String: Any] {
-                    authority = (string(policy["authority"]) ?? "simulate")
-                        .replacingOccurrences(of: ":", with: "")
-                        .lowercased()
-                    if let steps = policy["max-steps"] as? Int {
-                        autonomyMaxSteps = max(1, steps)
-                    } else if let steps = policy["max-steps"] as? Double {
-                        autonomyMaxSteps = max(1, Int(steps))
-                    }
-                }
-                applyAutonomyLast(autonomy["last"])
-                connected = true
-                statusLine = "v\(version)"
-                if !wasConnected {
-                    notice = ""
-                    noticeIsError = false
-                }
-            } catch {
-                connected = false
+            } else {
                 externalActions = []
                 externalWithheld = []
                 externalMatches = true
                 externalSupported = true
-                planExternalPending = false
-                openGoals = 0
-                pendingEvents = 0
                 hasPlan = false
                 planSuccess = false
-                archiveProbePending = false
-                archiveGateSnapshot = ""
-                autonomyLastLine = ""
-                autonomyLastIsError = false
-                statusLine = "Server non raggiungibile su \(baseURL)"
-                report(error.localizedDescription, error: true)
             }
+            planExternalPending = false
+            let explain = try await get("/api/explain")
+            narration = string(explain["narration"]) ?? ""
+            nodes = nodes(from: explain["graph"])
+            let archive = try await get("/api/archive?applies=1")
+            cards = cards(from: archive["procedures"])
+            archiveGateSnapshot = gateSnap
+            archiveProbePending = false
+            let factsBody = try await get("/api/facts")
+            factLines = factLines(from: factsBody["facts"])
+            let operators = try await get("/api/operators")
+            let reactions = try await get("/api/reactions")
+            let rules = try await get("/api/rules")
+            let nextAliases = aliasTargets(
+                operators: operators["operators"],
+                reactions: reactions["reactions"],
+                rules: rules["rules"])
+            if !nextAliases.contains(where: { $0.id == aliasTarget }) {
+                aliasTarget = nextAliases.first?.id ?? ""
+            }
+            aliases = nextAliases
+            let autonomy = try await get("/api/autonomy")
+            if let policy = autonomy["policy"] as? [String: Any] {
+                authority = (string(policy["authority"]) ?? "simulate")
+                    .replacingOccurrences(of: ":", with: "")
+                    .lowercased()
+                // Any client may set a limit the stepper does not offer, or
+                // one that is not an Int at all (the server rounds a
+                // bignum), and Int(Double) traps on a value out of range.
+                if let steps = integer(policy["max-steps"]) {
+                    autonomyMaxSteps = clampedSteps(steps)
+                }
+            }
+            applyAutonomyLast(autonomy["last"])
+            connected = true
+            statusLine = "v\(version)"
+            if !wasConnected {
+                notice = ""
+                noticeIsError = false
+            }
+            // After the notice of a reconnection is cleared, so it is not lost.
+            noteArchiveFault(archive)
+        } catch {
+            // Given up by `stop`: nobody is waiting for the answer.
+            if Task.isCancelled { return }
+            connected = false
+            externalActions = []
+            externalWithheld = []
+            externalMatches = true
+            externalSupported = true
+            planExternalPending = false
+            openGoals = 0
+            pendingEvents = 0
+            hasPlan = false
+            planSuccess = false
+            archiveProbePending = false
+            archiveGateSnapshot = ""
+            reportedArchiveFault = nil
+            autonomyLastLine = ""
+            autonomyLastIsError = false
+            // A server that answered is reachable: say what it answered.
+            statusLine = error is URLError
+                ? "Server non raggiungibile su \(baseURL)"
+                : error.localizedDescription
+            report(error.localizedDescription, error: true)
+        }
+    }
+
+    /// Reports an archive fault when a poll first sees it, and again only if
+    /// it changes or comes back. A fault that stands is not repeated every
+    /// two seconds over the notice of whatever the user just did.
+    private func noteArchiveFault(_ body: [String: Any]) {
+        let fault = archiveFault(body)
+        guard fault != reportedArchiveFault else { return }
+        reportedArchiveFault = fault
+        if let fault {
+            report("Archivio: \(fault)", error: true)
         }
     }
 
@@ -334,36 +495,40 @@ final class WorkbenchModel: ObservableObject {
         authority = value
         guard connected else { return }
         Task {
-            _ = try? await post("/api/autonomy/policy", ["authority": value])
-            refresh()
+            await run("/api/autonomy/policy", ["authority": value])
         }
     }
 
+    private func clampedSteps(_ value: Int) -> Int {
+        min(Self.maxStepsRange.upperBound, max(Self.maxStepsRange.lowerBound, value))
+    }
+
     func setMaxSteps(_ value: Int) {
-        let steps = min(32, max(1, value))
+        let steps = clampedSteps(value)
         autonomyMaxSteps = steps
         guard connected else { return }
         Task {
-            _ = try? await post("/api/autonomy/policy", ["max-steps": steps])
-            refresh()
+            await run("/api/autonomy/policy", ["max-steps": steps])
         }
     }
 
     func autonomyStep() {
-        guard connected, autonomyHasWork else { return }
+        guard connected, autonomyHasWork, !executing else { return }
         Task {
             await postAutonomy(path: "/api/autonomy/step", loop: false)
         }
     }
 
     func autonomyLoop() {
-        guard connected, autonomyHasWork else { return }
+        guard connected, autonomyHasWork, !executing else { return }
         Task {
             await postAutonomy(path: "/api/autonomy/loop", loop: true)
         }
     }
 
     private func postAutonomy(path: String, loop: Bool) async {
+        executing = true
+        defer { executing = false }
         let auth = autonomyAuthority
         let touchesComputer = auth == "execute"
         do {
@@ -376,12 +541,12 @@ final class WorkbenchModel: ObservableObject {
                 payload["auto-confirm"] = true
             }
             let body = try await post(path, payload)
-            if let error = string(body["error"]), body["ok"] as? Bool == false {
-                report(error, error: true)
+            if let error = refusal(body) {
+                report(error, error: true, answer: body)
             } else {
                 applyAutonomyLast(body["autonomy"])
                 let (text, isError) = autonomyOutcome(from: body["autonomy"])
-                report(text, error: isError)
+                report(text, error: isError, answer: body)
             }
             refresh()
         } catch {
@@ -404,27 +569,54 @@ final class WorkbenchModel: ObservableObject {
         }
     }
 
+    /// Called when the Esegui dialog opens: remembers what it tells the user.
+    func armExecute() {
+        executeConfirmation = canExecute ? currentExecutionPrompt : nil
+    }
+
+    private var currentExecutionPrompt: ExecutionPrompt {
+        ExecutionPrompt(touchesComputer: executeConfirmsComputer,
+                        actions: externalSummary,
+                        withheld: externalWithheldSummary,
+                        message: liveExecuteDialogMessage)
+    }
+
     func execute() {
-        guard connected, canExecute else { return }
-        let touchesComputer = executeConfirmsComputer
+        guard connected, !executing, let confirmed = executeConfirmation else { return }
+        executeConfirmation = nil
+        executing = true
         Task {
+            defer { executing = false }
+            // A refresh under way has cleared the external actions: wait for
+            // what it reads, which is what the plan says now.
+            await refreshTask?.value
+            guard connected else { return }
+            // The user confirmed what the dialog said. If the plan no longer
+            // reads that way, such as a replan from the REPL that now needs
+            // the computer, that answer is not for this plan.
+            guard planIsCurrent, confirmed == currentExecutionPrompt else {
+                report("Il piano è cambiato mentre confermavi. Controlla e conferma di nuovo.",
+                       error: true)
+                return
+            }
+            let touchesComputer = confirmed.touchesComputer
             do {
                 let body = try await post("/api/run",
                                           ["confirm": true, "adapters": touchesComputer])
-                if let error = string(body["error"]), body["ok"] as? Bool == false {
-                    report(error, error: true)
+                if let error = refusal(body) {
+                    report(error, error: true, answer: body)
                 } else if !executionSucceeded(body) {
                     report("Esecuzione interrotta. Gli obiettivi del piano non sono stati raggiunti.",
-                           error: true)
+                           error: true, answer: body)
                 } else if executionWithheld(body) {
                     report("Esecuzione conclusa. I fatti sono aggiornati. Un'azione sul computer non è partita: le sue precondizioni non ci sono più.",
-                           error: false)
+                           error: false, answer: body)
                 } else if touchesComputer {
                     report("Esecuzione conclusa. I fatti sono aggiornati e l'azione sul computer è partita.",
-                           error: false)
+                           error: false, answer: body)
                 } else {
                     report("Esecuzione conclusa. I fatti del contesto sono aggiornati.",
-                           error: false)
+                           error: false, answer: body)
                 }
                 refresh()
             } catch {
@@ -465,13 +657,13 @@ final class WorkbenchModel: ObservableObject {
         Task {
             do {
                 let body = try await post("/api/ask", ["phrase": phrase])
-                if let error = string(body["error"]), body["ok"] as? Bool == false {
+                if let error = refusal(body) {
                     choices = goalChoices(from: body)
-                    report(error, error: true)
+                    report(error, error: true, answer: body)
                 } else {
                     choices = []
                     phraseDraft = ""
-                    report("Obiettivo registrato. Il piano è aggiornato.", error: false)
+                    report("Obiettivo registrato. Il piano è aggiornato.", error: false, answer: body)
                 }
                 refresh()
             } catch {
@@ -491,24 +683,24 @@ final class WorkbenchModel: ObservableObject {
                         "word": choice.word,
                         "kind": choice.kind
                     ])
-                    if let error = string(named["error"]), named["ok"] as? Bool == false {
-                        report(error, error: true)
+                    if let error = refusal(named) {
+                        report(error, error: true, answer: named)
                         return
                     }
                 }
                 let planned = try await post("/api/plan", ["goals": [goal.parts]])
-                if let error = string(planned["error"]), planned["ok"] as? Bool == false {
-                    report(error, error: true)
+                if let error = refusal(planned) {
+                    report(error, error: true, answer: planned)
                     refresh()
                     return
                 }
                 let added = try await post("/api/add-goal", ["goal": goal.parts])
-                if let error = string(added["error"]), added["ok"] as? Bool == false {
-                    report(error, error: true)
+                if let error = refusal(added) {
+                    report(error, error: true, answer: added)
                 } else {
                     choices = []
                     phraseDraft = ""
-                    report("Obiettivo registrato. Il piano è aggiornato.", error: false)
+                    report("Obiettivo registrato. Il piano è aggiornato.", error: false, answer: added)
                 }
                 refresh()
             } catch {
@@ -530,7 +722,7 @@ final class WorkbenchModel: ObservableObject {
         guard !path.isEmpty else { return }
         pathDraft = ""
         Task {
-            await run("/api/watch-directory", ["path": path, "interval": 1],
+            await run("/api/watch-directory", ["path": path, "interval": Self.watchInterval],
                       success: "Cartella sotto osservazione. Il piano non parte.")
         }
     }
@@ -567,64 +759,40 @@ final class WorkbenchModel: ObservableObject {
         }
     }
 
-    func watchTerminalScreen() {
+    /// Starts the watch that ROUTE names, or stops it when it is running.
+    private func toggleWatch(_ route: String, running: Bool, started: String, stopped: String) {
         guard connected else { return }
-        if watchingTerminalScreen {
-            Task {
-                await run("/api/watch-terminal-screen/stop", [:],
-                          success: "Osservazione dello schermo ferma.")
-            }
-            return
-        }
         Task {
-            await run("/api/watch-terminal-screen", ["interval": 1],
-                      success: "Schermo sotto osservazione. Il piano non parte.")
+            if running {
+                await run("\(route)/stop", [:], success: stopped)
+            } else {
+                await run(route, ["interval": Self.watchInterval], success: started)
+            }
         }
+    }
+
+    func watchTerminalScreen() {
+        toggleWatch("/api/watch-terminal-screen", running: watchingTerminalScreen,
+                    started: "Schermo sotto osservazione. Il piano non parte.",
+                    stopped: "Osservazione dello schermo ferma.")
     }
 
     func watchTerminalText() {
-        guard connected else { return }
-        if watchingTerminalText {
-            Task {
-                await run("/api/watch-terminal-text/stop", [:],
-                          success: "Osservazione del testo ferma.")
-            }
-            return
-        }
-        Task {
-            await run("/api/watch-terminal-text", ["interval": 1],
-                      success: "Testo sotto osservazione. Il piano non parte.")
-        }
+        toggleWatch("/api/watch-terminal-text", running: watchingTerminalText,
+                    started: "Testo sotto osservazione. Il piano non parte.",
+                    stopped: "Osservazione del testo ferma.")
     }
 
     func watchTerminals() {
-        guard connected else { return }
-        if watchingTerminals {
-            Task {
-                await run("/api/watch-terminals/stop", [:],
-                          success: "Osservazione del terminale ferma.")
-            }
-            return
-        }
-        Task {
-            await run("/api/watch-terminals", ["interval": 1],
-                      success: "Terminale sotto osservazione. Il piano non parte.")
-        }
+        toggleWatch("/api/watch-terminals", running: watchingTerminals,
+                    started: "Terminale sotto osservazione. Il piano non parte.",
+                    stopped: "Osservazione del terminale ferma.")
     }
 
     func watchProcesses() {
-        guard connected else { return }
-        if watchingProcesses {
-            Task {
-                await run("/api/watch-processes/stop", [:],
-                          success: "Osservazione dei processi ferma.")
-            }
-            return
-        }
-        Task {
-            await run("/api/watch-processes", ["interval": 1],
-                      success: "Processi sotto osservazione. Il piano non parte.")
-        }
+        toggleWatch("/api/watch-processes", running: watchingProcesses,
+                    started: "Processi sotto osservazione. Il piano non parte.",
+                    stopped: "Osservazione dei processi ferma.")
     }
 
     func noticeDirectory() {
@@ -664,28 +832,9 @@ final class WorkbenchModel: ObservableObject {
             return
         }
         Task {
-            do {
-                let body = try await post("/api/induce/rule", ["name": name])
-                if let op = body["operator"] as? [String: Any] {
-                    learned = InducedOperator(
-                        name: string(op["name"]) ?? name,
-                        preconditions: pretty(op["preconditions"]),
-                        adds: pretty(op["add-list"]),
-                        deletes: pretty(op["delete-list"]),
-                        examples: exampleCount(op)
-                    )
-                    let n = exampleCount(op)
-                    report(n > 1
-                           ? "Altro esempio unito alla regola. \(n) esempi."
-                           : "Regola generalizzata registrata.",
-                           error: false)
-                } else {
-                    report(string(body["error"]) ?? "Induzione non riuscita.", error: true)
-                }
-                refresh()
-            } catch {
-                report(error.localizedDescription, error: true)
-            }
+            await induce("/api/induce/rule", name: name,
+                         merged: { "Altro esempio unito alla regola. \($0) esempi." },
+                         registered: "Regola generalizzata registrata.")
         }
     }
 
@@ -700,11 +849,11 @@ final class WorkbenchModel: ObservableObject {
                     "word": word,
                     "kind": "operator"
                 ])
-                if let error = string(body["error"]), body["ok"] as? Bool == false {
-                    report(error, error: true)
+                if let error = refusal(body) {
+                    report(error, error: true, answer: body)
                 } else {
                     wordDraft = ""
-                    report("Ora risponde a \(word).", error: false)
+                    report("Ora risponde a \(word).", error: false, answer: body)
                 }
                 refresh()
             } catch {
@@ -726,11 +875,11 @@ final class WorkbenchModel: ObservableObject {
                     "word": word,
                     "kind": target.kind
                 ])
-                if let error = string(body["error"]), body["ok"] as? Bool == false {
-                    report(error, error: true)
+                if let error = refusal(body) {
+                    report(error, error: true, answer: body)
                 } else {
                     aliasDraft = ""
-                    report("Ora \(target.label) risponde a \(word).", error: false)
+                    report("Ora \(target.label) risponde a \(word).", error: false, answer: body)
                 }
                 refresh()
             } catch {
@@ -747,28 +896,35 @@ final class WorkbenchModel: ObservableObject {
             return
         }
         Task {
-            do {
-                let body = try await post("/api/induce", ["name": name])
-                if let op = body["operator"] as? [String: Any] {
-                    let n = exampleCount(op)
-                    learned = InducedOperator(
-                        name: string(op["name"]) ?? name,
-                        preconditions: pretty(op["preconditions"]),
-                        adds: pretty(op["add-list"]),
-                        deletes: pretty(op["delete-list"]),
-                        examples: n
-                    )
-                    report(n > 1
-                           ? "Altro esempio unito. \(n) esempi."
-                           : "Operatore registrato.",
-                           error: false)
-                } else {
-                    report(string(body["error"]) ?? "Induzione non riuscita.", error: true)
-                }
-                refresh()
-            } catch {
-                report(error.localizedDescription, error: true)
+            await induce("/api/induce", name: name,
+                         merged: { "Altro esempio unito. \($0) esempi." },
+                         registered: "Operatore registrato.")
+        }
+    }
+
+    /// Asks the server to induce the operator NAME from the observed change.
+    /// MERGED says what happened when the example joined an operator that
+    /// already had one or more, given the number of examples it now has.
+    private func induce(_ path: String, name: String,
+                        merged: (Int) -> String, registered: String) async {
+        do {
+            let body = try await post(path, ["name": name])
+            if let op = body["operator"] as? [String: Any] {
+                let n = exampleCount(op)
+                learned = InducedOperator(
+                    name: string(op["name"]) ?? name,
+                    preconditions: pretty(op["preconditions"]),
+                    adds: pretty(op["add-list"]),
+                    deletes: pretty(op["delete-list"]),
+                    examples: n
+                )
+                report(n > 1 ? merged(n) : registered, error: false, answer: body)
+            } else {
+                report(string(body["error"]) ?? "Induzione non riuscita.", error: true, answer: body)
             }
+            refresh()
+        } catch {
+            report(error.localizedDescription, error: true)
         }
     }
 
@@ -799,11 +955,9 @@ final class WorkbenchModel: ObservableObject {
         let halt = (string(autonomy["halt"]) ?? "")
             .replacingOccurrences(of: ":", with: "")
             .lowercased()
-        let iterations: Int? = {
-            if let n = autonomy["iterations"] as? Int { return n }
-            if let n = autonomy["iterations"] as? Double { return Int(n) }
-            return nil
-        }()
+        // Only a loop has :iterations. A step writes it as false, which `as? Int`
+        // would read as 0 and so label every step "Ciclo autonomo (0 passi)".
+        let iterations = integer(autonomy["iterations"])
         let loop = iterations != nil
         let label = loop ? "Ciclo autonomo" : "Passo autonomo"
         let count: String = {
@@ -849,10 +1003,12 @@ final class WorkbenchModel: ObservableObject {
     private func run(_ path: String, _ payload: [String: Any], success: String? = nil) async {
         do {
             let body = try await post(path, payload)
-            if let error = string(body["error"]), body["ok"] as? Bool == false {
-                report(error, error: true)
+            if let error = refusal(body) {
+                report(error, error: true, answer: body)
             } else if let success {
-                report(success, error: false)
+                report(success, error: false, answer: body)
+            } else if let fault = archiveFault(body) {
+                report("Archivio: \(fault)", error: true)
             }
             refresh()
         } catch {
@@ -865,37 +1021,96 @@ final class WorkbenchModel: ObservableObject {
         noticeIsError = error
     }
 
+    /// Why the server refused a request, or nil when it accepted it. Every
+    /// refusal of a gate is {"ok": false, "error": text}.
+    private func refusal(_ body: [String: Any]) -> String? {
+        guard body["ok"] as? Bool == false else { return nil }
+        return string(body["error"])
+    }
+
+    /// What the server says about the procedure archive file when it could not
+    /// be read or written. The request itself went on without the file.
+    private func archiveFault(_ body: [String: Any]) -> String? {
+        guard let text = body["archive-error"] as? String, !text.isEmpty else { return nil }
+        return text
+    }
+
+    /// Reports TEXT as the outcome of the request that BODY answered, with the
+    /// archive fault the answer carries: a run that happened but could not be
+    /// remembered is not reported as a clean one.
+    private func report(_ text: String, error: Bool, answer body: [String: Any]) {
+        if let fault = archiveFault(body) {
+            report("\(text) Archivio: \(fault)", error: true)
+        } else {
+            report(text, error: error)
+        }
+    }
+
+    /// Not the shared session: it caches, keeps cookies and waits a minute for
+    /// every request. Each request sets its own timeout; these are the ceiling.
+    private let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = WorkbenchModel.actionTimeout
+        configuration.timeoutIntervalForResource = WorkbenchModel.actionTimeout
+        return URLSession(configuration: configuration)
+    }()
+
     private func get(_ path: String) async throws -> [String: Any] {
-        let url = URL(string: baseURL + path)!
-        let (data, response) = try await URLSession.shared.data(from: url)
-        try check(response)
-        return try decode(data)
+        try await send(path, payload: nil)
     }
 
     private func post(_ path: String, _ payload: [String: Any]) async throws -> [String: Any] {
-        let url = URL(string: baseURL + path)!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode >= 400,
-           let body = try? decode(data), body["error"] == nil {
-            throw URLError(.badServerResponse)
-        }
-        return try decode(data)
+        try await send(path, payload: payload)
     }
 
-    private func check(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else { return }
-        if http.statusCode >= 400 {
-            throw URLError(.badServerResponse)
+    /// One request, GET without a payload and POST with one, answered by the
+    /// JSON object the façade writes. The server refuses a POST that is not
+    /// application/json (415), a foreign Host or Origin (403), a body over
+    /// 1 MiB (413) and a wrong method (405), always in the envelope
+    /// {"ok": false, "error": text}. A POST that is refused that way returns
+    /// the envelope, which the caller reads as every other refusal of a gate.
+    /// Any other status of 400 or more, and any body that is not an object,
+    /// throws, so a failure is never taken for an answer.
+    private func send(_ path: String, payload: [String: Any]?) async throws -> [String: Any] {
+        guard let url = URL(string: baseURL + path) else {
+            throw APIError.invalidURL(baseURL)
         }
+        var request = URLRequest(url: url, timeoutInterval: Self.readTimeout)
+        if let payload {
+            let body = try JSONSerialization.data(withJSONObject: payload)
+            // The server answers 413 without reading the body and closes the
+            // connection, which the client would report as a lost connection.
+            guard body.count <= Self.maxRequestBodyOctets else { throw APIError.bodyTooLarge }
+            request.httpMethod = "POST"
+            request.timeoutInterval = Self.actionTimeout
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+        let (data, response) = try await session.data(for: request)
+        // A refresh that was cancelled must not go on to publish what it read.
+        try Task.checkCancellation()
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        if status >= 400 {
+            let reason = object.flatMap { string($0["error"]) }
+            if payload != nil, let object, reason != nil, object["ok"] as? Bool == false {
+                return object
+            }
+            throw APIError.status(status, reason)
+        }
+        guard let object else { throw APIError.notJSONObject(status) }
+        return object
     }
 
-    private func decode(_ data: Data) throws -> [String: Any] {
-        let object = try JSONSerialization.jsonObject(with: data)
-        return object as? [String: Any] ?? [:]
+    /// JSON true and false arrive as NSNumber, and Swift bridges them to Int
+    /// and to text ("0", "1") like any other number. The server writes NIL as
+    /// false (a step has no :iterations, a halt has no reason), so a boolean
+    /// is never read as a number or as text.
+    private func isBoolean(_ number: NSNumber) -> Bool {
+        CFGetTypeID(number) == CFBooleanGetTypeID()
     }
 
     private func string(_ value: Any?) -> String? {
@@ -903,7 +1118,20 @@ final class WorkbenchModel: ObservableObject {
         case let text as String:
             return text
         case let number as NSNumber:
-            return number.stringValue
+            return isBoolean(number) ? nil : number.stringValue
+        default:
+            return nil
+        }
+    }
+
+    /// The whole number VALUE states, or nil when it states none: absent,
+    /// null, false, text that is not digits. A number out of range saturates.
+    private func integer(_ value: Any?) -> Int? {
+        switch value {
+        case let number as NSNumber:
+            return isBoolean(number) ? nil : number.intValue
+        case let text as String:
+            return Int(text)
         default:
             return nil
         }
@@ -970,14 +1198,7 @@ final class WorkbenchModel: ObservableObject {
     }
 
     private func int(_ value: Any?) -> Int {
-        switch value {
-        case let number as NSNumber:
-            return number.intValue
-        case let text as String:
-            return Int(text) ?? 0
-        default:
-            return 0
-        }
+        integer(value) ?? 0
     }
 
     private func goalChoices(from body: [String: Any]) -> [GoalChoice] {
