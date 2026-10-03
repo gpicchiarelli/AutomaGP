@@ -518,10 +518,11 @@ A variable, an empty name, and a pid below 1 name no process."
     ((and (symbolp term) (not (variable-symbol-p term)))
      (symbol-name term))))
 
-(defparameter *process-listing* "ps -axww -o pid=,command="
+(defparameter *process-listing* "ps -axww -o pid= -o command="
   "The ps call that prints the pid and the whole command line of every process.
 It is run as a list of arguments, never by a shell, and it is the command
-line ps prints for itself.")
+line ps prints for itself. Each column has its own -o: FreeBSD reads
+\"pid=,command=\" as one column whose header is \",command=\".")
 
 (defun %process-line (line)
   "The pid and the command line of one LINE of *PROCESS-LISTING*, or NIL."

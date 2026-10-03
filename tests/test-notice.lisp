@@ -26,7 +26,7 @@
 (defun %test-session-tty (marker)
   "TTY name and pid of the process whose command contains MARKER."
   ;; -ww keeps BSD/Linux from truncating the marker off the command line.
-  (let ((text (uiop:run-program '("ps" "-axww" "-o" "pid=,tty=,command=")
+  (let ((text (uiop:run-program '("ps" "-axww" "-o" "pid=" "-o" "tty=" "-o" "command=")
                                 :output :string
                                 :ignore-error-status t)))
     (dolist (line (uiop:split-string text :separator '(#\Newline #\Return)))
@@ -1270,7 +1270,7 @@ osascript where it exists, so the Terminal.app read itself is the one cut."
                  ("ngin.x" ,other "/usr/sbin/nginx -g daemon off;" nil)
                  ("." ,other "nginx" nil)
                  ("ps" ,other ,listing nil)
-                 ("pid=,command=" ,other ,listing nil)
+                 ("pid= -o command=" ,other ,listing nil)
                  ("nginx" ,self "sbcl --eval (watch \"nginx\")" nil)
                  ("sbcl" ,self "sbcl --eval (watch \"nginx\")" t)
                  ("sbcl" ,self "/usr/local/bin/sbcl --eval x" t)
@@ -1299,7 +1299,7 @@ osascript where it exists, so the Terminal.app read itself is the one cut."
            (is (null (automa-gp::%notice-process-running-p
                       (substitute #\. #\- token))))
            ;; Only the ps that lists the processes carries these.
-           (is (null (automa-gp::%notice-process-running-p "pid=,command=")))
+           (is (null (automa-gp::%notice-process-running-p "pid= -o command=")))
            (is (null (automa-gp::%notice-process-running-p "-o command=")))
            (is-true (automa-gp::%notice-process-running-p
                      (file-namestring sb-ext:*runtime-pathname*))))
