@@ -323,7 +323,10 @@ struct WorkbenchView: View {
                               : !model.externalSupported
                               ? "I fatti non sostengono più l'azione sul computer. Pianifica di nuovo."
                               : "Applica il piano su una copia. I fatti del contesto restano fermi.")
-                    Button("Esegui…") { confirmExecute = true }
+                    Button("Esegui…") {
+                        model.armExecute()
+                        confirmExecute = true
+                    }
                         .disabled(!model.connected || !model.canExecute)
                         .tint(.red)
                         .help(!model.hasPlan

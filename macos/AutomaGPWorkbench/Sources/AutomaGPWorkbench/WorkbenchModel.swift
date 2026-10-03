@@ -68,6 +68,17 @@ struct AliasTarget: Identifiable, Equatable {
     }
 }
 
+/// What the Esegui confirmation puts to the user: whether the run touches the
+/// computer, which actions, and the words that say so. The model keeps it from
+/// the moment the dialog opens, and a run goes ahead only if the plan still
+/// reads the same when the user answers.
+struct ExecutionPrompt: Equatable {
+    let touchesComputer: Bool
+    let actions: String
+    let withheld: String
+    let message: String
+}
+
 /// A way the server's answer can be unusable that URLSession does not report:
 /// an HTTP error status without the façade's envelope, or a body that is not
 /// a JSON object. The text is what the notice shows, so it names the status
@@ -160,6 +171,12 @@ final class WorkbenchModel: ObservableObject {
     @Published var planExternalPending = false
 
     private var archiveGateSnapshot = ""
+    /// What the open Esegui dialog said; see `armExecute`.
+    @Published private(set) var executeConfirmation: ExecutionPrompt?
+    /// True while a run or an autonomous step is in flight. The server would
+    /// queue a second one and then run it on what the first left, and a run
+    /// can drive the computer.
+    @Published private(set) var executing = false
 
     var externalSummary: String {
         externalActions.map(\.label).joined(separator: " · ")
@@ -193,9 +210,19 @@ final class WorkbenchModel: ObservableObject {
     }
 
     /// Esegui also waits for this refresh's plan GET (live external list).
-    var canExecute: Bool { canSimulate && !planExternalPending }
+    var canExecute: Bool { planIsCurrent && !executing }
 
+    /// A plan that may run, whose external actions this refresh has read.
+    private var planIsCurrent: Bool { canSimulate && !planExternalPending }
+
+    /// The words of the open dialog. Held from the click that opened it, not
+    /// read live: a refresh clears the external actions while it runs, and
+    /// the dialog would then say "Non tocca il computer." over a plan that does.
     var executeDialogMessage: String {
+        executeConfirmation?.message ?? liveExecuteDialogMessage
+    }
+
+    private var liveExecuteDialogMessage: String {
         if executeConfirmsComputer {
             return "I fatti del contesto cambiano. Sul computer: \(externalSummary)."
         }
@@ -486,20 +513,22 @@ final class WorkbenchModel: ObservableObject {
     }
 
     func autonomyStep() {
-        guard connected, autonomyHasWork else { return }
+        guard connected, autonomyHasWork, !executing else { return }
         Task {
             await postAutonomy(path: "/api/autonomy/step", loop: false)
         }
     }
 
     func autonomyLoop() {
-        guard connected, autonomyHasWork else { return }
+        guard connected, autonomyHasWork, !executing else { return }
         Task {
             await postAutonomy(path: "/api/autonomy/loop", loop: true)
         }
     }
 
     private func postAutonomy(path: String, loop: Bool) async {
+        executing = true
+        defer { executing = false }
         let auth = autonomyAuthority
         let touchesComputer = auth == "execute"
         do {
@@ -540,10 +569,37 @@ final class WorkbenchModel: ObservableObject {
         }
     }
 
+    /// Called when the Esegui dialog opens: remembers what it tells the user.
+    func armExecute() {
+        executeConfirmation = canExecute ? currentExecutionPrompt : nil
+    }
+
+    private var currentExecutionPrompt: ExecutionPrompt {
+        ExecutionPrompt(touchesComputer: executeConfirmsComputer,
+                        actions: externalSummary,
+                        withheld: externalWithheldSummary,
+                        message: liveExecuteDialogMessage)
+    }
+
     func execute() {
-        guard connected, canExecute else { return }
-        let touchesComputer = executeConfirmsComputer
+        guard connected, !executing, let confirmed = executeConfirmation else { return }
+        executeConfirmation = nil
+        executing = true
         Task {
+            defer { executing = false }
+            // A refresh under way has cleared the external actions: wait for
+            // what it reads, which is what the plan says now.
+            await refreshTask?.value
+            guard connected else { return }
+            // The user confirmed what the dialog said. If the plan no longer
+            // reads that way, such as a replan from the REPL that now needs
+            // the computer, that answer is not for this plan.
+            guard planIsCurrent, confirmed == currentExecutionPrompt else {
+                report("Il piano è cambiato mentre confermavi. Controlla e conferma di nuovo.",
+                       error: true)
+                return
+            }
+            let touchesComputer = confirmed.touchesComputer
             do {
                 let body = try await post("/api/run",
                                           ["confirm": true, "adapters": touchesComputer])
