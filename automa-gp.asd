@@ -131,6 +131,7 @@
                              (:file "test-domains")
                              (:file "test-autonomy")
                              (:file "test-repl")
+                             (:file "test-json")
                              (:file "test-web")
                              (:file "test-workbench")
                              (:file "test-tavolo")
