@@ -1037,6 +1037,14 @@ Requests are answered one at a time."
                              :error "The request body must be a JSON object.")))
           (t (%answer route body query)))))))
 
+(defun web-api-allowed-methods (path)
+  "The methods the API answers on PATH, as upper-case strings, NIL for a
+path it does not have. PATH may carry a query string. A 405 names them in
+its Allow header."
+  (mapcar (lambda (route) (symbol-name (car route)))
+          (gethash (nth-value 0 (%split-path-query (string path)))
+                   *api-routes*)))
+
 (defun web-api-handle-json (method path &optional json-body)
   "Like WEB-API-HANDLE, with the body as JSON text and the answer as JSON
 text. Returns (VALUES STATUS-CODE CONTENT-TYPE JSON-STRING).

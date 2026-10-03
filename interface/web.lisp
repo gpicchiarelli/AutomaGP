@@ -12,7 +12,8 @@
   (:import-from #:automa-gp
                 #:gp-context
                 #:lisp->json
-                #:web-api-handle-json)
+                #:web-api-handle-json
+                #:web-api-allowed-methods)
   (:export #:*default-web-port*
            #:*max-request-body-octets*
            #:*web-acceptor*
@@ -744,7 +745,13 @@ instead of taking the image down."
                  "frame-ancestors 'none'")
            (answer 200 "text/html; charset=utf-8" (%console-html)))
           ((and (>= (length uri) 5) (string= uri "/api/" :end1 5))
-           (multiple-value-call #'answer (%api-response method path request)))
+           (multiple-value-bind (status content-type body)
+               (%api-response method path request)
+             ;; RFC 9110: a 405 lists the methods the resource has.
+             (when (eql status 405)
+               (setf (hunchentoot:header-out :allow)
+                     (format nil "~{~A~^, ~}" (web-api-allowed-methods path))))
+             (answer status content-type body)))
           (t
            (answer 404 "text/plain; charset=utf-8" "Not found")))))))
 

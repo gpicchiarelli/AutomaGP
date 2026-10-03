@@ -644,6 +644,7 @@
    #:json-string->symbol
    #:json->sexp
    #:web-api-handle
+   #:web-api-allowed-methods
    #:web-api-handle-json
    ;; autonomy (Phase 12)
    #:*valid-authorities*

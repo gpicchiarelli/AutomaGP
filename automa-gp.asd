@@ -144,3 +144,15 @@
                              (:file "test-docs"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))
+
+(defsystem "automa-gp/web-tests"
+  :description "End-to-end tests of the operator console over a loopback socket"
+  :author "Giacomo Picchiarelli <gpicchiarelli@gmail.com>"
+  :license "BSD-2-Clause"
+  :depends-on ("automa-gp/tests" "automa-gp/web"
+               (:feature :sbcl (:require "sb-bsd-sockets")))
+  :serial t
+  :components ((:module "tests"
+                :components ((:file "console-http"))))
+  :perform (test-op (op c)
+             (symbol-call :automa-gp/tests :run-web-tests)))

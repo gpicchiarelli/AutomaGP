@@ -70,6 +70,7 @@ workbench:
           - tests/test-web.lisp
           - tests/test-json.lisp
           - tests/test-console.lisp
+          - tests/console-http.lisp
           - tests/test-workbench.lisp
           - tests/test-ask.lisp
           - tests/test-repl.lisp

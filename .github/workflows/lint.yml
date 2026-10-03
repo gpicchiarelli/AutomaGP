@@ -78,7 +78,7 @@ jobs:
       # next step fails the job on any STYLE-WARNING and on the deferred
       # "undefined variable/function" warnings SBCL reports at the end of a
       # compilation unit: the tree compiles clean and stays that way.
-      - name: Load automa-gp, automa-gp/web and automa-gp/tests from scratch
+      - name: Load every system from scratch
         run: |
           set -o pipefail
           sbcl --non-interactive \
@@ -88,6 +88,7 @@ jobs:
             --eval '(asdf:load-system "automa-gp" :force t)' \
             --eval '(asdf:load-system "automa-gp/web" :force t)' \
             --eval '(asdf:load-system "automa-gp/tests" :force t)' \
+            --eval '(asdf:load-system "automa-gp/web-tests" :force t)' \
             --eval '(format t "~&automa-gp ~A loaded~%" (symbol-value (find-symbol "*VERSION*" "AUTOMA-GP")))' \
             --eval '(uiop:quit 0)' 2>&1 | tee "$RUNNER_TEMP/sbcl-load.log"
 

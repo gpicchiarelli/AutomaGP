@@ -37,10 +37,11 @@ ln -sfn "$PWD" ~/quicklisp/local-projects/automa-gp
 The symlink is for your own REPL. `./scripts/run-tests.sh` does not need
 it: it registers the checkout it lives in with ASDF, runs the FiveAM
 suite, and exits non-zero when a test fails, so a second clone or a git
-worktree always tests itself. `./scripts/run-web.sh` starts
-the Hunchentoot console. The macOS Workbench builds with
-`swift build -c release` inside `macos/AutomaGPWorkbench` (Xcode 15 or
-newer, no signing).
+worktree always tests itself. `make web-test` starts the console on a
+loopback port and drives it over TCP; it needs Hunchentoot, which is why it
+is a system of its own. `./scripts/run-web.sh` starts the Hunchentoot
+console. The macOS Workbench builds with `swift build -c release` inside
+`macos/AutomaGPWorkbench` (Xcode 15 or newer, no signing).
 
 ## Development loop
 

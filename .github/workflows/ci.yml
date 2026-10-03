@@ -38,6 +38,9 @@ jobs:
       - name: Run test suite
         run: ./scripts/run-tests.sh
 
+      - name: Run console tests (HTTP over loopback)
+        run: AUTOMA_GP_TEST_SCOPE=web ./scripts/run-tests.sh
+
   test-freebsd:
     name: Tests (freebsd)
     runs-on: ubuntu-latest

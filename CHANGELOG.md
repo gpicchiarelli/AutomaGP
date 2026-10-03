@@ -39,6 +39,12 @@ test before it was fixed. The suite goes from 19669 to 22171 checks.
 - `gp-watch-failures`, also reported by `/api/status`; `install-domain-pack`;
   the JSON limits `*json-max-depth*`, `*json-max-digits*` and
   `*json-max-symbol-length*`.
+- `automa-gp/web-tests`: the operator console started on an ephemeral
+  loopback port and driven with raw HTTP over `sb-bsd-sockets`, no client
+  library. It checks the loopback bind, the Host, Origin, Content-Type and
+  body-size policy as the acceptor applies it, the JSON envelope of every
+  refusal, the framing headers of the page, and that a POST changes the
+  one session the next GET reports.
 - `tests/test-architecture.lisp` holds the layers to their side of the
   line: a fake adapter reached by name, and a scan of the sources that
   fails when the core names an operating-system primitive or an adapter.
@@ -114,6 +120,9 @@ test before it was fixed. The suite goes from 19669 to 22171 checks.
 
 ### Fixed
 
+- A 405 from the console named the allowed methods only in its JSON body;
+  it now carries the `Allow` header RFC 9110 requires. The first end-to-end
+  test of the acceptor found it.
 - A web request, a watch thread and a REPL front end could write the
   session at the same time.
 - Untrusted JSON could intern unbounded symbols, exhaust the control stack
@@ -127,10 +136,9 @@ test before it was fixed. The suite goes from 19669 to 22171 checks.
 
 ### Limits
 
-- The Hunchentoot acceptor itself is exercised only through its request
-  policy, which `tests/test-console.lisp` reads as text and runs without a
-  socket. A test that drives a started acceptor on a loopback port is
-  still to write.
+- The console tests need Hunchentoot, so they are a system of their own,
+  `automa-gp/web-tests`, run by `make web-test`. CI runs them on Ubuntu and
+  macOS, not on FreeBSD.
 - The REPL commands do not take the session lock: a REPL has one thread.
 - The JSON decoder reads a float in `*read-default-float-format*`, as the
   Lisp reader does.

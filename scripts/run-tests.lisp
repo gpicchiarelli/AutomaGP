@@ -16,11 +16,17 @@
        (uiop:pathname-directory-pathname *load-truename*))
       asdf:*central-registry*)
 
-(ql:quickload :automa-gp/tests :silent t)
-
-;; RUN-TESTS prints the failures and then signals; the exit code carries
-;; the outcome, so no backtrace is wanted here.
-(let ((ok (handler-case (uiop:symbol-call :automa-gp/tests :run-tests)
-            (error () nil))))
-  (format t "~&automa-gp tests: ~A~%" (if ok "PASSED" "FAILED"))
-  (uiop:quit (if ok 0 1)))
+;; AUTOMA_GP_TEST_SCOPE=web runs the console tests over a loopback socket
+;; (system automa-gp/web-tests, which needs Hunchentoot); anything else, or
+;; nothing, runs the suite of the core.
+(let* ((web (equal (uiop:getenvp "AUTOMA_GP_TEST_SCOPE") "web"))
+       (system (if web :automa-gp/web-tests :automa-gp/tests))
+       (runner (if web :run-web-tests :run-tests)))
+  (ql:quickload system :silent t)
+  ;; RUN-TESTS prints the failures and then signals; the exit code carries
+  ;; the outcome, so no backtrace is wanted here.
+  (let ((ok (handler-case (uiop:symbol-call :automa-gp/tests runner)
+              (error () nil))))
+    (format t "~&automa-gp ~:[tests~;console tests~]: ~A~%" web
+            (if ok "PASSED" "FAILED"))
+    (uiop:quit (if ok 0 1))))
