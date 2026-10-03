@@ -9,6 +9,24 @@ versions are the increments listed in `ROADMAP.md`.
 
 ## [Unreleased]
 
+### Changed
+
+- Workbench (engineering fixes only, no change to what the window says or
+  shows): every request goes through one function on a session of its own,
+  with a timeout of 10 seconds for a read and 300 for an action; no URL is
+  force-unwrapped; a trailing slash in `AUTOMA_GP_URL` no longer breaks
+  every path; an HTTP error or a body that is not a JSON object is reported
+  with its status and the server's own reason.
+- Workbench: one refresh runs at a time and it stops with its window, so an
+  old answer cannot land after a newer one; a single autonomous step is not
+  reported as a cycle of zero steps; a loop limit the stepper does not offer
+  no longer traps the client; a refused policy change and the
+  `archive-error` the server reports are shown instead of swallowed.
+- Workbench: a run goes ahead only if the plan still reads as the Esegui
+  dialog showed it, the dialog keeps the words it opened with while a
+  refresh clears the live list, and only one run or autonomous step is in
+  flight at a time.
+
 ## [0.196.0] — 2026-10-03
 
 The second half of the engineering pass: persistence, the session commands,
