@@ -25,7 +25,7 @@
       (web-api-handle :get "/api/status")
     (is (= 200 code))
     (is (eq t (getf body :ok)))
-    (is (string= "0.16.0" (getf body :api)))
+    (is (string= "0.17.0" (getf body :api)))
     (is (null (getf body :plan-p)))
     (is (null (getf body :plan-success)))
     (is (eq t (getf body :external-matches)))

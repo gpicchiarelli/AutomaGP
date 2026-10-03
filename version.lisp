@@ -2,5 +2,5 @@
 
 (in-package #:automa-gp)
 
-(defparameter *version* "0.195.0"
-  "AUTOMA GP version (engineering pass over the core and the memory layers).")
+(defparameter *version* "0.196.0"
+  "AUTOMA GP version (engineering pass over the interfaces, persistence and adapters).")

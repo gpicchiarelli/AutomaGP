@@ -12,8 +12,8 @@ authors:
   - family-names: Picchiarelli
     given-names: Giacomo
     email: gpicchiarelli@gmail.com
-version: "0.195.0"
-date-released: 2026-10-01
+version: "0.196.0"
+date-released: 2026-10-03
 license: BSD-2-Clause
 repository-code: "https://github.com/gpicchiarelli/AutomaGP"
 url: "https://github.com/gpicchiarelli/AutomaGP#readme"

@@ -21,7 +21,7 @@ adapters/      filesystem · processes · macos
     ↓
 memory/        working · knowledge · episodic · procedural · persistence
     ↓
-core/          events · mea · planner · executor
+core/          events · mea · planner · executor · external
 ```
 
 ## Core contract
@@ -96,8 +96,44 @@ procedure archive signals `procedure-archive-error` on every access, with
 `:retry` and `:skip`, and autosave never overwrites it.
 
 **Threads.** The session state (current context, current plan, last
-execution, trace history) is not locked. One deliberation runs at a time;
-a front end with several threads must serialise its calls.
+execution, trace history) belongs to one thread at a time, and the core does
+not lock it: it has no threading dependency. `*session-lock*`, defined with
+the session commands, is the one lock of the session. The web layer holds
+it while a request is answered and its response is written, and every
+notice and every watch thread holds it while a noticed form enters a
+context, so a request, a watch and another request take turns. A thread that
+holds it may take it again, and a watch that cannot get it in time looks at
+its stop flag before it tries again. The REPL commands do not take it: a REPL
+has one thread, and a front end that runs commands beside a watch holds it
+around each one with `with-session-lock`.
+
+**Layers and adapters.** The planner and the core know nothing of the
+operating system. An operator may carry an `:external` spec in its meta, the
+adapter, the operation and the arguments that make a symbolic step real.
+`core/external.lisp` names the actions a plan stands for, records them on the
+plan, and decides whether they would still run as recorded; it invokes
+nothing. Only under an execute with `*invoke-adapters*` does it hand a spec to
+the adapter that registered under its name, with `register-adapter`. The
+filesystem, process and macOS adapters in `adapters/` register themselves;
+the core never names one. `tests/test-architecture.lisp` fails when a source in
+`core/` names an operating-system primitive or an adapter function, and shows
+the executor reaching a fake adapter by name alone.
+
+**The façade.** `web-api-handle` answers 200 with the result, 400 with `:error`
+when a gate or a body refuses, 404 for an unknown path, 405 with `:allow` for
+a known path and the wrong method, and 500 when a request exhausts the
+storage of the image, which goes on. A body that is not JSON is a 400 in the
+same envelope. Requests are answered one at a time under the session lock.
+A flag is read one way everywhere: `null`, `"false"` and `0` are false, and
+a value that says neither is refused. `POST /api/run` confirms a risky step
+only when the body says `confirm`. A response carries `archive-error` when a
+procedure archive file could not be read or written during the request: the
+request completes, session memory is coherent, and the file is as it was.
+The console, `automa-gp/web`, adds a request policy in front of this: the
+Host header must name the console, an Origin header must be its own, a
+request other than GET or HEAD must declare `application/json`, and a body
+must declare its length and stay within `*max-request-body-octets*`
+(1 MiB); the refusals are 403, 415, 411, 400 and 413.
 
 ## Autonomy (Phase 12 / PROMPT §28)
 

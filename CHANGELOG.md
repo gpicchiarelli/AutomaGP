@@ -9,18 +9,133 @@ versions are the increments listed in `ROADMAP.md`.
 
 ## [Unreleased]
 
+## [0.196.0] — 2026-10-03
+
+The second half of the engineering pass: persistence, the session commands,
+notices and watches, the phrase interpreter, the JSON façade, the operator
+console and the adapters. As in 0.195.0, each defect was reproduced by a
+test before it was fixed. The suite goes from 19669 to 22171 checks.
+
+### Added
+
+- One session lock, `*session-lock*` with `with-session-lock`: the web
+  layer holds it while a request is answered, and every notice and watch
+  holds it while a noticed form enters a context. Three separate locks
+  that did not exclude each other became one.
+- An adapter registry. `register-adapter`, `find-adapter` and `*adapters*`
+  in the new `core/external.lisp`. The filesystem, process and macOS
+  adapters register themselves; the core names no adapter, calls no
+  operating-system function, and no longer reaches a function that may not
+  exist through `fboundp`. `core/external.lisp` also holds what used to sit
+  in the macOS adapter file although it touches nothing outside the image:
+  naming the external actions of a plan, recording them, and deciding
+  whether they would still run as recorded.
+- Typed conditions: `command-refused` (session commands, with reasons),
+  `notice-refused`, `phrase-refused` and its subtypes (`ambiguous-goal`,
+  `undeclared-word`, `unspecific-word`, `unrelated-word`, `not-that-name`),
+  `word-refused`, `json-parse-error`, and `persistence-error` /
+  `persistence-version-error`. The four phrase refusals that name
+  candidate goals have a `use-value` restart that takes one of them.
+- `gp-watch-failures`, also reported by `/api/status`; `install-domain-pack`;
+  the JSON limits `*json-max-depth*`, `*json-max-digits*` and
+  `*json-max-symbol-length*`.
+- `tests/test-architecture.lisp` holds the layers to their side of the
+  line: a fake adapter reached by name, and a scan of the sources that
+  fails when the core names an operating-system primitive or an adapter.
+  `tests/test-docs.lisp` runs the Lisp examples of the README and the
+  worked setups.
+
 ### Changed
 
 - Persistence: `.agp` files are UTF-8 and read by a dedicated data reader
-  that refuses `#.`, `#S`, reader conditionals and circular labels. Load
-  and save failures are `persistence-error`; another format version is
-  refused unless `continue` is taken. `*default-snapshot-directory*` is
-  `nil` by default and is honoured for relative paths when set.
-- Episodes: ids are integers (old files keep their symbol ids), and
-  `find-episodes` / `gp-episodes` select failures with `:success :failed`.
-- Knowledge: `knowledge-add-rule!` puts the newest rule first, named or
-  not, as `register-rule!` does; merging knowledge into a context twice
-  changes nothing the second time.
+  that refuses `#.`, `#S`, reader conditionals and circular labels, bounds
+  nesting and the number of new symbols, and creates no package. Every load
+  or save failure is a `persistence-error`; another format version is
+  refused unless `continue` is taken; the stores are untouched on failure.
+  A write goes to a staged file that is then renamed. Episode ids are
+  integers; `find-episodes` and `gp-episodes` select failures with
+  `:success :failed`. `knowledge-add-rule!` puts the newest rule first, as
+  `register-rule!` does. `*default-snapshot-directory*` is `nil` by default
+  and is honoured for relative paths.
+- Session commands refuse with `command-refused` before they change
+  anything. `gp-context` creates a context only with `:name`. `gp-plan`
+  refuses a request with no fact-like goal, or whose goals all hold, instead
+  of returning an empty plan. `gp-simulate` refuses, as `gp-run` does, a
+  plan whose operators the context does not register. The last plan, the
+  last execution and the listening session change together when the session
+  context changes, and the listening session belongs to its context.
+  `gp-use-procedure` and `gp-react :plan` install their plan as `gp-plan`
+  does. `gp-learn-action` and `gp-induce-rule` signal `induction-error`.
+- Notices and watches: a watch writes to the context it was started on; a
+  look that signals is counted and listed; a stop does not wait for the
+  interval; a process name in a `process-running` reaction is literal text,
+  and a pid below 1 names no process. The Terminal.app notices are refused
+  with `notice-refused` off macOS, and a transcript that cannot be read
+  signals instead of counting as not containing the text.
+- Phrases: punctuation that ends a word is not part of it, a new word is
+  never interned in `common-lisp` or `keyword`, and an action that planning
+  lifts takes no word. A lone word reached by several operators is offered
+  as an undeclared word with each as a choice.
+- JSON: the decoder reads `\b`, `\f` and `\uXXXX` (surrogate pairs
+  included) and refuses nesting past 64 levels, digit runs past 1024 and
+  malformed numerals; the encoder escapes every control character and
+  writes only JSON numerals. An object key that is not already a keyword
+  stays a string. Words and paths are no longer interned without bound.
+- The façade (`*web-api-version*` 0.17.0): routes are a table of
+  `define-api-route`; a known path with the wrong method is 405 with
+  `:allow`; a body that is not JSON is 400 in the JSON envelope; storage
+  exhaustion is a 500 and the image goes on. Every flag reads the same way:
+  `null`, `"false"` and `0` are false, and a value that says neither is
+  refused. `POST /api/run` is not a confirmation unless the body says
+  `confirm`. Autonomy step and loop merge their body into the session
+  policy instead of resetting it. An archive file that cannot be written no
+  longer makes a route answer 400: the request completes and the response
+  carries `archive-error`. Operator patterns are arrays, empty as `[]`.
+- The console refuses a Host header that does not name it (403), an Origin
+  that is not its own (403), a POST that is not `application/json` (415), a
+  body over 1 MiB (413), a chunked body without length (411) and a bad
+  length (400); it is not framed, keeps no connection alive, warns when
+  bound to a non-loopback address, and no longer swallows an error from
+  stopping. The package `automa-gp/web` no longer uses `automa-gp`. A script
+  that drives the API with curl sends
+  `-H 'Content-Type: application/json'` on every POST.
+- Adapters: a missing argument and an unknown operation signal
+  `action-failed` instead of answering `:ok t`; `processes :run` takes a
+  list command only and reports `:ok` only for exit status 0; `file-exists-p`
+  is true for a directory; `process-running-p` uses `ps -p` for a pid and
+  says `:unknown` when the lookup could not be made. `archive-document`
+  with `:archive-path` is irreversible and asks for confirmation on a live
+  run. The external-action gates default to the session context only when
+  neither a context nor operators are given. A simulation gates on the
+  operators it will use. The hardware pack declares its word as text.
+- Coverage: expressions 92.2% and branches 82.0% before this half;
+  `adapters/filesystem.lisp` and `adapters/processes.lisp` rise from about
+  50% to about 97%.
+
+### Fixed
+
+- A web request, a watch thread and a REPL front end could write the
+  session at the same time.
+- Untrusted JSON could intern unbounded symbols, exhaust the control stack
+  with deep nesting, or turn `null`, `"false"` and `0` into true for
+  `adapters` and `auto-confirm`.
+- A fact holding a Common Lisp word could not be added through the API.
+- A saved snapshot or archive was read with the evaluator on, and a failed
+  write could remove the previous file.
+- `/api/autonomy` mis-read a loop summary, and a procedure whose name is a
+  string could be remembered through the API but not used or scored.
+
+### Limits
+
+- The Hunchentoot acceptor itself is exercised only through its request
+  policy, which `tests/test-console.lisp` reads as text and runs without a
+  socket. A test that drives a started acceptor on a loopback port is
+  still to write.
+- The REPL commands do not take the session lock: a REPL has one thread.
+- The JSON decoder reads a float in `*read-default-float-format*`, as the
+  Lisp reader does.
+- A stem needs four letters, so `apri` and `aprire` are declared
+  separately.
 
 ## [0.195.0] — 2026-10-01
 

@@ -196,6 +196,7 @@ after that deepens memory, observation, adapters, and the autonomy policy.
 - [x] Leggi react-then-halt honesty; Passo help (v0.193.0)
 - [x] Esegui confirm honesty; HTML autonomy confirm (v0.194.0)
 - [x] Engineering pass over the core and the memory layers: audited defects fixed test-first, typed conditions with restarts, parametric tests (v0.195.0)
+- [x] Engineering pass over persistence, the session commands, notices, phrases, the JSON façade, the console and the adapters; one session lock and an adapter registry (v0.196.0)
 
 ---
 

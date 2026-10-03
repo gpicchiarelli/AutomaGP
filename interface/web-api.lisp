@@ -10,7 +10,7 @@
 
 (in-package #:automa-gp)
 
-(defparameter *web-api-version* "0.16.0"
+(defparameter *web-api-version* "0.17.0"
   "API surface version (operator archive routes included).")
 
 ;;; ---------------------------------------------------------------------------

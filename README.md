@@ -24,7 +24,7 @@
   <a href="version.lisp"><img src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fraw.githubusercontent.com%2Fgpicchiarelli%2FAutomaGP%2Fmain%2Fversion.lisp-expr&search=%22(%5B0-9.%5D%2B)%22&replace=%241&label=version&color=214237" alt="Version, read from version.lisp-expr on main"></a>
   <a href="automa-gp.asd"><img src="https://img.shields.io/badge/Common%20Lisp-SBCL-3f5f72.svg" alt="Common Lisp on SBCL"></a>
   <a href="adapters"><img src="https://img.shields.io/badge/target-macOS-111412.svg" alt="Target: macOS"></a>
-  <a href="tests"><img src="https://img.shields.io/badge/tests-489%20passing-63735f.svg" alt="489 tests passing"></a>
+  <a href="tests"><img src="https://img.shields.io/badge/tests-612%20passing-63735f.svg" alt="612 tests passing"></a>
   <a href="https://github.com/gpicchiarelli/AutomaGP/commits/main"><img src="https://img.shields.io/github/last-commit/gpicchiarelli/AutomaGP?color=3f5f72" alt="Last commit"></a>
 </p>
 
@@ -140,7 +140,7 @@ The rest is stated plainly so the README stays a faithful picture.
 - Domain packs are symbolic operator chains. `compile-project` in the software domain runs `true`; `archive-document` writes a marker file when a path is given. They exercise the planner and nothing else.
 - A replayed procedure runs its recorded external action only on a confirmed execute with adapters, and only when the operator is still the one recorded. A step whose operator is gone applies its stored effects and invents no command. A step whose preconditions no longer hold is withheld.
 - `gp-ask` knows a small vocabulary shaped by the goals already in the context. It is an entry point for a goal and nothing more.
-- The web server binds `127.0.0.1` and has no authentication. It is meant for the same machine.
+- The web server binds `127.0.0.1` and has no authentication. It is meant for the same machine, and it refuses a request whose Host or Origin is not its own, a POST that is not `application/json`, and a body over 1 MiB.
 
 ## Domains
 
@@ -181,7 +181,7 @@ You need SBCL and Quicklisp. On macOS, `brew install sbcl` and the [Quicklisp in
 ```bash
 git clone https://github.com/gpicchiarelli/AutomaGP.git
 cd AutomaGP
-./scripts/run-tests.sh      # FiveAM suite: 489 tests, 19669 checks
+./scripts/run-tests.sh      # FiveAM suite: 612 tests, 22171 checks
 ./scripts/run-web.sh        # operator console on http://127.0.0.1:47391/
 ```
 

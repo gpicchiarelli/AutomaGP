@@ -68,7 +68,10 @@ the session only; the archive file stays on disk.
 `./scripts/run-web.sh` starts Hunchentoot on `http://127.0.0.1:47391/`.
 Set `AUTOMA_GP_WEB_PORT` to change the port, or call
 `(automa-gp/web:start-web :port N)` from a REPL. The server binds
-`127.0.0.1` and has no authentication; it is meant for the same machine.
+`127.0.0.1` and has no authentication; it is meant for the same machine. It
+refuses a request whose Host or Origin header is not its own, a POST that is
+not `application/json` (so a script using curl sends
+`-H 'Content-Type: application/json'`), and a body over 1 MiB.
 
 ## Does it run on Linux or FreeBSD?
 
