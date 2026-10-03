@@ -173,6 +173,7 @@ simulate/run. MATCHES and SUPPORTED use the same rules as GET /api/plan."
             :terminal-watch (or (gp-terminal-watch) :null)
             :terminal-text-watch (or (gp-terminal-text-watch) :null)
             :terminal-screen-watch (or (gp-terminal-screen-watch) :null)
+            :watch-failures (json-array (gp-watch-failures))
             :listening-missing
             (json-array (if (observation-active-p)
                             (getf *observation* :missing)

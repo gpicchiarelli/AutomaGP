@@ -572,13 +572,16 @@ the facts of CONTEXT no longer support an action that would be handed to
 an adapter, including through earlier steps; UNKNOWN-OPERATOR when a step
 names an operator that is gone and carries no record to run from."
   (check-type plan plan "a PLAN")
-  (%refuse-unrunnable-external-actions plan
-                                       :context context
-                                       :operators operators)
   (let* ((ops (or operators
                   (when context (context-planning-operators context))
-                  (getf (plan-meta plan) :operators)))
-         (steps (%resolve-plan-steps plan :context context :operators ops)))
+                  (getf (plan-meta plan) :operators))))
+    ;; The gate looks at the operators the simulation will use.
+    (%refuse-unrunnable-external-actions plan :context context :operators ops)
+    (%simulate-resolved-plan plan context ops initial-facts initial-p)))
+
+(defun %simulate-resolved-plan (plan context ops initial-facts initial-p)
+  "The body of SIMULATE-PLAN once its gate has passed with OPS."
+  (let* ((steps (%resolve-plan-steps plan :context context :operators ops)))
     (multiple-value-bind (start source)
         (cond
           (initial-p (values initial-facts :initial-facts))

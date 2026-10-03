@@ -19,7 +19,8 @@
   "Fact list noted by GP-NOTE-STATE or GP-LISTEN, consumed by learning.")
 
 (defvar *observation* nil
-  "Plist for the current listening session: :ACTIVE :BEFORE :MISSING :REASON.")
+  "Plist for the current listening session:
+:ACTIVE :BEFORE :MISSING :REASON :CONTEXT.")
 
 (defvar *listen-on-plan-failure* t
   "When true, a failed GP-PLAN starts a listening session.")

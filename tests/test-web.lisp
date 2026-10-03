@@ -1228,3 +1228,11 @@ stays open."
     (declare (ignore ctype))
     (is (= 400 code))
     (is (search "not a request for a goal" json))))
+
+(test web-api-status-lists-the-watches-whose-look-failed
+  "Status carries the failures of the running watches, empty when none."
+  (gp-reset)
+  (multiple-value-bind (code body) (web-api-handle :get "/api/status")
+    (is (= 200 code))
+    (is (member :watch-failures body))
+    (is (null (coerce (getf body :watch-failures) 'list)))))

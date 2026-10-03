@@ -15,7 +15,7 @@
     :add-list '((automa-gp::power-state ?d automa-gp::on))
     :delete-list '((automa-gp::power-state ?d automa-gp::off))
     :meta (list :domain *hardware-domain-name*
-                :ask '(accendi)))
+                :ask '("ACCENDI")))
    (make-operator
     :name 'automa-gp::connect-device
     :preconditions '((automa-gp::device ?d) (automa-gp::power-state ?d automa-gp::on))
