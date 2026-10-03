@@ -37,6 +37,7 @@ struct WorkbenchView: View {
         .frame(minWidth: 980, minHeight: 640)
         .background(Color(nsColor: .windowBackgroundColor))
         .onAppear { model.start() }
+        .onDisappear { model.stop() }
         .onChange(of: model.listening) { listening in
             if listening { nameFocused = true }
         }
@@ -429,7 +430,7 @@ struct WorkbenchView: View {
                     Stepper(value: Binding(
                         get: { model.autonomyMaxSteps },
                         set: { model.setMaxSteps($0) }
-                    ), in: 1...32) {
+                    ), in: WorkbenchModel.maxStepsRange) {
                         Text("\(model.autonomyMaxSteps)")
                             .font(.caption.monospacedDigit())
                             .frame(minWidth: 24, alignment: .trailing)
