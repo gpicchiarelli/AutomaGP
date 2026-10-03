@@ -11,6 +11,26 @@
 (in-package #:automa-gp)
 
 ;;; ---------------------------------------------------------------------------
+;;; The session lock
+;;; ---------------------------------------------------------------------------
+
+(defvar *session-lock* (sb-thread:make-mutex :name "automa-gp-session")
+  "The lock of the one session this image holds.
+The commands of this file do not take it: a REPL has one thread. Whatever
+runs other threads against the session takes it around each unit of work:
+the web layer holds it while a request is answered and its response is
+written, and every notice and every watch thread holds it while a noticed
+form enters a context. A thread that holds it may take it again.")
+
+(defmacro with-session-lock ((&key timeout) &body body)
+  "Run BODY holding *SESSION-LOCK*, which the calling thread may already hold.
+With TIMEOUT, in seconds, a turn that does not come in time skips BODY and
+the form returns NIL: the caller looks at its stop flag and tries again."
+  `(sb-thread:with-recursive-lock (*session-lock*
+                                   ,@(when timeout `(:timeout ,timeout)))
+     ,@body))
+
+;;; ---------------------------------------------------------------------------
 ;;; Conditions
 ;;; ---------------------------------------------------------------------------
 

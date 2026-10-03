@@ -110,14 +110,6 @@ the reactions."
   (and (functionp *notice-halt*)
        (funcall *notice-halt*)))
 
-(defvar *notice-accept-lock* (sb-thread:make-mutex :name "automa-gp-notice-accept")
-  "Held while one noticed form enters a context.
-Every notice and every watch thread takes it, so their writes to a context
-never interleave. A command that is not a notice does not take it: a front
-end that runs commands while a watch runs holds it around each command,
-with SB-THREAD:WITH-RECURSIVE-LOCK, and no watch writes meanwhile. The
-thread that holds it may notice.")
-
 (defun %accept-notice (form &key (react t))
   "Record FORM in the context of this look, unless the look has been stopped.
 Returns NIL when the look is stopped and T when FORM belongs in the
@@ -133,7 +125,7 @@ the current context is that one or inherits from it."
       (return nil))
     ;; A turn that does not come within the timeout skips the body, and the
     ;; stop is looked at again.
-    (sb-thread:with-recursive-lock (*notice-accept-lock* :timeout 0.1)
+    (with-session-lock (:timeout 0.1)
       (when (%notice-halted-p)
         (return nil))
       ;; A watch thread that has to be terminated is not interrupted here,

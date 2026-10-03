@@ -123,6 +123,7 @@
                              (:file "test-events")
                              (:file "test-notice")
                              (:file "test-notice-watch")
+                             (:file "test-session-lock")
                              (:file "test-ask")
                              (:file "test-memory")
                              (:file "test-persistence")

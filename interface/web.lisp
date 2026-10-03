@@ -126,11 +126,6 @@ length must not exceed *MAX-REQUEST-BODY-OCTETS*."
 
 ;;;; End of the request policy
 
-(defvar *session-lock* (sb-thread:make-mutex :name "automa-gp-web-session")
-  "Held while an /api/ request is answered. The session state of the core
-is not locked and Hunchentoot answers each connection on its own thread,
-so the console serialises its calls into the session here.")
-
 (defun web-running-p ()
   "True when the operator console is listening."
   (and *web-acceptor* (hunchentoot:started-p *web-acceptor*)))
@@ -715,8 +710,8 @@ instead of taking the image down."
                     (or (hunchentoot:raw-post-data :request request
                                                    :force-text t)
                         ""))))
-        (sb-thread:with-mutex (*session-lock*)
-          (web-api-handle-json method path body)))
+        ;; WEB-API-HANDLE-JSON holds the session lock while it answers.
+        (web-api-handle-json method path body))
     (error (condition)
       (%json-refusal 400 (princ-to-string condition)))
     (storage-condition (condition)

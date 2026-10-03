@@ -265,7 +265,7 @@
     (setf *notice-watch-probe* nil)
     (unwind-protect
          (progn
-           (sb-thread:with-recursive-lock (automa-gp::*notice-accept-lock*)
+           (sb-thread:with-recursive-lock (*session-lock*)
              (automa-gp::%begin-notice-watch
               '*notice-watch-probe* lock 0.05
               "automa-gp-notice-watch-probe" "busy"

@@ -452,6 +452,8 @@
    #:restore-context
    #:apply-snapshot!
    ;; session / REPL
+   #:*session-lock*
+   #:with-session-lock
    #:*current-context*
    #:gp-reset
    #:gp-context

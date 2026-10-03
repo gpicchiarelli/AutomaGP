@@ -947,12 +947,6 @@ name, then :BEFORE and :AFTER for the lists BODY states."
 ;;; Dispatch
 ;;; ---------------------------------------------------------------------------
 
-(defvar *web-api-lock* (sb-thread:make-mutex :name "automa-gp-web-api")
-  "Held while a request is answered, so requests take turns.
-The HTTP layer runs each connection in a thread of its own, and a route
-reads and writes the one session: the context, the plan, the trace, the
-procedure archive and its file.")
-
 (defun %abort-instead-of-asking (condition restart-names)
   "The *ASK-USER-FN* of a request: give the plan up.
 A failure strategy of :ASK would otherwise read the answer from the
@@ -992,7 +986,7 @@ says what went wrong with the file under :ARCHIVE-ERROR."
                                        (reverse archive-errors))))
                  response)))
       (handler-case
-          (sb-thread:with-recursive-lock (*web-api-lock*)
+          (with-session-lock ()
             (let ((*ask-user-fn* (or *ask-user-fn*
                                      #'%abort-instead-of-asking)))
               (multiple-value-bind (response status)
@@ -1061,6 +1055,6 @@ JSON is answered 400 in the same envelope as any other refusal."
       (:no-error (body)
         ;; The response is made of session objects, so it is written as
         ;; text before another request may change them.
-        (sb-thread:with-recursive-lock (*web-api-lock*)
+        (with-session-lock ()
           (multiple-value-call #'answer
             (web-api-handle method path body)))))))
