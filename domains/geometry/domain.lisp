@@ -4,12 +4,6 @@
 
 (defparameter *geometry-domain-name* :geometry)
 
-(defun %tag-domains (context name)
-  (let ((meta (copy-list (context-meta context))))
-    (setf (getf meta :domains)
-          (adjoin name (getf meta :domains) :test #'equal))
-    (setf (context-meta context) meta)))
-
 (defun %geometry-operators ()
   (list
    (make-operator
@@ -41,21 +35,14 @@
               :meta (list :domain *geometry-domain-name*))))
 
 (defun install-geometry-domain (context &key (seed-demo t) &allow-other-keys)
-  "Install geometry-domain operators/rules into CONTEXT."
-  (unless (context-p context)
-    (error "install-geometry-domain requires a context"))
-  (dolist (op (%geometry-operators))
-    (register-operator! context op))
-  (dolist (r (%geometry-rules))
-    (register-rule! context r))
-  (when seed-demo
-    (unless (fact-p '(automa-gp::canvas automa-gp::ready)
-                    (context-all-facts context))
-      (setf (context-facts context)
-            (add-fact! (context-facts context)
-                       '(automa-gp::canvas automa-gp::ready)))))
-  (%tag-domains context *geometry-domain-name*)
-  context)
+  "Install geometry-domain operators/rules into CONTEXT. Returns CONTEXT.
+When SEED-DEMO, assert (canvas ready) if missing."
+  (install-domain-pack
+   context *geometry-domain-name*
+   :operators (%geometry-operators)
+   :rules (%geometry-rules)
+   :facts (when seed-demo
+            '((automa-gp::canvas automa-gp::ready)))))
 
 (defun geometry-demo-plan (context)
   "Seed three points and segment requests; plan for a triangle."
@@ -66,8 +53,7 @@
                (automa-gp::segment-request automa-gp::a automa-gp::b)
                (automa-gp::segment-request automa-gp::b automa-gp::c)
                (automa-gp::segment-request automa-gp::c automa-gp::a)))
-    (setf (context-facts context)
-          (add-fact! (context-facts context) f)))
+    (context-add-fact! context f))
   (plan-from-context context
                      :goals '((automa-gp::triangle automa-gp::a
                                automa-gp::b automa-gp::c))))

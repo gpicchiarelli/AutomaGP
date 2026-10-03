@@ -4,12 +4,6 @@
 
 (defparameter *music-domain-name* :music)
 
-(defun %tag-domains (context name)
-  (let ((meta (copy-list (context-meta context))))
-    (setf (getf meta :domains)
-          (adjoin name (getf meta :domains) :test #'equal))
-    (setf (context-meta context) meta)))
-
 (defun %music-operators ()
   (list
    (make-operator
@@ -41,33 +35,22 @@
               :meta (list :domain *music-domain-name*))))
 
 (defun install-music-domain (context &key (seed-demo t) &allow-other-keys)
-  "Install music-domain operators/rules into CONTEXT."
-  (unless (context-p context)
-    (error "install-music-domain requires a context"))
-  (dolist (op (%music-operators))
-    (register-operator! context op))
-  (dolist (r (%music-rules))
-    (register-rule! context r))
-  (when seed-demo
-    (dolist (f '((automa-gp::daw automa-gp::ready)))
-      (unless (fact-p f (context-all-facts context))
-        (setf (context-facts context)
-              (add-fact! (context-facts context) f)))))
-  (%tag-domains context *music-domain-name*)
-  context)
+  "Install music-domain operators/rules into CONTEXT. Returns CONTEXT.
+When SEED-DEMO, assert (daw ready) if missing."
+  (install-domain-pack
+   context *music-domain-name*
+   :operators (%music-operators)
+   :rules (%music-rules)
+   :facts (when seed-demo
+            '((automa-gp::daw automa-gp::ready)))))
 
 (defun music-demo-plan (context &key (interface 'automa-gp::scarlett-2i2)
                            (destination 'automa-gp::logic-pro))
   "Seed interface/MIDI facts and plan for (session-ready INTERFACE)."
   (install-music-domain context :seed-demo t)
-  (setf (context-facts context)
-        (add-fact! (context-facts context)
-                   (list 'automa-gp::audio-interface interface)))
-  (setf (context-facts context)
-        (add-fact! (context-facts context)
-                   (list 'automa-gp::power-state interface 'automa-gp::off)))
-  (setf (context-facts context)
-        (add-fact! (context-facts context)
-                   (list 'automa-gp::midi-destination destination)))
+  (dolist (fact (list (list 'automa-gp::audio-interface interface)
+                      (list 'automa-gp::power-state interface 'automa-gp::off)
+                      (list 'automa-gp::midi-destination destination)))
+    (context-add-fact! context fact))
   (plan-from-context context
                      :goals (list (list 'automa-gp::session-ready interface))))

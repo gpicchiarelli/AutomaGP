@@ -7,12 +7,6 @@
 
 (defparameter *documents-domain-name* :documents)
 
-(defun %tag-domains (context name)
-  (let ((meta (copy-list (context-meta context))))
-    (setf (getf meta :domains)
-          (adjoin name (getf meta :domains) :test #'equal))
-    (setf (context-meta context) meta)))
-
 (defun %documents-operators (&key archive-path)
   (list
    (make-operator
@@ -27,11 +21,15 @@
                      (automa-gp::classification-target ?class))
     :add-list '((automa-gp::document-classified ?s ?class))
     :meta (list :domain *documents-domain-name* :phase :analyze))
+   ;; With a path the step replaces a real file, and what it replaces
+   ;; cannot be brought back: a live run then asks for confirmation.
    (make-operator
     :name 'automa-gp::archive-document
     :preconditions '((automa-gp::document-classified ?s ?class)
                      (automa-gp::archive automa-gp::ready))
     :add-list '((automa-gp::document-archived ?s))
+    :risk (if archive-path :medium :low)
+    :reversible (not archive-path)
     :meta (list* :domain *documents-domain-name*
                  :phase :output
                  (when archive-path
@@ -63,34 +61,26 @@
 
 (defun install-documents-domain (context &key (seed-demo t) archive-path
                                  &allow-other-keys)
-  "Install documents-domain pack into CONTEXT. Returns CONTEXT."
-  (unless (context-p context)
-    (error "install-documents-domain requires a context"))
-  (dolist (op (%documents-operators :archive-path archive-path))
-    (register-operator! context op))
-  (dolist (r (%documents-rules))
-    (register-rule! context r))
-  (dolist (er (%documents-event-reactions))
-    (register-event-reaction! context er))
-  (when seed-demo
-    (dolist (f '((automa-gp::document-reader automa-gp::ready)
-                 (automa-gp::archive automa-gp::ready)))
-      (unless (fact-p f (context-all-facts context))
-        (setf (context-facts context)
-              (add-fact! (context-facts context) f)))))
-  (%tag-domains context *documents-domain-name*)
-  context)
+  "Install documents-domain pack into CONTEXT. Returns CONTEXT.
+When SEED-DEMO, assert (document-reader ready) and (archive ready) if
+missing. With ARCHIVE-PATH, ARCHIVE-DOCUMENT carries an :EXTERNAL spec
+that writes a marker file there and replaces the file if it exists; the
+operator is then irreversible, so a live run asks for confirmation."
+  (install-domain-pack
+   context *documents-domain-name*
+   :operators (%documents-operators :archive-path archive-path)
+   :rules (%documents-rules)
+   :event-reactions (%documents-event-reactions)
+   :facts (when seed-demo
+            '((automa-gp::document-reader automa-gp::ready)
+              (automa-gp::archive automa-gp::ready)))))
 
 (defun documents-demo-plan (context &key (source "note.txt")
                               (class 'automa-gp::memo)
                               archive-path)
   "Seed source/class facts and plan for (document-archived SOURCE)."
   (install-documents-domain context :seed-demo t :archive-path archive-path)
-  (setf (context-facts context)
-        (add-fact! (context-facts context)
-                   (list 'automa-gp::document-source source)))
-  (setf (context-facts context)
-        (add-fact! (context-facts context)
-                   (list 'automa-gp::classification-target class)))
+  (context-add-fact! context (list 'automa-gp::document-source source))
+  (context-add-fact! context (list 'automa-gp::classification-target class))
   (plan-from-context context
                      :goals (list (list 'automa-gp::document-archived source))))

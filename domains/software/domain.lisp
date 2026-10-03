@@ -9,12 +9,6 @@
 (defparameter *software-domain-name* :software
   "Symbolic domain tag stored on installed operators' meta.")
 
-(defun %tag-domains (context name)
-  (let ((meta (copy-list (context-meta context))))
-    (setf (getf meta :domains)
-          (adjoin name (getf meta :domains) :test #'equal))
-    (setf (context-meta context) meta)))
-
 (defun %software-operators ()
   (list
    (make-operator
@@ -46,48 +40,38 @@
               :then '(automa-gp::project-verified ?p)
               :meta (list :domain *software-domain-name*))))
 
-(defun %software-actions ()
-  (list
-   (make-action :name 'automa-gp::fetch-repository
-                :preconditions '((automa-gp::toolchain automa-gp::ready)
-                                 (automa-gp::project ?p))
-                :effects '((automa-gp::repository-present ?p))
-                :adapter :processes)
-   (make-action :name 'automa-gp::compile-project
-                :preconditions '((automa-gp::repository-present ?p))
-                :effects '((automa-gp::build-ok ?p))
-                :adapter :processes)
-   (make-action :name 'automa-gp::run-project-tests
-                :preconditions '((automa-gp::build-ok ?p))
-                :effects '((automa-gp::tests-ok ?p))
-                :adapter :processes)))
+(defun %software-actions (operators)
+  "One ACTION for each operator of OPERATORS, built from the operator:
+its preconditions, its add list as effects, its cost, risk and
+reversibility. :ADAPTER is the adapter of the operator's :EXTERNAL spec,
+and NIL for an operator that only changes facts. The two descriptions of
+a step cannot disagree, because only one of them is written down."
+  (loop for operator in operators
+        collect (make-action
+                 :name (operator-name operator)
+                 :preconditions (operator-preconditions operator)
+                 :effects (operator-add-list operator)
+                 :cost (operator-cost operator)
+                 :risk (operator-risk operator)
+                 :reversible (operator-reversible operator)
+                 :adapter (getf (operator-external-spec operator) :adapter))))
 
 (defun install-software-domain (context &key (seed-demo t) &allow-other-keys)
   "Install software-domain operators, rules, and actions into CONTEXT.
 When SEED-DEMO, assert (toolchain ready) if missing.
 Returns CONTEXT."
-  (unless (context-p context)
-    (error "install-software-domain requires a context"))
-  (dolist (op (%software-operators))
-    (register-operator! context op))
-  (dolist (r (%software-rules))
-    (register-rule! context r))
-  (dolist (a (%software-actions))
-    (register-action! context a))
-  (when seed-demo
-    (unless (fact-p '(automa-gp::toolchain automa-gp::ready)
-                    (context-all-facts context))
-      (setf (context-facts context)
-            (add-fact! (context-facts context)
-                       '(automa-gp::toolchain automa-gp::ready)))))
-  (%tag-domains context *software-domain-name*)
-  context)
+  (let ((operators (%software-operators)))
+    (install-domain-pack
+     context *software-domain-name*
+     :operators operators
+     :rules (%software-rules)
+     :actions (%software-actions operators)
+     :facts (when seed-demo
+              '((automa-gp::toolchain automa-gp::ready))))))
 
 (defun software-demo-plan (context &key (project 'automa-gp::myapp))
   "Seed a project fact and plan for (tests-ok PROJECT). Returns PLAN."
   (install-software-domain context :seed-demo t)
-  (setf (context-facts context)
-        (add-fact! (context-facts context)
-                   (list 'automa-gp::project project)))
+  (context-add-fact! context (list 'automa-gp::project project))
   (plan-from-context context
                      :goals (list (list 'automa-gp::tests-ok project))))
