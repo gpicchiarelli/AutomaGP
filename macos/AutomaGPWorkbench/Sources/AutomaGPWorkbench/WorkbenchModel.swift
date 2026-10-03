@@ -392,7 +392,6 @@ final class WorkbenchModel: ObservableObject {
             cards = cards(from: archive["procedures"])
             archiveGateSnapshot = gateSnap
             archiveProbePending = false
-            noteArchiveFault(archive)
             let factsBody = try await get("/api/facts")
             factLines = factLines(from: factsBody["facts"])
             let operators = try await get("/api/operators")
@@ -425,6 +424,8 @@ final class WorkbenchModel: ObservableObject {
                 notice = ""
                 noticeIsError = false
             }
+            // After the notice of a reconnection is cleared, so it is not lost.
+            noteArchiveFault(archive)
         } catch {
             // Given up by `stop`: nobody is waiting for the answer.
             if Task.isCancelled { return }
