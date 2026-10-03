@@ -155,7 +155,13 @@ must declare its length and stay within `*max-request-body-octets*`
 This section is the detailed contract behind the summary in the README.
 Each sentence corresponds to a tested behaviour.
 
-`gp-narrate` speaks the recorded trace in Italian. A failed `gp-plan` opens
+Session commands refuse before they change anything, with the typed
+condition `command-refused` (reasons such as `:no-open-goal`,
+`:goal-holds`, `:no-plan`, `:unsuccessful-plan`, `:no-listening-session`)
+and with a `type-error` for a wrong argument. A listening session belongs to
+the context it was opened on: it ends, with the last plan and the last
+execution, when the session context changes. `gp-narrate` speaks the
+recorded trace in Italian. A failed `gp-plan` opens
 a listening session. `gp-induce-rule` turns the manual before/after change
 into an operator: the object symbol shared by that change becomes `?X0`,
 and numbers stay ground. Its preconditions are the facts the change
@@ -210,7 +216,9 @@ reaction already names, in the transcript file that reaction names.
 The text is an exact sequence of characters. A symbolic link is not
 followed, and a device is not opened. The rest of the file is not
 returned. It does not stay listening, plan, or run adapters.
-`gp-watch-terminal-text` repeats that read until
+A transcript that cannot be opened or read signals, and a watch reports it
+with `gp-watch-failures`, instead of counting the file as not containing the
+text. `gp-watch-terminal-text` repeats that read until
 `gp-stop-terminal-text-watch` or `gp-reset`. A text that appears while
 the watch runs is noticed on a later look, when a reaction already
 names it. The watch still does not follow a link, open a device,
@@ -221,8 +229,10 @@ reaction already names, on the Terminal.app tab whose tty that
 reaction names. The text is an exact sequence of characters. The rest
 of the screen is not returned. The look does not type and does not
 run a command in the tab. If Terminal.app is closed or does not
-answer within two seconds, that text is skipped. It does not stay
-listening, plan, or run adapters.
+answer within two seconds, that text is skipped. Off macOS there is no
+Terminal.app to read, and the notice and its watch are refused with
+`notice-refused` instead of starting a watch that could never notice
+anything. It does not stay listening, plan, or run adapters.
 `gp-watch-terminal-screen` repeats that look until
 `gp-stop-terminal-screen-watch` or `gp-reset`. A text that appears
 while the watch runs is noticed on a later look, when a reaction
@@ -249,6 +259,11 @@ same wait. A stop drops the check or the read still open, and that
 target is not recorded. A match split across two reads of a transcript
 is still found when the look is not stopped. `process-running-p`
 outside a notice look is unchanged.
+A watch writes to the context it was started on, whichever context is
+current when a look finishes. A look that signals is counted, and
+`gp-watch-failures` lists the running watches whose latest look signalled,
+with the number of looks in a row and the message; such a watch keeps the
+facts of its last good look and keeps looking until a look succeeds.
 `gp-plan-open-goals` plans the unsatisfied fact-like goals. It does not
 change facts, simulate, or execute. No open goal — none recorded, or
 all already hold — is an error. `POST /api/plan-open-goals` returns
