@@ -114,9 +114,10 @@ test before it was fixed. The suite goes from 19669 to 22171 checks.
   run. The external-action gates default to the session context only when
   neither a context nor operators are given. A simulation gates on the
   operators it will use. The hardware pack declares its word as text.
-- Coverage: expressions 92.2% and branches 82.0% before this half;
-  `adapters/filesystem.lisp` and `adapters/processes.lisp` rise from about
-  50% to about 97%.
+- Coverage, measured by `make coverage`: expressions 86.8% and branches
+  71.3% at the start of the pass, 92.2% and 82.0% after 0.195.0, 95.1% and
+  90.4% now. `adapters/filesystem.lisp` and `adapters/processes.lisp` rise
+  from about 50% to about 97%.
 
 ### Fixed
 
