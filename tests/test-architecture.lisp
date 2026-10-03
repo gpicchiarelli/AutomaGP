@@ -124,7 +124,9 @@ the run is aborted, and the facts are as they were."
 memory/ may name these.")
 
 (test the-core-names-no-operating-system-primitive
-  (dolist (file (%sources-in "core"))
+  "The platform's foundation in semantic/ keeps to the same rule: acquisition,
+which has to reach the machine, will be a system of its own."
+  (dolist (file (append (%sources-in "core") (%sources-in "semantic")))
     (let ((text (%source-text file)))
       (dolist (token *operating-system-tokens*)
         (is (null (search token text :test #'char-equal))
@@ -146,7 +148,7 @@ memory/ may name these.")
   "FBOUNDP/FUNCALL by quoted name is how a layer calls one that loads
 after it; with the registry nothing needs it."
   (dolist (file (append (%sources-in "core") (%sources-in "memory")
-                        (%sources-in "adapters")))
+                        (%sources-in "adapters") (%sources-in "semantic")))
     (is (null (search "(fboundp '" (%source-text file)))
         "~A tests a function with FBOUNDP" file)))
 
@@ -154,12 +156,12 @@ after it; with the registry nothing needs it."
 ;;; The public surface
 ;;; ---------------------------------------------------------------------------
 
-(defun %slot-accessor-names ()
+(defun %slot-accessor-names (package-designator)
   "Every reader, writer and accessor name that a class, condition or
-structure of AUTOMA-GP defines for a slot. Their documentation belongs to
+structure of the package defines for a slot. Their documentation belongs to
 the slot, so they are not asked for a docstring of their own."
   (let ((names (make-hash-table :test #'eq))
-        (package (find-package :automa-gp)))
+        (package (find-package package-designator)))
     (do-all-symbols (symbol package)
       (when (and (eq (symbol-package symbol) package) (find-class symbol nil))
         (let ((class (find-class symbol)))
@@ -178,26 +180,29 @@ the slot, so they are not asked for a docstring of their own."
 
 (test every-exported-symbol-is-defined-and-documented
   "PROMPT-FASE-2 §4: every public function is exported and has a docstring;
-and nothing is exported that does not exist."
-  (let ((accessors (%slot-accessor-names))
-        (undefined nil) (undocumented nil))
-    (do-external-symbols (symbol :automa-gp)
-      (let ((function (fboundp symbol))
-            (macro (macro-function symbol))
-            (variable (and (boundp symbol) (not (constantp symbol))))
-            (class (find-class symbol nil)))
-        (cond
-          ((not (or function variable class (constantp symbol)))
-           (push symbol undefined))
-          ((gethash symbol accessors))
-          (t
-           (when (and function (not (special-operator-p symbol))
-                      (null (documentation symbol 'function)))
-             (push (list (if macro :macro :function) symbol) undocumented))
-           (when (and variable (null (documentation symbol 'variable)))
-             (push (list :variable symbol) undocumented))
-           (when (and class (null (documentation symbol 'type)))
-             (push (list :class symbol) undocumented))))))
-    (is (null undefined) "exported but never defined: ~{~S~^ ~}" undefined)
-    (is (null undocumented) "exported without a docstring: ~{~S~^ ~}"
-        undocumented)))
+and nothing is exported that does not exist. The semantic platform keeps the
+same rule."
+  (dolist (package '(:automa-gp :automa-gp/semantic))
+    (let ((accessors (%slot-accessor-names package))
+          (undefined nil) (undocumented nil))
+      (do-external-symbols (symbol package)
+        (let ((function (fboundp symbol))
+              (macro (macro-function symbol))
+              (variable (and (boundp symbol) (not (constantp symbol))))
+              (class (find-class symbol nil)))
+          (cond
+            ((not (or function variable class (constantp symbol)))
+             (push symbol undefined))
+            ((gethash symbol accessors))
+            (t
+             (when (and function (not (special-operator-p symbol))
+                        (null (documentation symbol 'function)))
+               (push (list (if macro :macro :function) symbol) undocumented))
+             (when (and variable (null (documentation symbol 'variable)))
+               (push (list :variable symbol) undocumented))
+             (when (and class (null (documentation symbol 'type)))
+               (push (list :class symbol) undocumented))))))
+      (is (null undefined) "~A exports but never defines: ~{~S~^ ~}"
+          package undefined)
+      (is (null undocumented) "~A exports without a docstring: ~{~S~^ ~}"
+          package undocumented))))

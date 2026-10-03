@@ -41,6 +41,14 @@ jobs:
       - name: Run console tests (HTTP over loopback)
         run: AUTOMA_GP_TEST_SCOPE=web ./scripts/run-tests.sh
 
+      - name: Smoke-test modelc
+        run: |
+          ./scripts/modelc standard list
+          ./scripts/modelc standard closure shacl@1.0
+          status=0
+          ./scripts/modelc validate model.ttl || status=$?
+          test "$status" = 3
+
   test-freebsd:
     name: Tests (freebsd)
     runs-on: ubuntu-latest
@@ -66,3 +74,4 @@ jobs:
               --eval "(quicklisp-quickstart:install :path \"$HOME/quicklisp/\")" \
               --eval '(quit)'
             ./scripts/run-tests.sh
+            ./scripts/modelc standard list

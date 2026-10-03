@@ -33,7 +33,7 @@ load: ## Load every system of this checkout; fail on any error
 	@test -f "$(QL_SETUP)" || { echo "Quicklisp not found at $(QL_SETUP)" >&2; exit 1; }
 	$(SBCL) --non-interactive --load "$(QL_SETUP)" \
 	  --eval '(push (uiop:getcwd) asdf:*central-registry*)' \
-	  --eval '(handler-bind ((warning (function muffle-warning))) (ql:quickload (list :automa-gp :automa-gp/web :automa-gp/tests :automa-gp/web-tests) :silent t))' \
+	  --eval '(handler-bind ((warning (function muffle-warning))) (ql:quickload (list :automa-gp :automa-gp/semantic :automa-gp/web :automa-gp/tests :automa-gp/web-tests) :silent t))' \
 	  --eval '(format t "~&automa-gp ~A loaded~%" (symbol-value (find-symbol "*VERSION*" :automa-gp)))'
 
 lint: ## markdownlint, yamllint, actionlint, shellcheck — each skipped when not installed

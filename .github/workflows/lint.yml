@@ -87,6 +87,7 @@ jobs:
             --eval '(setf asdf:*compile-file-failure-behaviour* :error)' \
             --eval '(asdf:load-system "automa-gp" :force t)' \
             --eval '(asdf:load-system "automa-gp/web" :force t)' \
+            --eval '(asdf:load-system "automa-gp/semantic" :force t)' \
             --eval '(asdf:load-system "automa-gp/tests" :force t)' \
             --eval '(asdf:load-system "automa-gp/web-tests" :force t)' \
             --eval '(format t "~&automa-gp ~A loaded~%" (symbol-value (find-symbol "*VERSION*" "AUTOMA-GP")))' \

@@ -2,6 +2,7 @@
 
 (defpackage #:automa-gp/tests
   (:use #:cl #:automa-gp #:fiveam)
+  (:local-nicknames (#:sem #:automa-gp/semantic))
   (:export #:run-tests
            #:automa-gp-suite))
 

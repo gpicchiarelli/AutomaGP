@@ -75,6 +75,21 @@ workbench:
           - tests/test-ask.lisp
           - tests/test-repl.lisp
 
+semantic:
+  - changed-files:
+      - any-glob-to-any-file:
+          - semantic/**
+          - scripts/modelc
+          - scripts/modelc.lisp
+          - docs/piattaforma-semantica.md
+          - docs/PROMPT-SEMANTICA.md
+          - tests/test-semantic-closure.lisp
+          - tests/test-semantic-support.lisp
+          - tests/test-semantic-diagnostics.lisp
+          - tests/test-semantic-registry.lisp
+          - tests/test-semantic-traceability.lisp
+          - tests/test-semantic-cli.lisp
+
 documentation:
   - changed-files:
       - any-glob-to-any-file:

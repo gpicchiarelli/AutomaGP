@@ -33,6 +33,7 @@
 
 (declaim (optimize sb-cover:store-coverage-data))
 (asdf:load-system :automa-gp :force t)
+(asdf:load-system :automa-gp/semantic :force t)
 (declaim (optimize (sb-cover:store-coverage-data 0)))
 (asdf:load-system :automa-gp/tests :force t)
 

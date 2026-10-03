@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# modelc — the command line of the AUTOMA GP semantic platform.
+# Run `scripts/modelc help` for the commands. Exit status: 0 done, 1 failed,
+# 2 not a command, 3 planned and not implemented yet.
+set -euo pipefail
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
+
+if ! command -v sbcl >/dev/null 2>&1; then
+  echo "SBCL not found on PATH" >&2
+  exit 1
+fi
+
+exec sbcl --noinform --non-interactive --no-userinit --no-sysinit \
+  --load "$ROOT/scripts/modelc.lisp" --end-toplevel-options "$@"

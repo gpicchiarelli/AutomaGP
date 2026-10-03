@@ -81,6 +81,26 @@
                              (:file "web-api"))))
   :in-order-to ((test-op (test-op "automa-gp/tests"))))
 
+(defsystem "automa-gp/semantic"
+  :description "AUTOMA GP semantic platform: registry of standards, support levels, requirements, diagnostics"
+  :author "Giacomo Picchiarelli <gpicchiarelli@gmail.com>"
+  :license "BSD-2-Clause"
+  :version (:read-file-form "version.lisp-expr")
+  :depends-on ("automa-gp")
+  :serial t
+  :components ((:module "semantic"
+                :serial t
+                :components ((:file "package")
+                             (:file "diagnostics")
+                             (:file "closure")
+                             (:file "support")
+                             (:file "standard")
+                             (:file "registry")
+                             (:file "requirement")
+                             (:file "catalog")
+                             (:file "report")
+                             (:file "cli")))))
+
 (defsystem "automa-gp/web"
   :description "Optional Hunchentoot operator console for AUTOMA GP"
   :author "Giacomo Picchiarelli <gpicchiarelli@gmail.com>"
@@ -96,7 +116,7 @@
   :description "Tests for AUTOMA GP"
   :author "Giacomo Picchiarelli <gpicchiarelli@gmail.com>"
   :license "BSD-2-Clause"
-  :depends-on ("automa-gp" "fiveam")
+  :depends-on ("automa-gp" "automa-gp/semantic" "fiveam")
   :serial t
   :components ((:module "tests"
                 :serial t
@@ -141,7 +161,13 @@
                              (:file "test-console")
                              (:file "test-tavolo")
                              (:file "test-framework-pipeline")
-                             (:file "test-docs"))))
+                             (:file "test-docs")
+                             (:file "test-semantic-closure")
+                             (:file "test-semantic-support")
+                             (:file "test-semantic-diagnostics")
+                             (:file "test-semantic-registry")
+                             (:file "test-semantic-traceability")
+                             (:file "test-semantic-cli"))))
   :perform (test-op (op c)
              (symbol-call :automa-gp/tests :run-tests)))
 
