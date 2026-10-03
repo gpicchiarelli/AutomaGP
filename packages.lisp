@@ -588,6 +588,9 @@
    #:gp-watch-terminal-screen
    #:gp-stop-terminal-screen-watch
    #:gp-terminal-screen-watch
+   #:gp-watch-failures
+   #:notice-refused
+   #:notice-refused-reason
    #:gp-interpret
    #:gp-ask
    #:gp-name-operator
