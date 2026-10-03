@@ -32,6 +32,7 @@
                              (:file "planner")
                              (:file "conditions")
                              (:file "executor")
+                             (:file "external")
                              (:file "events")))
                (:module "adapters"
                 :serial t
@@ -130,6 +131,7 @@
                              (:file "test-archive")
                              (:file "test-archive-replay")
                              (:file "test-adapters")
+                             (:file "test-architecture")
                              (:file "test-domains")
                              (:file "test-autonomy")
                              (:file "test-repl")

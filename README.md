@@ -202,7 +202,7 @@ Dependencies stay small on purpose. The core needs ANSI CL, ASDF, and UIOP. The 
 | --- | --- |
 | [`core`](core) | Context, facts, matcher, unification, rules, queries, operators, MEA, planner, executor, conditions, trace, events, induction, autonomy |
 | [`memory`](memory) | Working, knowledge, episodic, procedural memory and `.agp` s-expression persistence |
-| [`adapters`](adapters) | Filesystem, processes, and macOS adapters; external-action naming and refusal |
+| [`adapters`](adapters) | Filesystem, processes, and macOS adapters; each registers itself with the core, which never names one |
 | [`domains`](domains) | Five domain packs and the `gp-load-domain` registry |
 | [`interface`](interface) | REPL commands, notice and watch, `gp-ask`, narration, JSON, the web API façade, and the Hunchentoot console |
 | [`macos/AutomaGPWorkbench`](macos/AutomaGPWorkbench) | Native SwiftUI shell over the JSON API |

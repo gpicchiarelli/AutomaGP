@@ -131,3 +131,5 @@ when the lookup of :RUNNING could not be made."
          (list :ok t :running running))))
     (t
      (%adapter-failure "unknown processes op ~S" op))))
+
+(register-adapter '(:processes :process) 'processes-dispatch)

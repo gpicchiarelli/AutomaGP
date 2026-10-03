@@ -524,6 +524,9 @@
    #:adapter-uname
    #:adapter-open
    #:macos-dispatch
+   #:*adapters*
+   #:register-adapter
+   #:find-adapter
    #:operator-external-spec
    #:plan-external-actions
    #:plan-external-actions-withheld

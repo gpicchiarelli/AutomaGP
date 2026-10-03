@@ -17,7 +17,8 @@
 
 (defvar *invoke-adapters* nil
   "When true, EXECUTE may run operator :EXTERNAL adapter specs (Phase 8).
-Defined here so the executor can bind it; adapters implement the dispatch.
+Defined here so the executor can bind it; adapters register their dispatch
+with REGISTER-ADAPTER (core/external.lisp).
 Default NIL keeps EXECUTE symbolic-only. SIMULATE never invokes adapters.")
 
 (defvar *execution-confirm* nil

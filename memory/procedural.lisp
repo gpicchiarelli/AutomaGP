@@ -1226,12 +1226,8 @@ request has no fact-like goal, Means-Ends Analysis."
     (cond
       (reused
        ;; PLAN-FROM-CONTEXT records the external actions of a searched plan.
-       ;; A replayed plan needs the same record. The adapter that keeps it is
-       ;; optional, as in core/planner.lisp.
-       (when (fboundp 'remember-plan-external-actions)
-         (funcall 'remember-plan-external-actions reused
-                  :context context
-                  :operators ops))
+       ;; A replayed plan needs the same record.
+       (remember-plan-external-actions reused :context context :operators ops)
        reused)
       (t
        ;; The goals go in as given: PLAN-FROM-CONTEXT normalizes them itself

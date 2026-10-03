@@ -1,37 +1,11 @@
 ;;;; adapters/filesystem.lisp — filesystem adapter (Phase 8)
 ;;;;
-;;;; Thin UIOP wrappers. Not imported by MEA/planner. Used only when the
-;;;; executor invokes an :EXTERNAL spec with :ADAPTER :FILESYSTEM.
+;;;; Thin UIOP wrappers. The core never names this file: it registers
+;;;; FILESYSTEM-DISPATCH under :FILESYSTEM and :FS (see core/external.lisp),
+;;;; and the executor reaches it only through an :EXTERNAL spec with that
+;;;; adapter name, under EXECUTE with *INVOKE-ADAPTERS*.
 
 (in-package #:automa-gp)
-
-;;; ---------------------------------------------------------------------------
-;;; Refusals shared by the three adapters
-;;; ---------------------------------------------------------------------------
-
-(defun %adapter-failure (control &rest arguments)
-  "Signal ACTION-FAILED with the reason CONTROL and ARGUMENTS format to.
-An adapter refuses this way what it will not do: an operation it does not
-have, an argument it was not given."
-  (error 'action-failed :reason (apply #'format nil control arguments)))
-
-(defun %required-argument (args key adapter op)
-  "The value of KEY in ARGS, the argument plist of OP of ADAPTER.
-Signals ACTION-FAILED when ARGS gives KEY no value, or gives it a variable
-no step bound. An adapter does not guess an argument: a check made on
-nothing would be reported as a check that was made."
-  (let ((value (getf args key)))
-    (cond
-      ((null value)
-       (%adapter-failure "~(~A~) ~S needs ~S" adapter op key))
-      ((variable-symbol-p value)
-       (%adapter-failure "~(~A~) ~S: ~S is the unbound variable ~S"
-                         adapter op key value))
-      (t value))))
-
-;;; ---------------------------------------------------------------------------
-;;; Primitives
-;;; ---------------------------------------------------------------------------
 
 (defun file-exists-p (path)
   "Abstract: true if PATH exists (file or directory)."
@@ -116,3 +90,5 @@ missing :PATH or :DIRECTORY; the primitive called signals its own errors."
        (list :ok t :deleted (adapter-delete-file (arg :path))))
       (t
        (%adapter-failure "unknown filesystem op ~S" op)))))
+
+(register-adapter '(:filesystem :fs) 'filesystem-dispatch)

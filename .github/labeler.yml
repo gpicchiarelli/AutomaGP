@@ -6,16 +6,29 @@ planner:
       - any-glob-to-any-file:
           - core/**
           - packages.lisp
-          - tests/test-planner.lisp
+          - tests/test-context.lisp
+          - tests/test-facts.lisp
+          - tests/test-state.lisp
+          - tests/test-goals.lisp
+          - tests/test-actions.lisp
+          - tests/test-modes.lisp
+          - tests/test-matcher.lisp
+          - tests/test-unification.lisp
+          - tests/test-rules.lisp
+          - tests/test-queries.lisp
+          - tests/test-operators.lisp
+          - tests/test-induction.lisp
           - tests/test-mea.lisp
+          - tests/test-planner.lisp
           - tests/test-executor.lisp
           - tests/test-external-actions.lisp
+          - tests/test-architecture.lisp
           - tests/test-conditions.lisp
           - tests/test-explanation.lisp
           - tests/test-narration.lisp
-          - tests/test-induction.lisp
           - tests/test-autonomy.lisp
           - tests/test-events.lisp
+          - tests/test-session-lock.lisp
 
 memory:
   - changed-files:
@@ -33,12 +46,15 @@ adapters:
           - interface/notice.lisp
           - tests/test-adapters.lisp
           - tests/test-notice.lisp
+          - tests/test-notice-watch.lisp
 
 domains:
   - changed-files:
       - any-glob-to-any-file:
           - domains/**
           - tests/test-domains.lisp
+          - tests/test-tavolo.lisp
+          - tests/test-framework-pipeline.lisp
 
 workbench:
   - changed-files:
@@ -47,10 +63,16 @@ workbench:
           - interface/web.lisp
           - interface/web-api.lisp
           - interface/json.lisp
+          - interface/repl.lisp
+          - interface/ask.lisp
           - scripts/run-web.sh
           - scripts/run-web.lisp
           - tests/test-web.lisp
+          - tests/test-json.lisp
+          - tests/test-console.lisp
           - tests/test-workbench.lisp
+          - tests/test-ask.lisp
+          - tests/test-repl.lisp
 
 documentation:
   - changed-files:
@@ -60,6 +82,7 @@ documentation:
           - examples/**
           - assets/**
           - CITATION.cff
+          - tests/test-docs.lisp
 
 ci:
   - changed-files:
@@ -73,3 +96,6 @@ ci:
           - .yamllint.yaml
           - scripts/run-tests.sh
           - scripts/run-tests.lisp
+          - scripts/coverage.lisp
+          - tests/suite.lisp
+          - tests/support.lisp

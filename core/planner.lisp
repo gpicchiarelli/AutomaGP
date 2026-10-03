@@ -103,14 +103,9 @@ Stores operators and deliberative trace in plan meta."
                          :context-name (context-name context)
                          :meta (list :context (context-name context)
                                      :operators ops))))
-    ;; The adapter layer loads after the core. When it is there, it notes
-    ;; on the plan the external actions the plan stands for; nothing is
-    ;; invoked.
-    (when (fboundp 'remember-plan-external-actions)
-      (funcall 'remember-plan-external-actions plan
-               :context context
-               :operators ops))
-    plan))
+    ;; Note on the plan the external actions it stands for; nothing is
+    ;; invoked (core/external.lisp).
+    (remember-plan-external-actions plan :context context :operators ops)))
 
 (defun plan-length (plan)
   "Number of steps in PLAN."
