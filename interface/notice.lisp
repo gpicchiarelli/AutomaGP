@@ -335,12 +335,21 @@ longer holds WATCH afterwards: a watch without its thread is not running."
       (when (eq (symbol-value place) watch)
         (setf (symbol-value place) nil)))))
 
+(defun %finite-real-p (object)
+  "True when OBJECT is a real number that is not an infinity or a NaN.
+Asked of the float itself: what RATIONAL signals for one differs between
+SBCL versions (an ARITHMETIC-ERROR in 2.6, a plain ERROR in 2.2)."
+  (and (realp object)
+       (not (and (floatp object)
+                 (or (sb-ext:float-nan-p object)
+                     (sb-ext:float-infinity-p object))))))
+
 (defun %watch-interval (interval)
   "INTERVAL as a rational number of seconds, or refuse it.
 A watch repeats every positive, finite number of seconds."
-  (or (and (realp interval)
-           (handler-case (and (plusp interval) (rational interval))
-             (arithmetic-error () nil)))
+  (or (and (%finite-real-p interval)
+           (plusp interval)
+           (rational interval))
       (%refuse-notice "Watch interval must be a positive number of seconds.")))
 
 (defun %begin-notice-watch (place lock interval thread-name busy prepare
