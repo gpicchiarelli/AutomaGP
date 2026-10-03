@@ -68,9 +68,52 @@ struct AliasTarget: Identifiable, Equatable {
     }
 }
 
+/// A way the server's answer can be unusable that URLSession does not report:
+/// an HTTP error status without the façade's envelope, or a body that is not
+/// a JSON object. The text is what the notice shows, so it names the status
+/// and keeps the server's own reason.
+enum APIError: LocalizedError {
+    case invalidURL(String)
+    case bodyTooLarge
+    case status(Int, String?)
+    case notJSONObject(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidURL(let text):
+            return "L'indirizzo del server non è valido: \(text)"
+        case .bodyTooLarge:
+            return "La richiesta supera il limite di \(WorkbenchModel.maxRequestBodyOctets) byte del server."
+        case .status(let code, let message):
+            return message.map { "HTTP \(code): \($0)" } ?? "Il server ha risposto HTTP \(code)."
+        case .notJSONObject(let code):
+            return "Il server ha risposto HTTP \(code) con un corpo che non è un oggetto JSON."
+        }
+    }
+}
+
 @MainActor
 final class WorkbenchModel: ObservableObject {
-    @Published var baseURL = "http://127.0.0.1:47391"
+    /// Where the Lisp server listens (interface/web.lisp, *default-web-port*)
+    /// unless the environment names another address.
+    nonisolated static let defaultBaseURL = "http://127.0.0.1:47391"
+    nonisolated static let baseURLVariable = "AUTOMA_GP_URL"
+    /// Seconds between two automatic refreshes.
+    nonisolated static let pollInterval: TimeInterval = 2
+    /// Seconds a read may wait for the server before it counts as unreachable.
+    nonisolated static let readTimeout: TimeInterval = 10
+    /// Seconds an action may wait: a run with adapters or an autonomous loop
+    /// answers only when it ends.
+    nonisolated static let actionTimeout: TimeInterval = 300
+    /// The longest request body the server reads
+    /// (interface/web.lisp, *max-request-body-octets*).
+    nonisolated static let maxRequestBodyOctets = 1024 * 1024
+    /// The loop limits the workbench offers for Ciclo.
+    nonisolated static let maxStepsRange = 1...32
+    /// Seconds between two looks of a watch the workbench starts.
+    nonisolated static let watchInterval = 1
+
+    @Published var baseURL = WorkbenchModel.defaultBaseURL
     @Published var connected = false
     @Published var statusLine = "In attesa del server Lisp."
     @Published var repairDepth = 0
@@ -198,9 +241,22 @@ final class WorkbenchModel: ObservableObject {
     }
 
     init() {
-        if let env = ProcessInfo.processInfo.environment["AUTOMA_GP_URL"], !env.isEmpty {
-            baseURL = env
+        let configured = Self.normalizedBaseURL(
+            ProcessInfo.processInfo.environment[Self.baseURLVariable] ?? "")
+        if !configured.isEmpty {
+            baseURL = configured
         }
+    }
+
+    /// The address without surrounding blanks or a trailing slash. The server
+    /// prints its address with that slash, and a path joined to it would start
+    /// with two, which the server answers 404.
+    nonisolated static func normalizedBaseURL(_ text: String) -> String {
+        var address = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        while address.hasSuffix("/") {
+            address.removeLast()
+        }
+        return address
     }
 
     private var timer: Timer?
@@ -865,37 +921,63 @@ final class WorkbenchModel: ObservableObject {
         noticeIsError = error
     }
 
+    /// Not the shared session: it caches, keeps cookies and waits a minute for
+    /// every request. Each request sets its own timeout; these are the ceiling.
+    private let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        configuration.httpShouldSetCookies = false
+        configuration.timeoutIntervalForRequest = WorkbenchModel.actionTimeout
+        configuration.timeoutIntervalForResource = WorkbenchModel.actionTimeout
+        return URLSession(configuration: configuration)
+    }()
+
     private func get(_ path: String) async throws -> [String: Any] {
-        let url = URL(string: baseURL + path)!
-        let (data, response) = try await URLSession.shared.data(from: url)
-        try check(response)
-        return try decode(data)
+        try await send(path, payload: nil)
     }
 
     private func post(_ path: String, _ payload: [String: Any]) async throws -> [String: Any] {
-        let url = URL(string: baseURL + path)!
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, response) = try await URLSession.shared.data(for: request)
-        if let http = response as? HTTPURLResponse, http.statusCode >= 400,
-           let body = try? decode(data), body["error"] == nil {
-            throw URLError(.badServerResponse)
-        }
-        return try decode(data)
+        try await send(path, payload: payload)
     }
 
-    private func check(_ response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else { return }
-        if http.statusCode >= 400 {
-            throw URLError(.badServerResponse)
+    /// One request, GET without a payload and POST with one, answered by the
+    /// JSON object the façade writes. The server refuses a POST that is not
+    /// application/json (415), a foreign Host or Origin (403), a body over
+    /// 1 MiB (413) and a wrong method (405), always in the envelope
+    /// {"ok": false, "error": text}. A POST that is refused that way returns
+    /// the envelope, which the caller reads as every other refusal of a gate.
+    /// Any other status of 400 or more, and any body that is not an object,
+    /// throws, so a failure is never taken for an answer.
+    private func send(_ path: String, payload: [String: Any]?) async throws -> [String: Any] {
+        guard let url = URL(string: baseURL + path) else {
+            throw APIError.invalidURL(baseURL)
         }
-    }
-
-    private func decode(_ data: Data) throws -> [String: Any] {
-        let object = try JSONSerialization.jsonObject(with: data)
-        return object as? [String: Any] ?? [:]
+        var request = URLRequest(url: url, timeoutInterval: Self.readTimeout)
+        if let payload {
+            let body = try JSONSerialization.data(withJSONObject: payload)
+            // The server answers 413 without reading the body and closes the
+            // connection, which the client would report as a lost connection.
+            guard body.count <= Self.maxRequestBodyOctets else { throw APIError.bodyTooLarge }
+            request.httpMethod = "POST"
+            request.timeoutInterval = Self.actionTimeout
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = body
+        }
+        let (data, response) = try await session.data(for: request)
+        // A refresh that was cancelled must not go on to publish what it read.
+        try Task.checkCancellation()
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 200
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        if status >= 400 {
+            let reason = object.flatMap { string($0["error"]) }
+            if payload != nil, let object, reason != nil, object["ok"] as? Bool == false {
+                return object
+            }
+            throw APIError.status(status, reason)
+        }
+        guard let object else { throw APIError.notJSONObject(status) }
+        return object
     }
 
     private func string(_ value: Any?) -> String? {
