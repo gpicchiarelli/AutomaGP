@@ -135,6 +135,7 @@
                              (:file "test-json")
                              (:file "test-web")
                              (:file "test-workbench")
+                             (:file "test-console")
                              (:file "test-tavolo")
                              (:file "test-framework-pipeline")
                              (:file "test-docs"))))

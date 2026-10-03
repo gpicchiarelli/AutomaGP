@@ -17,4 +17,6 @@ if [[ ! -f "$QL_SETUP" ]]; then
   exit 1
 fi
 
-exec sbcl --noinform --load "$QL_SETUP" --load "$ROOT/scripts/run-web.lisp"
+# --non-interactive: a failure to load or start ends the process with a
+# non-zero status instead of waiting in the debugger for input.
+exec sbcl --noinform --non-interactive --load "$QL_SETUP" --load "$ROOT/scripts/run-web.lisp"
